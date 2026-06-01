@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0a0a0c"/><stop offset="100%" stop-color="#1a1a20"/></linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0f0f12"/><stop offset="100%" stop-color="#050508"/></linearGradient>
+  </defs>
+  <rect width="320" height="180" fill="url(#sky)"/>
+  <!-- Ink ground -->
+  <rect x="0" y="120" width="320" height="60" fill="url(#ground)"/>
+  <!-- Moon — stark white circle -->
+  <circle cx="200" cy="40" r="18" fill="#f0f0e8" filter="url(#rough)"/>
+  <circle cx="200" cy="40" r="16" fill="#e8e8e0"/>
+  <!-- Dead tree — fine linework -->
+  <line x1="80" y1="180" x2="80" y2="80" stroke="#0d0d10" stroke-width="4" filter="url(#rough)"/>
+  <line x1="80" y1="130" x2="50" y2="100" stroke="#0d0d10" stroke-width="2" filter="url(#rough)"/>
+  <line x1="80" y1="115" x2="110" y2="90" stroke="#0d0d10" stroke-width="2" filter="url(#rough)"/>
+  <line x1="80" y1="100" x2="60" y2="78" stroke="#0d0d10" stroke-width="1.5" filter="url(#rough)"/>
+  <line x1="80" y1="95" x2="100" y2="75" stroke="#0d0d10" stroke-width="1.5" filter="url(#rough)"/>
+  <line x1="80" y1="85" x2="70" y2="70" stroke="#0d0d10" stroke-width="1" filter="url(#rough)"/>
+  <!-- Horizontal ground line -->
+  <line x1="0" y1="120" x2="320" y2="120" stroke="#2a2a30" stroke-width="1" filter="url(#rough)"/>
+  <!-- Distant silhouette hills -->
+  <path d="M0,120 Q60,95 120,110 Q180,95 240,108 Q280,100 320,112 L320,120 Z" fill="#111115"/>
+  <!-- Flying birds (fine marks) -->
+  <path d="M240,55 Q245,50 250,55" stroke="#c0c0b8" stroke-width="1" fill="none"/>
+  <path d="M255,48 Q260,43 265,48" stroke="#c0c0b8" stroke-width="1" fill="none"/>
+  <path d="M230,65 Q233,61 237,65" stroke="#c0c0b8" stroke-width="0.8" fill="none"/>
+</svg>

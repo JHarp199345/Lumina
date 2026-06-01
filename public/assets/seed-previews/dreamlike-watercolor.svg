@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <filter id="blur1"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="blur2"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="blur3"><feGaussianBlur stdDeviation="3"/></filter>
+    <radialGradient id="bg" cx="40%" cy="60%"><stop offset="0%" stop-color="#2a1f4a"/><stop offset="100%" stop-color="#0d0a1a"/></radialGradient>
+    <radialGradient id="moon" cx="50%" cy="50%"><stop offset="0%" stop-color="#e8dfc0" stop-opacity="0.9"/><stop offset="100%" stop-color="#c9b87a" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="320" height="180" fill="url(#bg)"/>
+  <!-- Wash layers -->
+  <ellipse cx="80" cy="90" rx="120" ry="80" fill="#4a3878" opacity="0.35" filter="url(#blur1)"/>
+  <ellipse cx="240" cy="60" rx="100" ry="70" fill="#7b5ea7" opacity="0.25" filter="url(#blur1)"/>
+  <ellipse cx="160" cy="140" rx="160" ry="50" fill="#1a2040" opacity="0.6" filter="url(#blur2)"/>
+  <!-- Moon -->
+  <circle cx="220" cy="45" r="22" fill="url(#moon)" filter="url(#blur2)"/>
+  <circle cx="220" cy="45" r="14" fill="#e8dfc0" opacity="0.6"/>
+  <!-- Water reflection -->
+  <ellipse cx="160" cy="165" rx="140" ry="18" fill="#9b8fc0" opacity="0.15" filter="url(#blur2)"/>
+  <ellipse cx="220" cy="162" rx="30" ry="6" fill="#e8dfc0" opacity="0.12" filter="url(#blur3)"/>
+  <!-- Silhouette tree -->
+  <line x1="70" y1="180" x2="70" y2="105" stroke="#1a1030" stroke-width="3"/>
+  <ellipse cx="70" cy="100" rx="18" ry="22" fill="#1a1030" opacity="0.8"/>
+  <!-- Soft horizontal washes -->
+  <rect x="0" y="115" width="320" height="3" fill="#6b5090" opacity="0.12" filter="url(#blur3)"/>
+  <rect x="0" y="125" width="320" height="2" fill="#4a3878" opacity="0.1" filter="url(#blur3)"/>
+</svg>

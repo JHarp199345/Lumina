@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <linearGradient id="parch" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#3a2408"/><stop offset="100%" stop-color="#1e1206"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#c9a84c"/><stop offset="50%" stop-color="#f0d070"/><stop offset="100%" stop-color="#c9a84c"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="320" height="180" fill="url(#parch)"/>
+  <!-- Parchment texture lines -->
+  <rect x="0" y="0" width="320" height="180" fill="#60380a" opacity="0.08"/>
+  <!-- Ornate border -->
+  <rect x="8" y="8" width="304" height="164" fill="none" stroke="url(#gold)" stroke-width="1.5" opacity="0.7"/>
+  <rect x="12" y="12" width="296" height="156" fill="none" stroke="#c9a84c" stroke-width="0.5" opacity="0.4"/>
+  <!-- Corner ornaments -->
+  <circle cx="8" cy="8" r="4" fill="#c9a84c" opacity="0.8"/>
+  <circle cx="312" cy="8" r="4" fill="#c9a84c" opacity="0.8"/>
+  <circle cx="8" cy="172" r="4" fill="#c9a84c" opacity="0.8"/>
+  <circle cx="312" cy="172" r="4" fill="#c9a84c" opacity="0.8"/>
+  <!-- Central illuminated mandala -->
+  <circle cx="160" cy="90" r="45" fill="none" stroke="#c9a84c" stroke-width="1" opacity="0.5"/>
+  <circle cx="160" cy="90" r="35" fill="none" stroke="#f0d070" stroke-width="0.5" opacity="0.4"/>
+  <!-- Stylized tree of life center -->
+  <line x1="160" y1="120" x2="160" y2="65" stroke="#c9a84c" stroke-width="2" filter="url(#glow)"/>
+  <path d="M160,95 Q145,80 135,68" stroke="#c9a84c" stroke-width="1.5" fill="none"/>
+  <path d="M160,95 Q175,80 185,68" stroke="#c9a84c" stroke-width="1.5" fill="none"/>
+  <path d="M160,80 Q148,70 140,60" stroke="#c9a84c" stroke-width="1" fill="none"/>
+  <path d="M160,80 Q172,70 180,60" stroke="#c9a84c" stroke-width="1" fill="none"/>
+  <circle cx="160" cy="62" r="5" fill="#f0d070" opacity="0.9" filter="url(#glow)"/>
+  <!-- Gold accent dots -->
+  <circle cx="60" cy="40" r="2" fill="#c9a84c" opacity="0.6"/>
+  <circle cx="260" cy="40" r="2" fill="#c9a84c" opacity="0.6"/>
+  <circle cx="60" cy="140" r="2" fill="#c9a84c" opacity="0.6"/>
+  <circle cx="260" cy="140" r="2" fill="#c9a84c" opacity="0.6"/>
+  <!-- Decorative text lines (simulated) -->
+  <rect x="40" y="155" width="100" height="1.5" fill="#8b6914" opacity="0.5"/>
+  <rect x="180" y="155" width="100" height="1.5" fill="#8b6914" opacity="0.5"/>
+</svg>
