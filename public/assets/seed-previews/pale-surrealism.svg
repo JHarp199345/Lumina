@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <linearGradient id="sursky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e8ddd0"/><stop offset="100%" stop-color="#d0c4b8"/></linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c8b8a8"/><stop offset="100%" stop-color="#b0a090"/></linearGradient>
+    <filter id="surblur"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="lightshadow"><feGaussianBlur stdDeviation="6"/></filter>
+  </defs>
+  <!-- De Chirico style background -->
+  <rect width="320" height="180" fill="url(#sursky)"/>
+  <!-- Floor -->
+  <rect x="0" y="110" width="320" height="70" fill="url(#floor)"/>
+  <!-- Horizon line -->
+  <line x1="0" y1="110" x2="320" y2="110" stroke="#a09080" stroke-width="0.5" opacity="0.5"/>
+  <!-- Impossible long shadows -->
+  <polygon points="80,110 100,110 200,180 180,180" fill="#b8a898" opacity="0.6"/>
+  <polygon points="180,90 192,90 280,180 260,180" fill="#c0b0a0" opacity="0.4"/>
+  <!-- Classical archway -->
+  <rect x="40" y="40" width="60" height="70" fill="#d8ccc0" stroke="#b8a898" stroke-width="1"/>
+  <path d="M40,60 Q70,35 100,60" fill="#c8b8a8" stroke="#b8a898" stroke-width="1"/>
+  <rect x="50" y="65" width="40" height="45" fill="#1a1612" opacity="0.7"/>
+  <!-- Second archway (receding) -->
+  <rect x="200" y="55" width="45" height="55" fill="#d0c4b8" stroke="#b0a090" stroke-width="0.8" opacity="0.8"/>
+  <path d="M200,70 Q222,50 245,70" fill="#c0b4a8" stroke="#b0a090" stroke-width="0.8" opacity="0.8"/>
+  <rect x="208" y="75" width="29" height="35" fill="#1a1612" opacity="0.5"/>
+  <!-- Tiny incongruous object: large sphere on ground -->
+  <circle cx="245" cy="104" r="18" fill="#e0d4c8" stroke="#c0b0a0" stroke-width="0.8"/>
+  <ellipse cx="245" cy="128" rx="18" ry="4" fill="#b0a090" opacity="0.4" filter="url(#surblur)"/>
+  <!-- Clock / impossible element (simple melting rectangle) -->
+  <rect x="110" y="98" width="40" height="12" rx="2" fill="#d8ccbc" stroke="#b8a898" stroke-width="0.5" transform="rotate(-5,130,104)"/>
+  <!-- Long horizontal shadow -->
+  <rect x="0" y="108" width="320" height="3" fill="#a09080" opacity="0.2" filter="url(#lightshadow)"/>
+</svg>

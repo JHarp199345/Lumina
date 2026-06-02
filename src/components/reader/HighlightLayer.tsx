@@ -1,0 +1,273 @@
+import { useState, useCallback, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useAnnotationStore } from "@/store/annotationStore";
+import { useBookStore } from "@/store/bookStore";
+import type { HighlightColor } from "@/types";
+
+const HIGHLIGHT_COLORS: { color: HighlightColor; label: string; bg: string }[] = [
+  { color: "yellow", label: "Yellow", bg: "bg-yellow-400/70" },
+  { color: "blue", label: "Blue", bg: "bg-blue-500/70" },
+  { color: "green", label: "Green", bg: "bg-green-500/70" },
+  { color: "red", label: "Red", bg: "bg-red-500/70" },
+];
+
+interface SelectionMenu {
+  x: number;
+  y: number;
+  selectedText: string;
+  range: Range;
+}
+
+export default function HighlightLayer() {
+  const [selectionMenu, setSelectionMenu] = useState<SelectionMenu | null>(null);
+  const [noteModal, setNoteModal] = useState<{ highlightId: string } | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const { addHighlight, addNote } = useAnnotationStore();
+  const { activeBook } = useBookStore();
+
+  const handleMouseUp = useCallback(
+    (e: MouseEvent) => {
+      if (!activeBook) return;
+
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.rangeCount) {
+        setSelectionMenu(null);
+        return;
+      }
+
+      const selectedText = selection.toString().trim();
+      if (selectedText.length < 3) {
+        setSelectionMenu(null);
+        return;
+      }
+
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+
+      setSelectionMenu({
+        x: rect.left + rect.width / 2,
+        y: rect.top - 8,
+        selectedText,
+        range: range.cloneRange(),
+      });
+    },
+    [activeBook]
+  );
+
+  const handleHighlight = useCallback(
+    (color: HighlightColor) => {
+      if (!selectionMenu || !activeBook) return;
+
+      const highlightId = `h_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const epubCfi = getCfiFromSelection(selectionMenu.range);
+
+      if (!epubCfi) {
+        // CFI extraction failed — apply visual-only highlight (not persisted)
+        applyHighlightToRange(selectionMenu.range, color, highlightId);
+        setSelectionMenu(null);
+        window.getSelection()?.removeAllRanges();
+        console.info("[Highlight] Could not extract EPUB CFI — highlight is session-only.");
+        return;
+      }
+
+      // CFI obtained — persist and apply
+      addHighlight({
+        id: highlightId,
+        bookId: activeBook.id,
+        cfiRange: epubCfi,
+        color,
+        selectedText: selectionMenu.selectedText,
+        createdAt: new Date().toISOString(),
+      });
+
+      applyHighlightToRange(selectionMenu.range, color, highlightId);
+      setSelectionMenu(null);
+      window.getSelection()?.removeAllRanges();
+      setNoteModal({ highlightId });
+    },
+    [selectionMenu, activeBook, addHighlight]
+  );
+
+  const handleAddNote = useCallback(() => {
+    if (!noteModal) return;
+    if (noteText.trim()) {
+      addNote({
+        id: `n_${Date.now()}`,
+        highlightId: noteModal.highlightId,
+        bookId: activeBook?.id || "",
+        noteText: noteText.trim(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    setNoteModal(null);
+    setNoteText("");
+  }, [noteModal, noteText, addNote, activeBook]);
+
+  // Close menu on outside click
+  const handleDocClick = useCallback(
+    (e: MouseEvent) => {
+      if (selectionMenu) {
+        const target = e.target as HTMLElement;
+        if (!target.closest("[data-highlight-menu]")) {
+          setSelectionMenu(null);
+        }
+      }
+    },
+    [selectionMenu]
+  );
+
+  useEffect(() => {
+    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("click", handleDocClick);
+    return () => {
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("click", handleDocClick);
+    };
+  }, [handleMouseUp, handleDocClick]);
+
+  return (
+    <>
+      {/* Color picker menu */}
+      <AnimatePresence>
+        {selectionMenu && (
+          <motion.div
+            data-highlight-menu
+            initial={{ opacity: 0, y: 4, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.95 }}
+            transition={{ duration: 0.12 }}
+            className="fixed z-50 flex items-center gap-1.5 px-2 py-1.5 bg-surface-dark/95 border border-white/10 rounded-lg shadow-xl backdrop-blur-sm"
+            style={{
+              left: selectionMenu.x,
+              top: selectionMenu.y,
+              transform: "translate(-50%, -100%)",
+            }}
+          >
+            {HIGHLIGHT_COLORS.map(({ color, label, bg }) => (
+              <button
+                key={color}
+                onClick={() => handleHighlight(color)}
+                title={label}
+                className={`w-5 h-5 rounded-full ${bg} hover:scale-110 transition-transform ring-1 ring-white/20`}
+              />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Note modal */}
+      <AnimatePresence>
+        {noteModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40"
+              onClick={() => {
+                setNoteModal(null);
+                setNoteText("");
+              }}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 bg-surface-dark border border-white/10 rounded-xl shadow-2xl p-4 space-y-3"
+            >
+              <p className="text-xs text-white/40 font-medium">Add a note</p>
+              <textarea
+                autoFocus
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && e.metaKey) handleAddNote();
+                  if (e.key === "Escape") {
+                    setNoteModal(null);
+                    setNoteText("");
+                  }
+                }}
+                placeholder="Your thoughts..."
+                rows={3}
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/70 placeholder:text-white/15 focus:outline-none focus:border-lumina-gold/40 resize-none transition-colors"
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => {
+                    setNoteModal(null);
+                    setNoteText("");
+                  }}
+                  className="px-3 py-1.5 rounded text-xs text-white/30 hover:text-white/50 transition-colors"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={handleAddNote}
+                  className="px-3 py-1.5 rounded text-xs bg-lumina-gold/20 text-lumina-gold hover:bg-lumina-gold/30 transition-colors"
+                >
+                  Save note
+                </button>
+              </div>
+              <p className="text-xs text-white/15">⌘↵ to save</p>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+// ─── CFI Extraction ───────────────────────────────────────────────────────────
+
+/**
+ * Extract a real EPUB CFI for a selection range.
+ * Returns null if CFI extraction fails — callers should not persist null CFIs.
+ */
+function getCfiFromSelection(range: Range): string | null {
+  const epubBook = (
+    window as Window & { luminaEpubBook?: { getCfiFromRange?: (r: Range) => string } }
+  ).luminaEpubBook;
+
+  if (epubBook?.getCfiFromRange) {
+    try {
+      const cfi = epubBook.getCfiFromRange(range);
+      if (cfi && cfi.startsWith("epubcfi(")) return cfi;
+    } catch { /* fall through */ }
+  }
+  return null;
+}
+
+// ─── DOM Highlight Application ────────────────────────────────────────────────
+
+function applyHighlightToRange(range: Range, color: HighlightColor, id: string) {
+  const colorClassMap: Record<HighlightColor, string> = {
+    yellow: "highlight-yellow",
+    blue: "highlight-blue",
+    green: "highlight-green",
+    red: "highlight-red",
+  };
+
+  try {
+    const mark = document.createElement("mark");
+    mark.className = colorClassMap[color];
+    mark.dataset.highlightId = id;
+    mark.style.borderRadius = "2px";
+    mark.style.padding = "0 1px";
+    mark.style.cursor = "pointer";
+    range.surroundContents(mark);
+  } catch {
+    // Range crosses element boundaries — use extractContents approach
+    try {
+      const fragment = range.extractContents();
+      const mark = document.createElement("mark");
+      mark.className = colorClassMap[color];
+      mark.dataset.highlightId = id;
+      mark.appendChild(fragment);
+      range.insertNode(mark);
+    } catch {
+      // Silently fail — don't crash reader on complex selections
+      console.warn("[Highlight] Could not apply highlight to complex selection");
+    }
+  }
+}
