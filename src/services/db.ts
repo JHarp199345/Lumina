@@ -426,3 +426,22 @@ export async function dbLoadBookStyleSeed(bookId: string): Promise<StyleSeedId |
   if (rows.length === 0 || !rows[0].style_seed) return null;
   return String(rows[0].style_seed) as StyleSeedId;
 }
+
+// ─── Bulk delete ──────────────────────────────────────────────────────────────
+
+/** Delete all data rows for a book across every table. File cleanup is the caller's responsibility. */
+export async function dbDeleteAllBookData(bookId: string): Promise<void> {
+  const db = await getDb();
+  const queries = [
+    [`DELETE FROM books WHERE id = $1`, [bookId]],
+    [`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM highlights WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM notes WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM semantic_maps WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM image_cache WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM book_settings WHERE book_id = $1`, [bookId]],
+  ] as [string, unknown[]][];
+  for (const [sql, params] of queries) {
+    await db.execute(sql, params).catch(() => {});
+  }
+}

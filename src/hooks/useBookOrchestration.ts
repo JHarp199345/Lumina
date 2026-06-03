@@ -15,16 +15,8 @@ import { analyzeBook } from "@/pipeline/semanticAnalyzer";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { getStyleSeedById } from "@/data/styleSeeds";
-import { getApiKey } from "@/utils/tauriBridge";
-import {
-  dbSaveSemanticMap,
-  dbLoadSemanticMap,
-  dbLoadImageCache,
-  dbSaveBookStyleSeed,
-  dbSaveImageCache,
-  dbDeleteImageCache,
-  dbDeleteSemanticMap,
-} from "@/services/db";
+import { storage } from "@/storage";
+
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import type { StyleSeedId, BookStructure, IdentifiedScene, CachedImage } from "@/types";
 import { useReaderStore } from "@/store/readerStore";
@@ -49,7 +41,7 @@ export function useBookOrchestration() {
       if (!activeBook) return;
 
       setActiveStyleSeed(styleSeedId);
-      await dbSaveBookStyleSeed(activeBook.id, styleSeedId).catch(() => {});
+      await storage.saveBookStyleSeed(activeBook.id, styleSeedId).catch(() => {});
 
       if (!imageGenerationEnabled) return;
 
@@ -57,7 +49,7 @@ export function useBookOrchestration() {
       const slice = getAnalysisSlice(structure, currentChapterIndex);
 
       // Check for cached semantic map for this book or collection segment.
-      const existingMap = await dbLoadSemanticMap(slice.semanticBookId);
+      const existingMap = await storage.loadSemanticMap(slice.semanticBookId);
       if (existingMap) {
         console.log(`[Orchestration] Using cached semantic map for ${slice.label}`);
         setActiveSemanticMap(existingMap);
@@ -70,7 +62,7 @@ export function useBookOrchestration() {
         // Load from DB here if the cache is cold before attempting restore.
         let { imageCache } = useImageStore.getState();
         if (Object.keys(imageCache).length === 0) {
-          const dbImages = await dbLoadImageCache(slice.semanticBookId).catch(() => [] as CachedImage[]);
+          const dbImages = await storage.loadImages(slice.semanticBookId).catch(() => [] as CachedImage[]);
           dbImages.forEach((img) => addToCache(img));
           imageCache = useImageStore.getState().imageCache;
         }
@@ -124,7 +116,7 @@ export function useBookOrchestration() {
       const slice = getAnalysisSlice(structure, currentChapterIndex);
 
       // Delete cached segment map so _runAnalysis doesn't find it.
-      await dbDeleteSemanticMap(slice.semanticBookId).catch(() => {});
+      await storage.deleteSemanticMap(slice.semanticBookId).catch(() => {});
 
       setActiveSemanticMap(null);
       await _runAnalysis(slice.structure, seedId, slice.semanticBookId, slice.label);
@@ -141,7 +133,7 @@ export function useBookOrchestration() {
     if (!map || !seedId) return;
 
     // Clear image cache from DB and all in-memory image state atomically
-    await dbDeleteImageCache(map.bookId).catch(() => {});
+    await storage.deleteImages(map.bookId).catch(() => {});
     clearQueue();
     clearImageCache(); // clears imageCache record, currentImage, and currentThemes
 
@@ -164,7 +156,7 @@ export function useBookOrchestration() {
       setAnalysisProgress(`Reading the emotional landscape of ${label}…`);
 
       try {
-        const googleKey = await getApiKey("lumina_google_ai_key");
+        const googleKey = await storage.loadApiKey("lumina_google_ai_key");
         if (!googleKey) {
           console.warn("[Orchestration] No API key — skipping analysis");
           setIsAnalyzing(false);
@@ -175,8 +167,8 @@ export function useBookOrchestration() {
           setAnalysisProgress(progress);
         });
 
-        await dbSaveSemanticMap(semanticMap).catch((e) =>
-          console.error("[DB] Failed to save semantic map:", e)
+        await storage.saveSemanticMap(semanticMap).catch((e) =>
+          console.error("[Storage] Failed to save semantic map:", e)
         );
 
         setActiveSemanticMap(semanticMap);
@@ -192,7 +184,7 @@ export function useBookOrchestration() {
         const openingScene = semanticMap.scenes[0];
         if (openingScene) {
           const styleSeed = getStyleSeedById(styleSeedId);
-          const falKey = await getApiKey("lumina_fal_key");
+          const falKey = await storage.loadApiKey("lumina_fal_key");
 
           if (styleSeed) {
             generateImage({
@@ -205,7 +197,7 @@ export function useBookOrchestration() {
                 addToCache(img);
                 setCurrentImage(img);
                 setCurrentThemes(img.emotionalThemes);
-                await dbSaveImageCache(img).catch(() => {});
+                // Persistence handled inside storage.saveImage() — no extra save
               },
             }).catch((err) => {
               console.warn("[Orchestration] Opening image failed:", err);

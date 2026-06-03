@@ -6,8 +6,8 @@ import { useBookStore } from "@/store/bookStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { getStyleSeedById } from "@/data/styleSeeds";
-import { getApiKey, toAssetUrl } from "@/utils/tauriBridge";
-import { dbSaveImageCache } from "@/services/db";
+import { toAssetUrl } from "@/utils/tauriBridge";
+import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useLongPress } from "@/hooks/useLongPress";
@@ -82,8 +82,8 @@ export default function VisualPanel() {
     setIsRegenerating(true);
 
     try {
-      const googleKey = await getApiKey("lumina_google_ai_key");
-      const falKey = await getApiKey("lumina_fal_key");
+      const googleKey = await storage.loadApiKey("lumina_google_ai_key");
+      const falKey = await storage.loadApiKey("lumina_fal_key");
       const styleSeed = getStyleSeedById(activeStyleSeed);
       if (!googleKey || !styleSeed) return;
 
@@ -100,7 +100,7 @@ export default function VisualPanel() {
           addToCache(img);
           setCurrentImage(img);
           setCurrentThemes(img.emotionalThemes);
-          await dbSaveImageCache(img).catch(() => {});
+          // Image already persisted inside storage.saveImage() — no extra save needed
         },
       });
 

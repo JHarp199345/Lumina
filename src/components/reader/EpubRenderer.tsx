@@ -15,7 +15,7 @@ import { useReaderStore } from "@/store/readerStore";
 import { useBookStore } from "@/store/bookStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useSettingsStore } from "@/store/settingsStore";
-import { dbSaveProgress } from "@/services/db";
+import { storage } from "@/storage";
 import { toAssetUrl } from "@/utils/tauriBridge";
 
 interface EpubRendererProps {
@@ -97,7 +97,7 @@ export default function EpubRenderer({
     (cfi: string, chapterIndex: number, percent: number) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        dbSaveProgress({
+        storage.saveProgress({
           bookId,
           currentCfi: cfi,
           currentChapterIndex: chapterIndex,
@@ -118,7 +118,19 @@ export default function EpubRenderer({
     bookRef.current?.destroy();
     initialDisplayed.current = false;
 
-    const book = Epub(toAssetUrl(epubPath));
+    // Web/PWA: EPUB is stored in IndexedDB — load bytes and pass an ArrayBuffer.
+    // Tauri: EPUB is a native file path — use the asset:// protocol URL.
+    let epubSource: string | ArrayBuffer;
+    if (epubPath.startsWith("idb://")) {
+      const activeBook = useBookStore.getState().activeBook;
+      if (!activeBook) return;
+      const bytes = await storage.getEpubBytes(activeBook);
+      epubSource = bytes.buffer as ArrayBuffer;
+    } else {
+      epubSource = toAssetUrl(epubPath);
+    }
+
+    const book = Epub(epubSource);
     bookRef.current = book;
 
     const rendition = book.renderTo(containerRef.current, {
@@ -223,7 +235,7 @@ export default function EpubRenderer({
         clearTimeout(saveTimerRef.current);
         const { currentCfi, currentChapterIndex, percentComplete } = useReaderStore.getState();
         if (currentCfi) {
-          dbSaveProgress({
+          storage.saveProgress({
             bookId,
             currentCfi,
             currentChapterIndex,

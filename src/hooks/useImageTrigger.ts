@@ -13,8 +13,8 @@ import { useImageStore } from "@/store/imageStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { generateImage, extractPaletteContext } from "@/pipeline/imageGenerator";
 import { getStyleSeedById } from "@/data/styleSeeds";
-import { getApiKey } from "@/utils/tauriBridge";
-import { dbSaveImageCache } from "@/services/db";
+import { storage } from "@/storage";
+
 import { LUMINA_CONFIG } from "@/config";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import type { IdentifiedScene, CachedImage } from "@/types";
@@ -128,8 +128,8 @@ export function useImageTrigger() {
     updateQueueItemStatus(next.sceneId, "generating");
 
     try {
-      const googleKey = await getApiKey("lumina_google_ai_key");
-      const falKey = await getApiKey("lumina_fal_key");
+      const googleKey = await storage.loadApiKey("lumina_google_ai_key");
+      const falKey = await storage.loadApiKey("lumina_fal_key");
 
       if (!googleKey) {
         console.warn("[ImageTrigger] No API key configured");
@@ -149,9 +149,7 @@ export function useImageTrigger() {
         onComplete: async (img) => {
           addToCache(img);
           generatedCountRef.current++;
-
-          // Persist to SQLite
-          await dbSaveImageCache(img).catch(() => {});
+          // Persistence handled inside storage.saveImage() — no extra save needed
 
           // Update prior palette context for next generation
           priorPromptRef.current = extractPaletteContext(

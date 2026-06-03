@@ -1,0 +1,223 @@
+/**
+ * TauriStorageAdapter
+ *
+ * Implements StorageAdapter using the existing Tauri IPC layer:
+ *   - SQLite (via services/db.ts) for all relational data
+ *   - Native file system (via tauriBridge.ts) for EPUB blobs and generated images
+ *
+ * No behaviour changes from the pre-adapter codebase — this is a thin wrapper
+ * that routes calls to the existing functions.
+ */
+
+import type { StorageAdapter } from "./StorageAdapter";
+import type {
+  Book,
+  ReadingProgress,
+  SemanticMap,
+  StyleSeedId,
+  Highlight,
+  HighlightColor,
+  Note,
+  CachedImage,
+} from "@/types";
+import {
+  openEpubDialog,
+  readFileBytes,
+  writeFileBytes,
+  copyFileToAppData,
+  getAppDataDir,
+  storeApiKey,
+  getApiKey,
+  deleteApiKey,
+  toAssetUrl,
+  deleteDirectory,
+} from "@/utils/tauriBridge";
+import {
+  dbSaveBook,
+  dbLoadAllBooks,
+  dbDeleteBook,
+  dbUpdateLastOpened,
+  dbSaveProgress,
+  dbLoadProgress,
+  dbSaveHighlight,
+  dbLoadHighlights,
+  dbDeleteHighlight,
+  dbUpdateHighlightColor,
+  dbSaveNote,
+  dbLoadNotes,
+  dbUpdateNote,
+  dbDeleteNote,
+  dbSaveSemanticMap,
+  dbLoadSemanticMap,
+  dbDeleteSemanticMap,
+  dbSaveBookStyleSeed,
+  dbLoadBookStyleSeed,
+  dbSaveImageCache,
+  dbLoadImageCache,
+  dbLoadImageCacheForBookPrefix,
+  dbDeleteImageCache,
+  dbDeleteAllBookData,
+} from "@/services/db";
+import { LUMINA_CONFIG } from "@/config";
+
+export class TauriStorageAdapter implements StorageAdapter {
+  // ── EPUB handling ────────────────────────────────────────────────────────
+
+  async pickEpubFile(): Promise<File | string | null> {
+    return openEpubDialog(); // returns path string or null
+  }
+
+  async storeEpub(source: File | string, bookId: string, fileName: string): Promise<string> {
+    if (typeof source !== "string") {
+      throw new Error("TauriStorageAdapter.storeEpub: expected a file path string");
+    }
+    return copyFileToAppData(source, `books/${bookId}/${fileName}`);
+  }
+
+  async getEpubBytes(book: Book): Promise<Uint8Array> {
+    return readFileBytes(book.filePath);
+  }
+
+  // ── Library ──────────────────────────────────────────────────────────────
+
+  async saveBook(book: Book): Promise<void> {
+    await dbSaveBook(book);
+  }
+
+  async loadAllBooks(): Promise<Book[]> {
+    return dbLoadAllBooks();
+  }
+
+  async deleteBook(bookId: string): Promise<void> {
+    await dbDeleteBook(bookId);
+  }
+
+  async updateLastOpened(bookId: string): Promise<void> {
+    await dbUpdateLastOpened(bookId);
+  }
+
+  // ── Progress ─────────────────────────────────────────────────────────────
+
+  async saveProgress(progress: ReadingProgress): Promise<void> {
+    await dbSaveProgress(progress);
+  }
+
+  async loadProgress(bookId: string): Promise<ReadingProgress | null> {
+    return dbLoadProgress(bookId);
+  }
+
+  // ── Annotations ──────────────────────────────────────────────────────────
+
+  async saveHighlight(highlight: Highlight): Promise<void> {
+    await dbSaveHighlight(highlight);
+  }
+
+  async loadHighlights(bookId: string): Promise<Highlight[]> {
+    return dbLoadHighlights(bookId);
+  }
+
+  async deleteHighlight(highlightId: string): Promise<void> {
+    await dbDeleteHighlight(highlightId);
+  }
+
+  async updateHighlightColor(highlightId: string, color: HighlightColor): Promise<void> {
+    await dbUpdateHighlightColor(highlightId, color);
+  }
+
+  async saveNote(note: Note): Promise<void> {
+    await dbSaveNote(note);
+  }
+
+  async loadNotes(bookId: string): Promise<Note[]> {
+    return dbLoadNotes(bookId);
+  }
+
+  async updateNote(noteId: string, text: string): Promise<void> {
+    await dbUpdateNote(noteId, text);
+  }
+
+  async deleteNote(noteId: string): Promise<void> {
+    await dbDeleteNote(noteId);
+  }
+
+  // ── Semantic map ─────────────────────────────────────────────────────────
+
+  async saveSemanticMap(map: SemanticMap): Promise<void> {
+    await dbSaveSemanticMap(map);
+  }
+
+  async loadSemanticMap(bookId: string): Promise<SemanticMap | null> {
+    return dbLoadSemanticMap(bookId);
+  }
+
+  async deleteSemanticMap(bookId: string): Promise<void> {
+    await dbDeleteSemanticMap(bookId);
+  }
+
+  // ── Style seed ───────────────────────────────────────────────────────────
+
+  async saveBookStyleSeed(bookId: string, seedId: StyleSeedId): Promise<void> {
+    await dbSaveBookStyleSeed(bookId, seedId);
+  }
+
+  async loadBookStyleSeed(bookId: string): Promise<StyleSeedId | null> {
+    return dbLoadBookStyleSeed(bookId);
+  }
+
+  // ── Image cache ──────────────────────────────────────────────────────────
+
+  async saveImage(meta: Omit<CachedImage, "filePath">, data: Uint8Array): Promise<string> {
+    const appDataDir = await getAppDataDir();
+    const fileName = `${meta.sceneId}.png`;
+    const relativePath = `${LUMINA_CONFIG.IMAGE_CACHE_DIR}/${meta.bookId}/${fileName}`;
+    const fullPath = `${appDataDir}/${relativePath}`;
+    await writeFileBytes(fullPath, data);
+    const displayUrl = toAssetUrl(fullPath);
+    await dbSaveImageCache({ ...meta, filePath: displayUrl });
+    return displayUrl;
+  }
+
+  async loadImages(bookId: string): Promise<CachedImage[]> {
+    return dbLoadImageCache(bookId);
+  }
+
+  async loadImagesForPrefix(bookId: string): Promise<CachedImage[]> {
+    return dbLoadImageCacheForBookPrefix(bookId);
+  }
+
+  async deleteImages(bookId: string): Promise<void> {
+    await dbDeleteImageCache(bookId);
+    // Best-effort file cleanup
+    const appDataDir = await getAppDataDir().catch(() => "");
+    if (appDataDir) {
+      await deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.IMAGE_CACHE_DIR}/${bookId}`).catch(() => {});
+    }
+  }
+
+  // ── API keys ─────────────────────────────────────────────────────────────
+
+  async saveApiKey(name: string, value: string): Promise<void> {
+    await storeApiKey(name, value);
+  }
+
+  async loadApiKey(name: string): Promise<string | null> {
+    return getApiKey(name);
+  }
+
+  async deleteApiKey(name: string): Promise<void> {
+    await deleteApiKey(name);
+  }
+
+  // ── Bulk delete ──────────────────────────────────────────────────────────
+
+  async deleteAllBookData(bookId: string): Promise<void> {
+    await dbDeleteAllBookData(bookId);
+    const appDataDir = await getAppDataDir().catch(() => "");
+    if (appDataDir) {
+      await Promise.allSettled([
+        deleteDirectory(`${appDataDir}/books/${bookId}`),
+        deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.IMAGE_CACHE_DIR}/${bookId}`),
+      ]);
+    }
+  }
+}

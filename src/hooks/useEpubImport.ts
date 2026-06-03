@@ -1,21 +1,11 @@
 import { useCallback } from "react";
-import { openEpubDialog, readFileBytes, copyFileToAppData } from "@/utils/tauriBridge";
+import { readFileBytes } from "@/utils/tauriBridge";
 import { parseEpub, extractCoverImage } from "@/pipeline/epubParser";
 import { useBookStore } from "@/store/bookStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useImageStore } from "@/store/imageStore";
 import { useReaderStore } from "@/store/readerStore";
-import {
-  dbSaveBook,
-  dbLoadAllBooks,
-  dbLoadProgress,
-  dbLoadHighlights,
-  dbLoadNotes,
-  dbLoadSemanticMap,
-  dbLoadImageCacheForBookPrefix,
-  dbLoadBookStyleSeed,
-  dbUpdateLastOpened,
-} from "@/services/db";
+import { storage } from "@/storage";
 import type { Book, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
@@ -66,10 +56,17 @@ export function useEpubImport() {
       }
     };
 
-    const filePath = await runStep("Opening file picker…", openEpubDialog);
-    if (!filePath) return null;
+    const picked = await runStep("Opening file picker…", () => storage.pickEpubFile());
+    if (!picked) return null;
 
-    const bytes = await runStep("Reading EPUB file…", () => readFileBytes(filePath));
+    // Read bytes from the File object (web) or file path (Tauri)
+    let bytes: Uint8Array;
+    if (picked instanceof File) {
+      const buf = await runStep("Reading EPUB file…", () => picked.arrayBuffer());
+      bytes = new Uint8Array(buf);
+    } else {
+      bytes = await runStep("Reading EPUB file…", () => readFileBytes(picked as string));
+    }
 
     // Give React a breath to render the import status before parsing a large EPUB.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -78,9 +75,13 @@ export function useEpubImport() {
       parseEpub(bytes, onProgress)
     );
 
-    const fileName = filePath.split("/").pop() || "book.epub";
+    const fileName =
+      picked instanceof File
+        ? picked.name
+        : (picked as string).split("/").pop() || "book.epub";
+
     const storedPath = await runStep("Copying book into Lumina…", () =>
-      copyFileToAppData(filePath, `books/${structure.bookId}/${fileName}`)
+      storage.storeEpub(picked, structure.bookId, fileName)
     );
 
     const coverImage = await runStep("Extracting cover image…", () => extractCoverImage(zip));
@@ -97,7 +98,7 @@ export function useEpubImport() {
       lastOpened: new Date().toISOString(),
     };
 
-    await runStep("Saving book to library…", () => dbSaveBook(book));
+    await runStep("Saving book to library…", () => storage.saveBook(book));
 
     onProgress?.("Mounting book in Lumina…");
 
@@ -122,11 +123,11 @@ export function useEpubImport() {
 
   const loadLibrary = useCallback(async () => {
     try {
-      const books = await dbLoadAllBooks();
+      const books = await storage.loadAllBooks();
       books.forEach((book) => addBook(book));
       return books;
     } catch (err) {
-      console.warn("[Library] Failed to load from DB:", err);
+      console.warn("[Library] Failed to load library:", err);
       return [];
     }
   }, [addBook]);
@@ -143,14 +144,14 @@ export function useEpubImport() {
 
       // 1. Load reading progress first — captures the CFI we'll restore to
       onProgress?.("Loading saved reading state…");
-      const progress = await dbLoadProgress(book.id);
+      const progress = await storage.loadProgress(book.id);
       const savedCfi = progress?.currentCfi ?? null;
 
       // 2. Re-parse EPUB structure (chapters/sections not stored in DB)
       let structure = null;
       try {
         onProgress?.("Reading saved EPUB file…");
-        const bytes = await readFileBytes(book.filePath);
+        const bytes = await storage.getEpubBytes(book);
         onProgress?.("Parsing saved EPUB structure…");
         const parsed = await parseEpub(bytes, onProgress);
         structure = parsed.structure;
@@ -167,11 +168,11 @@ export function useEpubImport() {
 
       // 3. Load all ancillary data
       const [semanticMap, seedId, highlights, notes, cachedImages] = await Promise.all([
-        dbLoadSemanticMap(semanticBookId),
-        dbLoadBookStyleSeed(book.id),
-        dbLoadHighlights(book.id),
-        dbLoadNotes(book.id),
-        dbLoadImageCacheForBookPrefix(book.id),
+        storage.loadSemanticMap(semanticBookId),
+        storage.loadBookStyleSeed(book.id),
+        storage.loadHighlights(book.id),
+        storage.loadNotes(book.id),
+        storage.loadImagesForPrefix(book.id),
       ]);
 
       // 4. Commit everything to stores before setting activeBook.
@@ -226,7 +227,7 @@ export function useEpubImport() {
       setActiveBook(book);
 
       // 7. Update last-opened timestamp
-      await dbUpdateLastOpened(book.id).catch(() => {});
+      await storage.updateLastOpened(book.id).catch(() => {});
       updateBook(book.id, { lastOpened: new Date().toISOString() });
       onProgress?.(`Opened ${book.title}.`);
     },

@@ -9,7 +9,7 @@
  */
 
 import type { IdentifiedScene, StyleSeed, CachedImage } from "@/types";
-import { writeFileBytes, getAppDataDir } from "@/utils/tauriBridge";
+import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
 
 const IMAGEN_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -63,25 +63,22 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
 
   if (!imageData) throw new Error("No image data returned");
 
-  // Save to cache
-  const appDataDir = await getAppDataDir();
-  const fileName = `${scene.id}.png`;
-  const relativePath = `${LUMINA_CONFIG.IMAGE_CACHE_DIR}/${bookId}/${fileName}`;
-  const fullPath = `${appDataDir}/${relativePath}`;
-
-  await writeFileBytes(fullPath, imageData);
-
-  const cachedImage: CachedImage = {
+  // Metadata without filePath — saveImage fills that in
+  const meta = {
     id: `img_${scene.id}`,
     bookId,
     sceneId: scene.id,
-    filePath: `file://${fullPath}`,
     descriptionUsed: prompt,
     styleSeed: styleSeed.id,
     generatedAt: new Date().toISOString(),
-    generationApi: apiUsed,
+    generationApi: apiUsed as "imagen3" | "flux",
     emotionalThemes: scene.emotionalVector,
   };
+
+  // Persist via the storage adapter (Tauri → disk + asset URL; Web → IndexedDB + blob URL)
+  const filePath = await storage.saveImage(meta, imageData);
+
+  const cachedImage: CachedImage = { ...meta, filePath };
 
   options.onComplete?.(cachedImage);
   return cachedImage;

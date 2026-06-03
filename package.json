@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "web:dev": "vite --host 0.0.0.0 --port 5173",
+    "web:build": "tsc && vite build",
+    "web:preview": "vite preview --host 0.0.0.0 --port 5173"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",

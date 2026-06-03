@@ -1,13 +1,6 @@
 import { create } from "zustand";
 import type { Highlight, Note, HighlightColor } from "@/types";
-import {
-  dbSaveHighlight,
-  dbSaveNote,
-  dbUpdateNote,
-  dbDeleteHighlight,
-  dbDeleteNote,
-  dbUpdateHighlightColor,
-} from "@/services/db";
+import { storage } from "@/storage";
 
 interface AnnotationStore {
   highlights: Highlight[];
@@ -35,8 +28,8 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
 
   addHighlight: async (highlight) => {
     set((state) => ({ highlights: [...state.highlights, highlight] }));
-    await dbSaveHighlight(highlight).catch((e) =>
-      console.error("[DB] Failed to save highlight:", e)
+    await storage.saveHighlight(highlight).catch((e) =>
+      console.error("[Storage] Failed to save highlight:", e)
     );
   },
 
@@ -45,8 +38,8 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
       highlights: state.highlights.filter((h) => h.id !== highlightId),
       notes: state.notes.filter((n) => n.highlightId !== highlightId),
     }));
-    await dbDeleteHighlight(highlightId).catch((e) =>
-      console.error("[DB] Failed to delete highlight:", e)
+    await storage.deleteHighlight(highlightId).catch((e) =>
+      console.error("[Storage] Failed to delete highlight:", e)
     );
   },
 
@@ -56,15 +49,15 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
         h.id === highlightId ? { ...h, color } : h
       ),
     }));
-    await dbUpdateHighlightColor(highlightId, color).catch((e) =>
-      console.error("[DB] Failed to update highlight color:", e)
+    await storage.updateHighlightColor(highlightId, color).catch((e) =>
+      console.error("[Storage] Failed to update highlight color:", e)
     );
   },
 
   addNote: async (note) => {
     set((state) => ({ notes: [...state.notes, note] }));
-    await dbSaveNote(note).catch((e) =>
-      console.error("[DB] Failed to save note:", e)
+    await storage.saveNote(note).catch((e) =>
+      console.error("[Storage] Failed to save note:", e)
     );
   },
 
@@ -75,15 +68,15 @@ export const useAnnotationStore = create<AnnotationStore>()((set, get) => ({
         n.id === noteId ? { ...n, noteText: text, updatedAt } : n
       ),
     }));
-    await dbUpdateNote(noteId, text).catch((e) =>
-      console.error("[DB] Failed to update note:", e)
+    await storage.updateNote(noteId, text).catch((e) =>
+      console.error("[Storage] Failed to update note:", e)
     );
   },
 
   removeNote: async (noteId) => {
     set((state) => ({ notes: state.notes.filter((n) => n.id !== noteId) }));
-    await dbDeleteNote(noteId).catch((e) =>
-      console.error("[DB] Failed to delete note:", e)
+    await storage.deleteNote(noteId).catch((e) =>
+      console.error("[Storage] Failed to delete note:", e)
     );
   },
 
