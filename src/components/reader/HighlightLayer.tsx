@@ -13,11 +13,13 @@ import { generateImage } from "@/pipeline/imageGenerator";
 import { storage } from "@/storage";
 import type { HighlightColor, IdentifiedScene } from "@/types";
 
+// The four lenses. Internal color keys stay yellow/blue/green/red for persistence
+// compatibility; the visible identity is the lens name and the glass swatch.
 const HIGHLIGHT_COLORS: { color: HighlightColor; label: string; swatch: string }[] = [
-  { color: "yellow", label: "Gold lens", swatch: "from-[#fff6b2]/90 to-[#d6b95f]/70 shadow-[0_0_14px_rgba(214,185,95,0.28)]" },
-  { color: "blue", label: "Blue lens", swatch: "from-[#a9e0ff]/85 to-[#469cd3]/65 shadow-[0_0_14px_rgba(96,165,250,0.24)]" },
-  { color: "green", label: "Green lens", swatch: "from-[#bbf7d0]/80 to-[#4ab279]/60 shadow-[0_0_14px_rgba(74,222,128,0.20)]" },
-  { color: "red", label: "Rose lens", swatch: "from-[#ffbecb]/80 to-[#dd6074]/60 shadow-[0_0_14px_rgba(244,114,182,0.20)]" },
+  { color: "yellow", label: "Amber lens", swatch: "from-[#fff0b8]/95 to-[#d8b24e]/75 shadow-[0_0_16px_rgba(214,185,95,0.42)]" },
+  { color: "blue", label: "Sapphire lens", swatch: "from-[#bfe6ff]/90 to-[#418fcb]/70 shadow-[0_0_16px_rgba(96,165,250,0.38)]" },
+  { color: "green", label: "Verdant lens", swatch: "from-[#c4f3d4]/88 to-[#46a877]/66 shadow-[0_0_16px_rgba(74,200,128,0.34)]" },
+  { color: "red", label: "Ember lens", swatch: "from-[#ffc7b0]/88 to-[#d56a52]/66 shadow-[0_0_16px_rgba(229,120,90,0.36)]" },
 ];
 
 interface SelectionMenu {

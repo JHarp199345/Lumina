@@ -15,6 +15,8 @@ import SideRail from "@/components/layout/SideRail";
 import PanelContainer from "@/components/layout/PanelContainer";
 import TabletPanelContainer from "@/components/layout/TabletPanelContainer";
 import HighlightLayer from "@/components/reader/HighlightLayer";
+import AnnotationsDrawer from "@/components/knowledge/AnnotationsDrawer";
+import SunburstNote from "@/components/knowledge/SunburstNote";
 import SeedPicker from "@/components/visual/SeedPicker";
 import OnboardingModal from "@/components/common/OnboardingModal";
 import SettingsPanel from "@/components/common/SettingsPanel";
@@ -292,6 +294,8 @@ function App() {
       </div>
 
       <HighlightLayer />
+      <AnnotationsDrawer />
+      <SunburstNote />
 
       <AnimatePresence>
         {importProgress && (

@@ -1,6 +1,9 @@
-import { BookOpen, FolderOpen, Menu, Moon, Settings, Sun, Monitor } from "lucide-react";
+import { BookOpen, FolderOpen, Menu, Moon, Settings, Sun, Monitor, Highlighter } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useReaderStore } from "@/store/readerStore";
+import { useBookStore } from "@/store/bookStore";
+import { useDrawerStore } from "@/store/drawerStore";
+import { useAnnotationStore } from "@/store/annotationStore";
 import type { Theme } from "@/types";
 import type { ReactNode } from "react";
 
@@ -23,6 +26,13 @@ export default function SideRail({
 }: SideRailProps) {
   const { theme, setTheme } = useSettingsStore();
   const { percentComplete } = useReaderStore();
+  const { activeBook } = useBookStore();
+  const openDrawer = useDrawerStore((s) => s.open);
+  const { getHighlightsForBook, getNotesForBook } = useAnnotationStore();
+
+  const annotationCount = activeBook
+    ? getHighlightsForBook(activeBook.id).length + getNotesForBook(activeBook.id).length
+    : 0;
 
   const ThemeIcon = theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
 
@@ -60,6 +70,19 @@ export default function SideRail({
         <RailButton label="Library" onClick={onLibraryOpen}>
           <BookOpen size={17} />
         </RailButton>
+
+        {activeBook && (
+          <div className="relative">
+            <RailButton label="Annotations" onClick={() => openDrawer("menu")}>
+              <Highlighter size={17} />
+            </RailButton>
+            {annotationCount > 0 && (
+              <span className="pointer-events-none absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-lumina-gold px-1 text-[9px] font-semibold text-black">
+                {annotationCount > 99 ? "99+" : annotationCount}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mt-auto flex flex-col items-center gap-2">
