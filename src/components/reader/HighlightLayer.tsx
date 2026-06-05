@@ -13,11 +13,11 @@ import { generateImage } from "@/pipeline/imageGenerator";
 import { storage } from "@/storage";
 import type { HighlightColor, IdentifiedScene } from "@/types";
 
-const HIGHLIGHT_COLORS: { color: HighlightColor; label: string; bg: string }[] = [
-  { color: "yellow", label: "Yellow", bg: "bg-yellow-400/70" },
-  { color: "blue", label: "Blue", bg: "bg-blue-500/70" },
-  { color: "green", label: "Green", bg: "bg-green-500/70" },
-  { color: "red", label: "Red", bg: "bg-red-500/70" },
+const HIGHLIGHT_COLORS: { color: HighlightColor; label: string; swatch: string }[] = [
+  { color: "yellow", label: "Gold lens", swatch: "from-[#fff6b2]/90 to-[#d6b95f]/70 shadow-[0_0_14px_rgba(214,185,95,0.28)]" },
+  { color: "blue", label: "Blue lens", swatch: "from-[#a9e0ff]/85 to-[#469cd3]/65 shadow-[0_0_14px_rgba(96,165,250,0.24)]" },
+  { color: "green", label: "Green lens", swatch: "from-[#bbf7d0]/80 to-[#4ab279]/60 shadow-[0_0_14px_rgba(74,222,128,0.20)]" },
+  { color: "red", label: "Rose lens", swatch: "from-[#ffbecb]/80 to-[#dd6074]/60 shadow-[0_0_14px_rgba(244,114,182,0.20)]" },
 ];
 
 interface SelectionMenu {
@@ -258,12 +258,12 @@ export default function HighlightLayer() {
               transform: "translate(-50%, -100%)",
             }}
           >
-            {HIGHLIGHT_COLORS.map(({ color, label, bg }) => (
+            {HIGHLIGHT_COLORS.map(({ color, label, swatch }) => (
               <button
                 key={color}
                 onClick={() => handleHighlight(color)}
                 title={label}
-                className={`w-5 h-5 rounded-full ${bg} hover:scale-110 transition-transform ring-1 ring-white/20`}
+                className={`h-6 w-6 rounded-full border border-white/20 bg-gradient-to-br ${swatch} transition-transform hover:scale-110`}
               />
             ))}
             {activeSemanticMap && activeStyleSeed && (
@@ -407,8 +407,6 @@ function applyHighlightToRange(range: Range, color: HighlightColor, id: string) 
     const mark = document.createElement("mark");
     mark.className = colorClassMap[color];
     mark.dataset.highlightId = id;
-    mark.style.borderRadius = "2px";
-    mark.style.padding = "0 1px";
     mark.style.cursor = "pointer";
     range.surroundContents(mark);
   } catch {
@@ -418,6 +416,7 @@ function applyHighlightToRange(range: Range, color: HighlightColor, id: string) 
       const mark = document.createElement("mark");
       mark.className = colorClassMap[color];
       mark.dataset.highlightId = id;
+      mark.style.cursor = "pointer";
       mark.appendChild(fragment);
       range.insertNode(mark);
     } catch {

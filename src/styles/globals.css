@@ -165,11 +165,57 @@ body,
   color: rgba(255, 255, 255, 0.9);
 }
 
-/* Highlight colors */
-.highlight-yellow { background-color: rgba(250, 204, 21, 0.25); }
-.highlight-blue { background-color: rgba(59, 130, 246, 0.25); }
-.highlight-green { background-color: rgba(34, 197, 94, 0.2); }
-.highlight-red { background-color: rgba(239, 68, 68, 0.2); }
+/* Lens-style highlights: soft illumination without changing layout. */
+mark[class^="highlight-"],
+mark[class*=" highlight-"] {
+  border-radius: 0.42em;
+  padding: 0.02em 0.12em;
+  color: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  text-shadow: 0 0 0.01px currentColor;
+  cursor: pointer;
+}
+
+.highlight-yellow {
+  background:
+    linear-gradient(180deg, rgba(255, 246, 178, 0.34), rgba(218, 174, 52, 0.23)),
+    radial-gradient(ellipse at 50% 70%, rgba(255, 231, 112, 0.22), transparent 70%);
+  box-shadow:
+    0 0 0 1px rgba(201, 168, 76, 0.16),
+    0 0 14px rgba(214, 185, 95, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.highlight-blue {
+  background:
+    linear-gradient(180deg, rgba(169, 224, 255, 0.30), rgba(70, 156, 211, 0.22)),
+    radial-gradient(ellipse at 50% 70%, rgba(125, 211, 252, 0.20), transparent 70%);
+  box-shadow:
+    0 0 0 1px rgba(96, 165, 250, 0.15),
+    0 0 14px rgba(96, 165, 250, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.highlight-green {
+  background:
+    linear-gradient(180deg, rgba(187, 247, 208, 0.28), rgba(74, 178, 121, 0.20)),
+    radial-gradient(ellipse at 50% 70%, rgba(134, 239, 172, 0.18), transparent 70%);
+  box-shadow:
+    0 0 0 1px rgba(74, 222, 128, 0.13),
+    0 0 14px rgba(74, 222, 128, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.highlight-red {
+  background:
+    linear-gradient(180deg, rgba(255, 190, 203, 0.28), rgba(221, 96, 116, 0.20)),
+    radial-gradient(ellipse at 50% 70%, rgba(251, 113, 133, 0.18), transparent 70%);
+  box-shadow:
+    0 0 0 1px rgba(244, 114, 182, 0.14),
+    0 0 14px rgba(244, 114, 182, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
 
 /* ─── Ambient visual layer animations ──────────────────────────────────────── */
 
