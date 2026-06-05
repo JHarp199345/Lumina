@@ -150,13 +150,13 @@ export default function AmbientSceneLayer({
               transition={{ duration: 0.4, ease: "easeOut" }}
               className="flex w-full max-w-sm flex-col items-center gap-2 text-center"
             >
-              <p className="text-sm text-white/25 font-light tracking-wide leading-relaxed">
+              <p className="text-sm text-ink-faint font-light tracking-wide leading-relaxed">
                 {displayPrimary}
               </p>
 
               {phase === "analyzing" && progressDetail && (
                 <div className="w-full pt-1">
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-sky-100/10">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink/10">
                     <motion.div
                       className="h-full rounded-full bg-lumina-gold/70 shadow-[0_0_16px_rgba(199,169,96,0.35)]"
                       initial={false}
@@ -164,12 +164,12 @@ export default function AmbientSceneLayer({
                       transition={{ duration: 0.45, ease: "easeOut" }}
                     />
                   </div>
-                  <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.16em] text-sky-100/24">
+                  <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.16em] text-ink-faint">
                     <span>{progressDetail.phase.replace("-", " ")}</span>
                     <span>{progressPercent}%</span>
                   </div>
                   {progressDetail.current != null && progressDetail.total != null && (
-                    <p className="mt-2 text-[11px] text-sky-100/28">
+                    <p className="mt-2 text-[11px] text-ink-faint">
                       {progressDetail.current} of {progressDetail.total}
                       {progressDetail.itemLabel ? ` · ${progressDetail.itemLabel}` : ""}
                     </p>

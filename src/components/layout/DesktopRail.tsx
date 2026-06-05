@@ -29,7 +29,7 @@ export default function DesktopRail({
   const { activeBook } = useBookStore();
 
   return (
-    <div className="relative w-10 flex-shrink-0 flex flex-col items-center bg-surface-dark border-r border-white/5 select-none z-10">
+    <div className="relative w-10 flex-shrink-0 flex flex-col items-center bg-surface-dark border-r border-hair select-none z-10">
 
       {/* Vertical progress bar — left edge, full height */}
       <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-white/4">
@@ -45,7 +45,7 @@ export default function DesktopRail({
         className={`mt-2 min-w-[40px] min-h-[44px] flex items-center justify-center rounded transition-colors ${
           tocOpen
             ? "text-lumina-gold"
-            : "text-white/25 hover:text-white/60 active:text-white/60"
+            : "text-ink-faint hover:text-ink-soft active:text-ink-soft"
         }`}
         aria-label={tocOpen ? "Close contents" : "Open contents"}
         title={tocOpen ? "Close contents" : "Open contents"}
@@ -59,7 +59,7 @@ export default function DesktopRail({
       {/* Library button — bottom */}
       <button
         onClick={onLibraryOpen}
-        className="mb-2 min-w-[40px] min-h-[44px] flex items-center justify-center rounded text-white/20 hover:text-white/55 active:text-white/55 transition-colors"
+        className="mb-2 min-w-[40px] min-h-[44px] flex items-center justify-center rounded text-ink-faint hover:text-ink/55 active:text-ink/55 transition-colors"
         aria-label="Library"
         title="Library"
       >

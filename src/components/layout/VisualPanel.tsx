@@ -1,11 +1,12 @@
-import { useState, useCallback, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion";
 import { Sparkles, RefreshCw, Loader, MapPin, X } from "lucide-react";
 import { useImageStore } from "@/store/imageStore";
 import { useBookStore } from "@/store/bookStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { getStyleSeedById } from "@/data/styleSeeds";
+import { useBookOrchestration } from "@/hooks/useBookOrchestration";
 import { storage } from "@/storage";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
@@ -76,6 +77,7 @@ export default function VisualPanel() {
   } = useBookStore();
   const { imageGenerationEnabled, apiKeyConfigured } = useSettingsStore();
   const { isTablet } = useDeviceLayout();
+  const { regenerateAllImages } = useBookOrchestration();
   const [showRegenerate, setShowRegenerate] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -167,9 +169,9 @@ export default function VisualPanel() {
   return (
     <div className="flex flex-col h-full bg-surface-darker">
       {/* Panel Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 flex-shrink-0">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-hair flex-shrink-0">
         <Sparkles size={12} className="text-lumina-gold" />
-        <span className="text-xs font-semibold tracking-widest text-white/30 uppercase">
+        <span className="text-xs font-semibold tracking-widest text-ink-faint uppercase">
           Visual Interpretation
         </span>
       </div>
@@ -244,10 +246,10 @@ export default function VisualPanel() {
               e.stopPropagation();
               setShowRegenerate((v) => !v);
             }}
-            className="absolute bottom-3 right-3 w-11 h-11 rounded-full bg-black/60 border border-white/15 flex items-center justify-center backdrop-blur-sm active:bg-black/80 transition-colors z-10"
+            className="absolute bottom-3 right-3 w-11 h-11 rounded-full bg-scrim border border-white/15 flex items-center justify-center backdrop-blur-sm active:bg-black/80 transition-colors z-10"
             aria-label="Image actions"
           >
-            <RefreshCw size={15} className="text-white/50" />
+            <RefreshCw size={15} className="text-ink-soft" />
           </button>
         )}
 
@@ -258,11 +260,11 @@ export default function VisualPanel() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center"
+              className="absolute inset-0 bg-scrim backdrop-blur-sm flex items-center justify-center"
             >
               <div className="flex flex-col items-center gap-3">
                 <Loader size={20} className="text-lumina-gold animate-spin" />
-                <p className="text-xs text-white/40">Generating new image…</p>
+                <p className="text-xs text-ink-faint">Generating new image…</p>
               </div>
             </motion.div>
           )}
@@ -276,14 +278,14 @@ export default function VisualPanel() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.12 }}
-              className="absolute bottom-4 right-4 z-20 min-w-42 rounded-lg border border-white/10 bg-black/82 p-1.5 shadow-xl backdrop-blur-sm"
+              className="absolute bottom-4 right-4 z-20 min-w-42 rounded-lg border border-hair bg-black/82 p-1.5 shadow-xl backdrop-blur-sm"
               onMouseLeave={() => setShowRegenerate(false)}
               onClick={(e) => e.stopPropagation()}
             >
               {currentScene && (
                 <button
                   onClick={handleGoToScene}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-white/64 transition-colors hover:bg-white/8 hover:text-white"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-ink/64 transition-colors hover:bg-ink/8 hover:text-ink"
                 >
                   <MapPin size={12} />
                   Go to Scene
@@ -291,12 +293,12 @@ export default function VisualPanel() {
               )}
               <button
                 onClick={handleRegenerate}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-white/64 transition-colors hover:bg-white/8 hover:text-white"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-ink/64 transition-colors hover:bg-ink/8 hover:text-ink"
               >
                 <RefreshCw size={12} />
                 Regenerate Image
               </button>
-              <p className="px-3 pb-1 pt-1.5 text-[10px] text-white/20">Regeneration uses your API quota</p>
+              <p className="px-3 pb-1 pt-1.5 text-[10px] text-ink-faint">Regeneration uses your API quota</p>
             </motion.div>
           )}
         </AnimatePresence>
@@ -308,15 +310,15 @@ export default function VisualPanel() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex items-center gap-2 px-4 py-3 border-t border-white/5 flex-shrink-0"
+            className="flex items-center gap-2 px-4 py-3 border-t border-hair flex-shrink-0"
           >
-            <span className="text-xs text-white/20 font-medium tracking-wider uppercase">
+            <span className="text-xs text-ink-faint font-medium tracking-wider uppercase">
               Themes
             </span>
             <div className="flex items-center gap-0 flex-wrap">
               {currentThemes.map((theme, i) => (
-                <span key={i} className="text-xs text-white/45 capitalize">
-                  {i > 0 && <span className="text-white/15 mx-1.5">·</span>}
+                <span key={i} className="text-xs text-ink-soft capitalize">
+                  {i > 0 && <span className="text-ink-faint mx-1.5">·</span>}
                   {theme}
                 </span>
               ))}
@@ -335,6 +337,7 @@ export default function VisualPanel() {
             analysisProgress={analysisProgress}
             analysisProgressDetail={analysisProgressDetail}
             onAnalyze={() => setAnalysisRequested(true)}
+            onRegenerateAll={regenerateAllImages}
             onClose={() => setShowGallery(false)}
           />
         )}
@@ -369,9 +372,9 @@ function ImageDisplay({
 
   if (loadFailed) {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#071525] px-6 text-center">
-        <p className="text-xs text-sky-100/28">Generated image could not be displayed</p>
-        <p className="max-w-sm text-[10px] text-sky-100/16 break-all">{src}</p>
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-reader px-6 text-center">
+        <p className="text-xs text-ink-faint">Generated image could not be displayed</p>
+        <p className="max-w-sm text-[10px] text-ink-faint break-all">{src}</p>
       </div>
     );
   }
@@ -411,7 +414,7 @@ function ImageDisplay({
               className="absolute bottom-3 left-4 flex items-center gap-1.5 pointer-events-none"
             >
               <div className="w-1 h-1 rounded-full bg-lumina-gold/40 animate-pulse" />
-              <span className="text-xs text-white/20 tracking-wide">next scene forming</span>
+              <span className="text-xs text-ink-faint tracking-wide">next scene forming</span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -438,6 +441,7 @@ function ImageGalleryModal({
   analysisProgress,
   analysisProgressDetail,
   onAnalyze,
+  onRegenerateAll,
   onClose,
 }: {
   imageCache: Record<string, CachedImage>;
@@ -447,6 +451,7 @@ function ImageGalleryModal({
   analysisProgress: string;
   analysisProgressDetail: ReturnType<typeof useBookStore.getState>["analysisProgressDetail"];
   onAnalyze: () => void;
+  onRegenerateAll: () => void | Promise<void>;
   onClose: () => void;
 }) {
   const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
@@ -502,7 +507,7 @@ function ImageGalleryModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/72 p-4 backdrop-blur-md"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 backdrop-blur-md"
       onClick={onClose}
     >
       <motion.div
@@ -513,26 +518,26 @@ function ImageGalleryModal({
         className="flex w-full max-w-5xl flex-col items-center gap-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="relative flex max-h-[72vh] w-full flex-col overflow-hidden rounded-lg border border-sky-100/12 bg-[#071525]/96 shadow-2xl">
-          <div className="flex items-center justify-between border-b border-sky-100/10 px-4 py-3">
+        <div className="relative flex max-h-[72vh] w-full flex-col overflow-hidden rounded-lg border border-hair bg-reader/95 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-hair px-4 py-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-100/38">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-faint">
                 Visual Story
               </p>
-              <p className="mt-1 text-xs text-sky-100/22">
+              <p className="mt-1 text-xs text-ink-faint">
                 {generatedCount} generated · {Math.max(0, timeline.length - generatedCount)} planned
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex rounded-md border border-sky-100/10 bg-black/18 p-1">
+              <div className="flex rounded-md border border-hair bg-black/18 p-1">
                 {(["horizontal", "vertical"] as const).map((mode) => (
                   <button
                     key={mode}
                     onClick={() => setOrientation(mode)}
                     className={`rounded px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] transition-colors ${
                       orientation === mode
-                        ? "bg-sky-100/10 text-sky-50/70"
-                        : "text-sky-100/28 hover:text-sky-50/55"
+                        ? "bg-ink/10 text-ink-soft"
+                        : "text-ink-faint hover:text-ink-soft"
                     }`}
                     aria-label={`Show ${mode} visual story`}
                   >
@@ -542,7 +547,7 @@ function ImageGalleryModal({
               </div>
               <button
                 onClick={onClose}
-                className="flex min-h-10 min-w-10 items-center justify-center rounded-md text-sky-100/35 transition-colors hover:bg-white/6 hover:text-sky-50"
+                className="flex min-h-10 min-w-10 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-ink/[0.06] hover:text-ink"
                 aria-label="Close visual story"
               >
                 <X size={16} />
@@ -552,7 +557,7 @@ function ImageGalleryModal({
 
           {timeline.length === 0 ? (
             <div className="flex min-h-64 flex-1 items-center justify-center px-6 text-center">
-              <p className="text-sm text-sky-100/28">No visual story planned yet.</p>
+              <p className="text-sm text-ink-faint">No visual story planned yet.</p>
             </div>
           ) : (
             <div
@@ -579,7 +584,7 @@ function ImageGalleryModal({
                     className={`group ${cardClass} overflow-hidden rounded-md border text-left transition-colors ${
                       isCurrent
                         ? "border-lumina-gold/55 bg-lumina-gold/8"
-                        : "border-sky-100/10 bg-white/[0.025] hover:border-sky-100/22"
+                        : "border-hair bg-ink/[0.04] hover:border-hair"
                     }`}
                   >
                     <div className={orientation === "horizontal" ? "" : "flex gap-3"}>
@@ -598,9 +603,9 @@ function ImageGalleryModal({
                             draggable={false}
                           />
                         ) : (
-                          <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-[#06111f]">
+                          <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-panel">
                             <Sparkles size={15} className="text-lumina-gold/35" />
-                            <span className="text-[10px] uppercase tracking-[0.14em] text-sky-100/22">
+                            <span className="text-[10px] uppercase tracking-[0.14em] text-ink-faint">
                               Planned
                             </span>
                           </div>
@@ -612,17 +617,17 @@ function ImageGalleryModal({
                             {beat.beatType.replace(/_/g, " ") || `Image ${index + 1}`}
                           </p>
                           {isReaderRequested && (
-                            <span className="rounded border border-sky-100/10 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-sky-100/32">
+                            <span className="rounded border border-hair px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-ink-faint">
                               Reader
                             </span>
                           )}
                         </div>
-                        <p className="line-clamp-2 text-xs leading-snug text-sky-100/56">
+                        <p className="line-clamp-2 text-xs leading-snug text-ink-soft">
                           {scene?.directorBrief?.blocking?.focalPoint ||
                             scene?.symbolicMotifs.slice(0, 2).join(" + ") ||
                             beat.emotionalPurpose}
                         </p>
-                        <p className="text-[10px] text-sky-100/22">
+                        <p className="text-[10px] text-ink-faint">
                           {image
                             ? "Tap to visit source passage"
                             : isPlannedOnly
@@ -655,26 +660,93 @@ function ImageGalleryModal({
             {isAnalyzing ? "Analyzing" : activeSemanticMap ? "Re-Analyze This Book" : "Analyze This Book"}
           </button>
           {isAnalyzing && (
-            <div className="w-[min(420px,80vw)] rounded-full border border-sky-100/10 bg-black/28 p-1 backdrop-blur-sm">
+            <div className="w-[min(420px,80vw)] rounded-full border border-hair bg-black/28 p-1 backdrop-blur-sm">
               <div
                 className="h-1.5 rounded-full bg-lumina-gold/70 transition-all duration-500"
                 style={{ width: `${Math.max(6, Math.min(100, analysisProgressDetail?.percent ?? 12))}%` }}
               />
-              <p className="mt-2 truncate text-center text-[11px] tracking-wide text-sky-100/42">
+              <p className="mt-2 truncate text-center text-[11px] tracking-wide text-ink-faint">
                 {analysisProgressDetail?.message || analysisProgress || "Preparing the visual story..."}
               </p>
             </div>
           )}
         </div>
+
+        {/* Slide-to-confirm wipe + repaint. Only offered when images exist. */}
+        {!isAnalyzing && generatedCount > 0 && (
+          <div className="fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 justify-center px-4">
+            <SlideToRegenerate
+              onConfirm={async () => {
+                await onRegenerateAll();
+                onClose();
+              }}
+            />
+          </div>
+        )}
       </motion.div>
     </motion.div>
+  );
+}
+
+// Slide-to-confirm control — drag the handle fully right to fire a destructive
+// wipe + repaint. The deliberate gesture prevents accidental triggers.
+function SlideToRegenerate({ onConfirm }: { onConfirm: () => void | Promise<void> }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const x = useMotionValue(0);
+  const [maxX, setMaxX] = useState(0);
+  const [confirmed, setConfirmed] = useState(false);
+
+  const HANDLE = 40; // px
+  const PADDING = 4; // px on each side
+
+  useEffect(() => {
+    const measure = () => {
+      if (trackRef.current) {
+        setMaxX(Math.max(0, trackRef.current.offsetWidth - HANDLE - PADDING * 2));
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  return (
+    <div
+      ref={trackRef}
+      className="relative h-12 w-[min(420px,82vw)] select-none overflow-hidden rounded-full border border-hair bg-sky-50/[0.055] shadow-[0_12px_38px_rgba(0,0,0,0.34)] backdrop-blur-md"
+    >
+      <div className="pointer-events-none absolute inset-[3px] rounded-full border border-white/[0.055] bg-gradient-to-r from-sky-100/[0.045] via-sky-100/[0.075] to-sky-100/[0.045]" />
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-12 text-center text-[11px] uppercase tracking-[0.16em] text-ink-faint">
+        {confirmed ? "Repainting from your spot…" : "Slide to regenerate all images"}
+      </div>
+      <motion.div
+        drag={confirmed ? false : "x"}
+        dragConstraints={{ left: 0, right: maxX }}
+        dragElastic={0}
+        dragMomentum={false}
+        style={{ x, left: PADDING }}
+        onDragEnd={() => {
+          if (x.get() >= maxX - 6) {
+            setConfirmed(true);
+            animate(x, maxX, { type: "spring", stiffness: 420, damping: 38 });
+            void onConfirm();
+          } else {
+            animate(x, 0, { type: "spring", stiffness: 420, damping: 38 });
+          }
+        }}
+        className="absolute top-1 flex h-10 w-10 cursor-grab items-center justify-center rounded-full border border-lumina-gold/45 bg-lumina-gold/78 text-[#071525] shadow-[0_8px_22px_rgba(0,0,0,0.35)] backdrop-blur-sm active:cursor-grabbing"
+        aria-label="Slide to regenerate all images"
+      >
+        <RefreshCw size={15} />
+      </motion.div>
+    </div>
   );
 }
 
 function DisabledState() {
   return (
     <div className="flex items-center justify-center h-full">
-      <p className="text-xs text-white/15">Image generation is disabled.</p>
+      <p className="text-xs text-ink-faint">Image generation is disabled.</p>
     </div>
   );
 }
@@ -693,10 +765,10 @@ function AmbientFailureState({
       className="absolute inset-0 flex flex-col items-center justify-center gap-4"
       style={{ background: gradient }}
     >
-      <p className="max-w-sm px-6 text-center text-xs leading-relaxed text-white/20">{message}</p>
+      <p className="max-w-sm px-6 text-center text-xs leading-relaxed text-ink-faint">{message}</p>
       <button
         onClick={onRetry}
-        className="text-xs text-white/20 hover:text-white/40 transition-colors flex items-center gap-1.5"
+        className="text-xs text-ink-faint hover:text-ink-faint transition-colors flex items-center gap-1.5"
       >
         <RefreshCw size={11} />
         Try again

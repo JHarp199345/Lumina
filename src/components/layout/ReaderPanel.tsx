@@ -25,7 +25,7 @@ export default function ReaderPanel({ onImport }: ReaderPanelProps) {
   const currentChapter = activeStructure?.chapters[currentChapterIndex];
 
   return (
-    <div className="flex flex-col h-full bg-[#071525]">
+    <div className="reader-paper-surface flex flex-col h-full bg-reader">
       {/* Chapter header — animated, hierarchy-aware */}
       {activeBook && currentChapter && (
         <ChapterHeader
@@ -60,8 +60,8 @@ export default function ReaderPanel({ onImport }: ReaderPanelProps) {
 
       {/* Footer */}
       {activeBook && (
-        <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 border-t border-sky-200/10 bg-sky-100/[0.015]">
-          <span className="text-xs text-sky-100/24">
+        <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 border-t border-hair bg-ink/[0.03]">
+          <span className="text-xs text-ink-faint">
             {percentComplete > 0 ? `${Math.round(percentComplete)}%` : ""}
           </span>
           <div className="flex items-center gap-2">
@@ -85,10 +85,10 @@ function PageTurnControls() {
   };
 
   return (
-    <div className="flex items-center gap-1 border-r border-sky-200/10 pr-2">
+    <div className="flex items-center gap-1 border-r border-hair pr-2">
       <button
         onClick={() => turnPage("prev")}
-        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-sky-100/28 hover:text-sky-50/70 active:text-sky-50 transition-colors"
+        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-faint hover:text-ink-soft active:text-ink transition-colors"
         title="Previous page"
         aria-label="Previous page"
       >
@@ -96,7 +96,7 @@ function PageTurnControls() {
       </button>
       <button
         onClick={() => turnPage("next")}
-        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-sky-100/28 hover:text-sky-50/70 active:text-sky-50 transition-colors"
+        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-faint hover:text-ink-soft active:text-ink transition-colors"
         title="Next page"
         aria-label="Next page"
       >
@@ -113,14 +113,14 @@ function FontSizeControl() {
     <div className="flex items-center gap-1">
       <button
         onClick={() => setFontSize(Math.max(12, fontSize - 1))}
-        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-sky-100/28 hover:text-sky-50/65 active:text-sky-50 transition-colors text-xs select-none"
+        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-faint hover:text-ink-soft active:text-ink transition-colors text-xs select-none"
         title="Decrease font size"
       >
         A
       </button>
       <button
         onClick={() => setFontSize(Math.min(28, fontSize + 1))}
-        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-sky-100/28 hover:text-sky-50/65 active:text-sky-50 transition-colors select-none"
+        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-faint hover:text-ink-soft active:text-ink transition-colors select-none"
         title="Increase font size"
         style={{ fontSize: "16px" }}
       >
@@ -133,12 +133,12 @@ function FontSizeControl() {
 function EmptyReaderState({ onImport }: { onImport?: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 px-8">
-      <div className="w-16 h-16 rounded-xl border border-white/10 bg-white/[0.035] flex items-center justify-center">
-        <BookOpen size={34} className="text-white/16" />
+      <div className="w-16 h-16 rounded-xl border border-hair bg-white/[0.035] flex items-center justify-center">
+        <BookOpen size={34} className="text-ink/16" />
       </div>
       <div className="text-center space-y-2 max-w-sm">
-        <p className="text-white/25 font-serif text-lg">Begin your reading journey</p>
-        <p className="text-white/15 text-sm">
+        <p className="text-ink-faint font-serif text-lg">Begin your reading journey</p>
+        <p className="text-ink-faint text-sm">
           Import an EPUB file to start reading with symbolic visual accompaniment.
         </p>
       </div>

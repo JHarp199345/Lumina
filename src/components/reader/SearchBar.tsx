@@ -87,11 +87,11 @@ export default function SearchBar({ onClose }: SearchBarProps) {
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="flex flex-col gap-2 p-3 border-b border-white/5 bg-surface-dark"
+      className="flex flex-col gap-2 p-3 border-b border-hair bg-surface-dark"
     >
       {/* Search input */}
-      <div className="flex items-center gap-2 bg-black/30 border border-white/10 rounded-lg px-3 py-2">
-        <Search size={13} className="text-white/25 flex-shrink-0" />
+      <div className="flex items-center gap-2 bg-black/30 border border-hair rounded-lg px-3 py-2">
+        <Search size={13} className="text-ink-faint flex-shrink-0" />
         <input
           ref={inputRef}
           autoFocus
@@ -105,12 +105,12 @@ export default function SearchBar({ onClose }: SearchBarProps) {
             if (e.key === "Escape") onClose();
           }}
           placeholder="Search in book…"
-          className="flex-1 bg-transparent text-xs text-white/60 placeholder:text-white/20 focus:outline-none"
+          className="flex-1 bg-transparent text-xs text-ink-soft placeholder:text-ink-faint focus:outline-none"
         />
         {query && (
           <button
             onClick={() => { setQuery(""); setResults([]); }}
-            className="text-white/20 hover:text-white/50 transition-colors"
+            className="text-ink-faint hover:text-ink-soft transition-colors"
           >
             <X size={12} />
           </button>
@@ -120,19 +120,19 @@ export default function SearchBar({ onClose }: SearchBarProps) {
       {/* Results navigation */}
       {results.length > 0 && (
         <div className="flex items-center justify-between px-1">
-          <span className="text-xs text-white/25">
+          <span className="text-xs text-ink-faint">
             {currentIndex + 1} of {results.length}
           </span>
           <div className="flex gap-1">
             <button
               onClick={goPrev}
-              className="p-1 rounded text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+              className="p-1 rounded text-ink-faint hover:text-ink-soft hover:bg-ink/5 transition-colors"
             >
               <ChevronUp size={13} />
             </button>
             <button
               onClick={goNext}
-              className="p-1 rounded text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+              className="p-1 rounded text-ink-faint hover:text-ink-soft hover:bg-ink/5 transition-colors"
             >
               <ChevronDown size={13} />
             </button>
@@ -142,13 +142,13 @@ export default function SearchBar({ onClose }: SearchBarProps) {
 
       {/* Current result excerpt */}
       {results[currentIndex] && (
-        <p className="text-xs text-white/30 line-clamp-2 px-1 italic">
+        <p className="text-xs text-ink-faint line-clamp-2 px-1 italic">
           "…{results[currentIndex].excerpt}…"
         </p>
       )}
 
       {query.length >= 3 && results.length === 0 && !isSearching && (
-        <p className="text-xs text-white/20 px-1">No results found.</p>
+        <p className="text-xs text-ink-faint px-1">No results found.</p>
       )}
     </motion.div>
   );

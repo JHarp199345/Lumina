@@ -35,12 +35,12 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
       >
         <div className="flex items-center justify-center gap-2 mb-4">
           <Sparkles size={16} className="text-lumina-gold" />
-          <span className="text-xs tracking-widest text-white/30 uppercase">Lumina</span>
+          <span className="text-xs tracking-widest text-ink-faint uppercase">Lumina</span>
         </div>
-        <h1 className="text-2xl font-serif text-white/85 mb-2">Choose Your Visual Style</h1>
-        <p className="text-sm text-white/30 max-w-md">
+        <h1 className="text-2xl font-serif text-ink/85 mb-2">Choose Your Visual Style</h1>
+        <p className="text-sm text-ink-faint max-w-md">
           This shapes the imagery generated throughout{" "}
-          <span className="text-white/50 italic">{bookTitle}</span>. You can change it later
+          <span className="text-ink-soft italic">{bookTitle}</span>. You can change it later
           in settings.
         </p>
       </motion.div>
@@ -67,7 +67,7 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
               className={`relative rounded-xl overflow-hidden border-2 transition-all duration-200 text-left ${
                 isSelected
                   ? "border-lumina-gold shadow-lg shadow-lumina-gold/20"
-                  : "border-white/5 hover:border-white/20"
+                  : "border-hair hover:border-hair"
               }`}
             >
               {/* Preview area */}
@@ -94,12 +94,12 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
               <div className="p-3">
                 <p
                   className={`text-sm font-medium mb-0.5 ${
-                    isSelected ? "text-lumina-gold" : "text-white/70"
+                    isSelected ? "text-lumina-gold" : "text-ink-soft"
                   }`}
                 >
                   {seed.name}
                 </p>
-                <p className="text-xs text-white/30 leading-snug">{seed.description}</p>
+                <p className="text-xs text-ink-faint leading-snug">{seed.description}</p>
               </div>
             </motion.button>
           );
@@ -117,7 +117,7 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
         Begin Reading
       </motion.button>
 
-      <p className="text-xs text-white/15 mt-4">
+      <p className="text-xs text-ink-faint mt-4">
         Images are generated as you read — never all at once.
       </p>
     </motion.div>

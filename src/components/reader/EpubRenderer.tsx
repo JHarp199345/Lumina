@@ -35,10 +35,50 @@ const HIGHLIGHT_CLASS: Record<string, string> = {
   red:    "lumina-hl-red",
 };
 
-const READER_TEXT_COLOR = "rgba(186, 222, 244, 0.88)";
-const READER_MUTED_COLOR = "rgba(148, 190, 218, 0.72)";
-const READER_HEADING_COLOR = "rgba(224, 243, 255, 0.94)";
-const READER_BACKGROUND = "#071525";
+// Reader text palette per theme. The EPUB renders inside an iframe, so its
+// colors are injected as styles (not Tailwind classes) and must be chosen here.
+interface ReaderPalette {
+  text: string;
+  muted: string;
+  heading: string;
+  background: string;
+  backgroundImage: string;
+  backgroundSize: string;
+  backgroundBlendMode: string;
+  border: string;
+  link: string;
+}
+
+const READER_PALETTE_DARK: ReaderPalette = {
+  text: "rgba(186, 222, 244, 0.88)",
+  muted: "rgba(148, 190, 218, 0.72)",
+  heading: "rgba(224, 243, 255, 0.94)",
+  background: "#071525",
+  backgroundImage: "none",
+  backgroundSize: "auto",
+  backgroundBlendMode: "normal",
+  border: "rgba(125, 183, 218, 0.18)",
+  link: "#d6b95f",
+};
+
+// Paper mode: warm off-white page, newspaper-ink text.
+const READER_PALETTE_LIGHT: ReaderPalette = {
+  text: "rgba(32, 32, 34, 0.92)",
+  muted: "rgba(70, 70, 74, 0.78)",
+  heading: "rgba(24, 24, 26, 0.96)",
+  background: "#f5f1e8",
+  backgroundImage: [
+    "radial-gradient(circle at 14% 21%, rgba(86, 68, 42, 0.04) 0 0.8px, transparent 1.3px)",
+    "radial-gradient(circle at 72% 58%, rgba(255, 255, 255, 0.42) 0 0.9px, transparent 1.45px)",
+    "repeating-linear-gradient(8deg, rgba(66, 52, 30, 0.012) 0 1px, transparent 1px 9px)",
+    "repeating-linear-gradient(96deg, rgba(255, 255, 255, 0.10) 0 1px, transparent 1px 13px)",
+    "linear-gradient(90deg, rgba(255, 255, 255, 0.18), transparent 18%, rgba(88, 72, 42, 0.018) 52%, transparent 82%)",
+  ].join(", "),
+  backgroundSize: "17px 23px, 31px 29px, 100% 9px, 100% 13px, 100% 100%",
+  backgroundBlendMode: "multiply, screen, multiply, screen, normal",
+  border: "rgba(45, 39, 28, 0.15)",
+  link: "#8d6b24",
+};
 
 export default function EpubRenderer({
   epubPath,
@@ -58,7 +98,68 @@ export default function EpubRenderer({
   const { setCurrentCfi, setPercentComplete, setCurrentChapterIndex } = useReaderStore();
   const { activeStructure } = useBookStore();
   const { getHighlightsForBook } = useAnnotationStore();
-  const { fontSize, lineHeight } = useSettingsStore();
+  const { fontSize, lineHeight, theme } = useSettingsStore();
+  // Resolve the active reader palette (re-resolves whenever the theme setting changes).
+  const resolvedReaderTheme = theme === "system" ? useSettingsStore.getState().resolvedTheme() : theme;
+  const palette = resolvedReaderTheme === "light"
+    ? READER_PALETTE_LIGHT
+    : READER_PALETTE_DARK;
+
+  const applyReaderTheme = useCallback(
+    (rendition: Rendition) => {
+      rendition.themes.default({
+        "html,body": {
+          "background": `${palette.background} !important`,
+          "background-image": `${palette.backgroundImage} !important`,
+          "background-size": `${palette.backgroundSize} !important`,
+          "background-blend-mode": `${palette.backgroundBlendMode} !important`,
+          "color": `${palette.text} !important`,
+        },
+        body: {
+          "font-size": `${fontSize}px`,
+          "line-height": String(lineHeight),
+          "color": `${palette.text} !important`,
+          "background": `${palette.background} !important`,
+          "background-image": `${palette.backgroundImage} !important`,
+          "background-size": `${palette.backgroundSize} !important`,
+          "background-blend-mode": `${palette.backgroundBlendMode} !important`,
+          "font-family": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          "padding": "0 !important",
+        },
+        "*": {
+          "color": `${palette.text} !important`,
+          "border-color": `${palette.border} !important`,
+        },
+        "p,div,span,li,blockquote,section,article": {
+          "color": `${palette.text} !important`,
+          "text-shadow": "none !important",
+        },
+        p: {
+          "margin-bottom": "1.2em",
+          "text-align": "left",
+        },
+        "h1,h2,h3,h4,h5,h6": {
+          "font-family": "Georgia, serif",
+          "color": `${palette.heading} !important`,
+          "margin-bottom": "0.75em",
+          "margin-top": "1.5em",
+        },
+        "i,em,cite": {
+          "color": `${palette.muted} !important`,
+        },
+        a: {
+          "color": `${palette.link} !important`,
+          "text-decoration": "none",
+        },
+        ".lumina-hl-yellow": { "background": "rgba(250,204,21,0.28)", "border-radius": "2px" },
+        ".lumina-hl-blue":   { "background": "rgba(59,130,246,0.28)", "border-radius": "2px" },
+        ".lumina-hl-green":  { "background": "rgba(34,197,94,0.22)",  "border-radius": "2px" },
+        ".lumina-hl-red":    { "background": "rgba(239,68,68,0.22)",  "border-radius": "2px" },
+        ".lumina-search":    { "background": "rgba(201,168,76,0.4)",  "border-radius": "2px", "outline": "1px solid rgba(201,168,76,0.6)" },
+      });
+    },
+    [fontSize, lineHeight, palette]
+  );
 
   // ── Re-apply persisted highlights ─────────────────────────────────────────
 
@@ -313,50 +414,7 @@ export default function EpubRenderer({
     renditionRef.current = rendition;
 
     // Inject reader + highlight + search-mark styles
-    rendition.themes.default({
-      "html,body": {
-        "background": `${READER_BACKGROUND} !important`,
-        "color": `${READER_TEXT_COLOR} !important`,
-      },
-      body: {
-        "font-size": `${fontSize}px`,
-        "line-height": String(lineHeight),
-        "color": `${READER_TEXT_COLOR} !important`,
-        "background": `${READER_BACKGROUND} !important`,
-        "font-family": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-        "padding": "0 !important",
-      },
-      "*": {
-        "color": `${READER_TEXT_COLOR} !important`,
-        "border-color": "rgba(125, 183, 218, 0.18) !important",
-      },
-      "p,div,span,li,blockquote,section,article": {
-        "color": `${READER_TEXT_COLOR} !important`,
-        "text-shadow": "none !important",
-      },
-      p: {
-        "margin-bottom": "1.2em",
-        "text-align": "left",
-      },
-      "h1,h2,h3,h4,h5,h6": {
-        "font-family": "Georgia, serif",
-        "color": `${READER_HEADING_COLOR} !important`,
-        "margin-bottom": "0.75em",
-        "margin-top": "1.5em",
-      },
-      "i,em,cite": {
-        "color": `${READER_MUTED_COLOR} !important`,
-      },
-      a: {
-        "color": "#d6b95f !important",
-        "text-decoration": "none",
-      },
-      ".lumina-hl-yellow": { "background": "rgba(250,204,21,0.28)", "border-radius": "2px" },
-      ".lumina-hl-blue":   { "background": "rgba(59,130,246,0.28)", "border-radius": "2px" },
-      ".lumina-hl-green":  { "background": "rgba(34,197,94,0.22)",  "border-radius": "2px" },
-      ".lumina-hl-red":    { "background": "rgba(239,68,68,0.22)",  "border-radius": "2px" },
-      ".lumina-search":    { "background": "rgba(201,168,76,0.4)",  "border-radius": "2px", "outline": "1px solid rgba(201,168,76,0.6)" },
-    });
+    applyReaderTheme(rendition);
 
     // Re-apply highlights every time a new section renders
     rendition.on("rendered", (_section: unknown, view: { contents?: { document?: Document } }) => {
@@ -395,6 +453,7 @@ export default function EpubRenderer({
     onInitialDisplayComplete?.();
   }, [
     epubPath, fontSize, lineHeight,
+    applyReaderTheme,
     applyHighlights, findChapterIndex, scheduleSave,
     setCurrentCfi, setPercentComplete, setCurrentChapterIndex,
     onTocReady, initialCfi, onInitialDisplayComplete,
@@ -424,15 +483,10 @@ export default function EpubRenderer({
 
   // Update font styles without full reinit
   useEffect(() => {
-    renditionRef.current?.themes.default({
-      body: {
-        "font-size": `${fontSize}px`,
-        "line-height": String(lineHeight),
-        "color": `${READER_TEXT_COLOR} !important`,
-        "background": `${READER_BACKGROUND} !important`,
-      },
-    });
-  }, [fontSize, lineHeight]);
+    const rendition = renditionRef.current;
+    if (!rendition) return;
+    applyReaderTheme(rendition);
+  }, [applyReaderTheme]);
 
   // Re-apply highlights when annotation store updates
   useEffect(() => { applyHighlights(); }, [applyHighlights]);

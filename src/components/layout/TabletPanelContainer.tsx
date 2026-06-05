@@ -49,7 +49,7 @@ function PortraitLayout({
         <ReaderPanel onImport={onImport} />
       </div>
 
-      <div className="h-px bg-white/5 flex-shrink-0" />
+      <div className="h-px bg-ink/5 flex-shrink-0" />
 
       {/* Visual — bottom 40 % */}
       <div className="flex-[2] overflow-hidden min-h-0">
@@ -82,7 +82,7 @@ function LandscapeLayout({
         <ReaderPanel onImport={onImport} />
       </div>
 
-      <div className="h-px bg-white/5 flex-shrink-0" />
+      <div className="h-px bg-ink/5 flex-shrink-0" />
 
       {/* Visual — bottom 40 % */}
       <div className="flex-[2] overflow-hidden min-h-0">

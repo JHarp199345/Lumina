@@ -285,7 +285,7 @@ export default function StructuredTextRenderer({
 
   return (
     <div
-      className="relative h-full w-full overflow-hidden bg-[radial-gradient(ellipse_at_top,#0c2338_0%,#071525_58%,#04111f_100%)] px-6 py-5 text-sky-100/85"
+      className="reader-paper-surface relative h-full w-full overflow-hidden bg-reader px-6 py-5 text-ink"
       onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
         const x = event.clientX - rect.left;
@@ -309,8 +309,8 @@ export default function StructuredTextRenderer({
       }}
       style={{ fontSize: `${fontSize}px`, lineHeight }}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-sky-200/[0.035] to-transparent" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#04111f] to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-ink/[0.035] to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-reader to-transparent" />
       {isCover ? (
         <div className="relative z-10 flex h-full items-center justify-center">
           {activeBook.coverImage ? (
@@ -319,7 +319,7 @@ export default function StructuredTextRenderer({
               <img
                 src={activeBook.coverImage}
                 alt={`${activeBook.title} cover`}
-                className="relative max-h-[92%] max-w-[86%] rounded-md border border-sky-100/12 object-contain shadow-2xl shadow-black/55"
+                className="relative max-h-[92%] max-w-[86%] rounded-md border border-hair object-contain shadow-2xl shadow-black/55"
                 draggable={false}
               />
             </div>
@@ -329,10 +329,10 @@ export default function StructuredTextRenderer({
                 <p className="mb-4 text-xs uppercase tracking-[0.26em] text-lumina-gold/65">
                   Lumina
                 </p>
-                <h2 className="font-serif text-3xl leading-tight text-sky-50/92">
+                <h2 className="font-serif text-3xl leading-tight text-ink">
                   {activeBook.title}
                 </h2>
-                <p className="mt-4 text-sm uppercase tracking-[0.18em] text-sky-100/38">
+                <p className="mt-4 text-sm uppercase tracking-[0.18em] text-ink-faint">
                   {activeBook.author}
                 </p>
               </div>
@@ -341,19 +341,19 @@ export default function StructuredTextRenderer({
         </div>
       ) : (
         <div className="relative z-10 mx-auto flex h-full max-w-[680px] flex-col overflow-hidden">
-          <div className="mb-4 flex items-center justify-between border-b border-sky-100/8 pb-3">
+          <div className="mb-4 flex items-center justify-between border-b border-hair pb-3">
             <p className="text-[10px] uppercase tracking-[0.22em] text-lumina-gold/58">
               {activeBook.title}
             </p>
-            <p className="text-[10px] uppercase tracking-[0.16em] text-sky-100/28">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-ink-faint">
               {pageIndex + 1} / {Math.max(1, chapterPages[currentChapterIndex]?.length ?? 1)}
             </p>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 font-serif text-sky-100/90 [text-wrap:pretty]">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 font-serif text-ink [text-wrap:pretty]">
             {currentText.split(/\n{2,}/).map((paragraph, index) => (
               <p
                 key={index}
-                className={`mb-5 text-sky-100/88 ${
+                className={`mb-5 text-ink ${
                   index === 0
                     ? "first-letter:float-left first-letter:mr-2 first-letter:font-serif first-letter:text-[3.1em] first-letter:leading-[0.85] first-letter:text-lumina-gold/80"
                     : ""

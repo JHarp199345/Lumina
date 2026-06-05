@@ -22,7 +22,7 @@ import LibraryPanel from "@/components/common/LibraryPanel";
 import type { StyleSeedId, BookStructure } from "@/types";
 
 function App() {
-  const { resolvedTheme, hasCompletedOnboarding, setApiKeyConfigured } = useSettingsStore();
+  const { theme, resolvedTheme, hasCompletedOnboarding, setApiKeyConfigured } = useSettingsStore();
   const {
     activeBook,
     activeStructure,
@@ -185,7 +185,7 @@ function App() {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     mq.addEventListener("change", applyTheme);
     return () => mq.removeEventListener("change", applyTheme);
-  }, [resolvedTheme]);
+  }, [theme, resolvedTheme]);
 
   const handleImport = async () => {
     let failed = false;
@@ -255,8 +255,8 @@ function App() {
   };
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-[#03101d] p-3 text-white sm:p-4">
-      <div className="flex h-full overflow-hidden rounded-xl border border-sky-200/16 bg-surface-dark shadow-2xl shadow-black/35">
+    <div className="h-[100dvh] overflow-hidden bg-app p-3 text-ink sm:p-4">
+      <div className="flex h-full overflow-hidden rounded-xl border border-hair bg-surface-dark shadow-2xl shadow-black/35">
         <SideRail
           onImport={handleImport}
           onLibraryOpen={() => setShowLibrary(true)}
@@ -299,13 +299,13 @@ function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim backdrop-blur-sm"
           >
-            <div className="w-[min(560px,calc(100vw-2rem))] rounded-xl border border-sky-200/14 bg-surface-dark px-5 py-4 shadow-2xl">
+            <div className="w-[min(560px,calc(100vw-2rem))] rounded-xl border border-hair bg-surface-dark px-5 py-4 shadow-2xl">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm text-sky-50/80">{importProgress}</p>
-                  <p className="mt-1 text-xs text-sky-100/30">
+                  <p className="text-sm text-ink/80">{importProgress}</p>
+                  <p className="mt-1 text-xs text-ink-faint">
                     {importFailed
                       ? "The failed step is listed below."
                       : "Large collections can take a moment."}
@@ -318,7 +318,7 @@ function App() {
                       setImportFailed(false);
                       setImportProgress("");
                     }}
-                    className="rounded-md border border-sky-200/15 px-3 py-1 text-xs text-sky-50/65 transition hover:border-sky-100/30 hover:text-sky-50"
+                    className="rounded-md border border-sky-200/15 px-3 py-1 text-xs text-ink-soft transition hover:border-hair hover:text-ink"
                   >
                     Close
                   </button>
@@ -326,11 +326,11 @@ function App() {
               </div>
 
               {importDetails.length > 0 && (
-                <div className="mt-4 max-h-48 space-y-1 overflow-auto rounded-lg border border-sky-200/10 bg-black/20 p-3">
+                <div className="mt-4 max-h-48 space-y-1 overflow-auto rounded-lg border border-hair bg-black/20 p-3">
                   {importDetails.map((detail, index) => (
                     <p
                       key={`${detail}-${index}`}
-                      className="break-words font-mono text-[11px] leading-relaxed text-sky-50/45"
+                      className="break-words font-mono text-[11px] leading-relaxed text-ink/45"
                     >
                       {detail}
                     </p>

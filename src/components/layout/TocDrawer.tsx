@@ -28,7 +28,7 @@ export default function TocDrawer({ open, onClose, side = "left" }: Props) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="absolute inset-0 bg-black/60 z-30"
+            className="absolute inset-0 bg-scrim z-30"
             onClick={onClose}
             aria-hidden="true"
           />

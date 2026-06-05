@@ -18,13 +18,13 @@ export default function ThemeDisplay() {
         transition={{ duration: 0.4 }}
         className="flex items-center gap-2"
       >
-        <span className="text-xs text-white/20 font-medium tracking-wider uppercase">
+        <span className="text-xs text-ink-faint font-medium tracking-wider uppercase">
           Themes
         </span>
         <div className="flex items-center gap-0 flex-wrap">
           {currentThemes.map((theme, i) => (
-            <span key={i} className="text-xs text-white/45">
-              {i > 0 && <span className="text-white/15 mx-1.5">·</span>}
+            <span key={i} className="text-xs text-ink-soft">
+              {i > 0 && <span className="text-ink-faint mx-1.5">·</span>}
               <span className="capitalize">{theme}</span>
             </span>
           ))}

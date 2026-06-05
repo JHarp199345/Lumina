@@ -157,7 +157,12 @@ export function useBookOrchestration() {
     [setActiveSemanticMap]
   );
 
-  // ── Regenerate all images (keeps semantic map) ───────────────────────────────
+  // ── Regenerate all images (keeps the plan; lazy from current position) ───────
+  //
+  // Wipes every cached image, then INSTANTLY repaints only the scene block the
+  // reader is currently in. The rest regenerate lazily through the read-ahead
+  // trigger as the reader reaches them — no whole-book churn, minimal quota.
+  // The narrative plan (threads, briefs) is untouched; only pixels are remade.
 
   const regenerateAllImages = useCallback(async () => {
     const state = useBookStore.getState();
@@ -166,13 +171,38 @@ export function useBookOrchestration() {
     const seedId = state.activeStyleSeed;
     if (!map || !seedId) return;
 
-    // Clear image cache from DB and all in-memory image state atomically
+    diagnosticInfo("regenerate_all.start", "Regenerating images from current position", {
+      bookId: map.bookId,
+      scenes: map.scenes.length,
+    });
+
+    // 1. Wipe all cached images (DB + memory + queue + current display).
     await storage.deleteImages(map.bookId).catch(() => {});
     clearQueue();
-    clearImageCache(); // clears imageCache record, currentImage, and currentThemes
+    clearImageCache();
 
-    // Re-queue all scenes in reading order
-    await _queueGenerations(map.scenes, map.bookId);
+    // 2. Find the scene block the reader is currently in (most recently passed).
+    const wordPosition = useReaderStore.getState().wordPosition;
+    const chapters = state.activeStructure?.chapters ?? [];
+    const generatable = map.scenes.filter((scene) => {
+      const beat = map.storyboard?.beats.find((b) => b.sceneId === scene.id);
+      return beat?.generationIntent !== "planned_only";
+    });
+
+    let current: IdentifiedScene | undefined;
+    let bestPos = -Infinity;
+    for (const scene of generatable) {
+      const pos = computeSceneWordPosition(scene, chapters);
+      if (pos <= wordPosition && pos > bestPos) {
+        bestPos = pos;
+        current = scene;
+      }
+    }
+    if (!current) current = generatable[0];
+
+    // 3. Instantly repaint the current block. The read-ahead trigger handles the
+    //    rest as the reader advances (it enqueues any scene with no cached image).
+    await _ensureSceneImage(current, seedId, map.bookId);
   }, [clearQueue, clearImageCache]);
 
   // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -325,12 +355,14 @@ export function useBookOrchestration() {
     ]
   );
 
-  const _ensureOpeningImage = useCallback(
-    async (semanticMap: { scenes: IdentifiedScene[] }, styleSeedId: StyleSeedId, semanticBookId: string) => {
-      const openingScene = semanticMap.scenes[0];
-      if (!openingScene) return;
+  // Generate + display a specific scene's image immediately. Used for the
+  // opening image and for the current block on regenerate-all. On failure it
+  // queues the scene for the background processor to retry.
+  const _ensureSceneImage = useCallback(
+    async (scene: IdentifiedScene | undefined, styleSeedId: StyleSeedId, semanticBookId: string) => {
+      if (!scene) return;
 
-      const cached = useImageStore.getState().imageCache[openingScene.id];
+      const cached = useImageStore.getState().imageCache[scene.id];
       if (cached) {
         setCurrentImage(cached);
         setCurrentThemes(cached.emotionalThemes);
@@ -345,7 +377,7 @@ export function useBookOrchestration() {
       setIsGenerating(true);
       try {
         const generated = await generateImage({
-          scene: openingScene,
+          scene,
           styleSeed,
           bookId: semanticBookId,
           googleApiKey: googleKey,
@@ -359,25 +391,25 @@ export function useBookOrchestration() {
         addToCache(generated);
         setCurrentImage(generated);
         setCurrentThemes(generated.emotionalThemes);
-        console.info("[Orchestration] Opening image committed:", generated.sceneId);
-        diagnosticInfo("image.opening.committed", "Opening image committed", {
+        console.info("[Orchestration] Scene image committed:", generated.sceneId);
+        diagnosticInfo("image.scene.committed", "Scene image committed", {
           sceneId: generated.sceneId,
           bookId: semanticBookId,
           filePath: generated.filePath,
         });
       } catch (err) {
-        console.warn("[Orchestration] Opening image failed:", err);
-        diagnosticError("image.opening.failed", "Opening image failed", {
+        console.warn("[Orchestration] Scene image failed:", err);
+        diagnosticError("image.scene.failed", "Scene image failed", {
           semanticBookId,
-          sceneId: openingScene.id,
+          sceneId: scene.id,
           error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
         });
         enqueue({
-          sceneId: openingScene.id,
+          sceneId: scene.id,
           bookId: semanticBookId,
           priority: -1000,
           status: "pending",
-          description: openingScene.directorBrief?.finalPrompt || openingScene.imageDescription || "",
+          description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
         });
       } finally {
         setIsGenerating(false);
@@ -386,24 +418,12 @@ export function useBookOrchestration() {
     [addToCache, enqueue, setCurrentImage, setCurrentThemes, setIsGenerating]
   );
 
-  const _queueGenerations = useCallback(
-    async (scenes: IdentifiedScene[], bookId: string) => {
-      scenes.forEach((scene, i) => {
-        if (useImageStore.getState().imageCache[scene.id]) return;
-        const beat = useBookStore
-          .getState()
-          .activeSemanticMap?.storyboard?.beats.find((item) => item.sceneId === scene.id);
-        if (beat?.generationIntent === "planned_only") return;
-        enqueue({
-          sceneId: scene.id,
-          bookId,
-          priority: i + 1,
-          status: "pending",
-          description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
-        });
-      });
+  // Opening image is just the first scene's image, displayed immediately.
+  const _ensureOpeningImage = useCallback(
+    async (semanticMap: { scenes: IdentifiedScene[] }, styleSeedId: StyleSeedId, semanticBookId: string) => {
+      await _ensureSceneImage(semanticMap.scenes[0], styleSeedId, semanticBookId);
     },
-    [enqueue]
+    [_ensureSceneImage]
   );
 
   return { startOrchestration, reAnalyzeBook, regenerateAllImages };

@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  /* Lumina color palette */
-  --color-lumina-gold: #c9a84c;
-  --color-lumina-gold-light: #e0c078;
+  /* Lumina gold — overridden per theme below */
+  --color-lumina-gold: var(--lum-gold);
+  --color-lumina-gold-light: var(--lum-gold-soft);
   --color-lumina-gold-dark: #a07830;
 
   --color-surface-dark: #081827;
@@ -11,8 +11,61 @@
   --color-surface-reader: #071525;
   --color-surface-elevated: #0c2136;
 
+  /* ── Semantic theme tokens (flip between dark & paper) ────────────────────
+     These are the surfaces/ink/borders the whole app should use. Each resolves
+     to a runtime var (--lum-*) defined per [data-theme] so a single attribute
+     swap repaints everything. Opacity modifiers (text-ink/60) work via color-mix. */
+  --color-app: var(--lum-app);           /* outer shell */
+  --color-panel: var(--lum-panel);        /* rails, nav, side panels */
+  --color-panel-2: var(--lum-panel-2);    /* elevated cards/modals */
+  --color-reader: var(--lum-reader);      /* the reading page */
+  --color-ink: var(--lum-ink);            /* primary text */
+  --color-ink-soft: var(--lum-ink-soft);  /* secondary text */
+  --color-ink-faint: var(--lum-ink-faint);/* tertiary/labels */
+  --color-hair: var(--lum-hair);          /* hairline borders */
+  --color-scrim: var(--lum-scrim);        /* modal backdrops / overlays */
+  --color-gold: var(--lum-gold);
+  --color-gold-soft: var(--lum-gold-soft);
+
   /* Typography */
   --font-serif: "Georgia", "Times New Roman", serif;
+}
+
+/* ── Dark theme (default) — current Lumina night-reader look, unchanged ───── */
+:root,
+[data-theme="dark"] {
+  --lum-app: #03101d;
+  --lum-panel: #06182a;
+  --lum-panel-2: #0c2136;
+  --lum-reader: #071525;
+  --lum-ink: #dcefff;
+  --lum-ink-soft: #9fc3dd;
+  --lum-ink-faint: #5d7a90;
+  --lum-hair: rgba(125, 183, 218, 0.14);
+  --lum-scrim: rgba(0, 0, 0, 0.6);
+  --lum-gold: #c9a84c;
+  --lum-gold-soft: #e0c078;
+}
+
+/* ── Light theme — "paper mode": soft gray paper + newspaper ink ──────────── */
+[data-theme="light"] {
+  --lum-app: #e3dfd4;       /* matte paper-gray shell */
+  --lum-panel: #ece8df;     /* soft paper panels */
+  --lum-panel-2: #f3f0e8;   /* elevated cards */
+  --lum-reader: #f5f1e8;    /* warm off-white reading page */
+  --lum-ink: #202022;       /* newspaper ink, near-black but not digital black */
+  --lum-ink-soft: #46464a;  /* smoky gray */
+  --lum-ink-faint: #75726d; /* muted warm gray */
+  --lum-hair: rgba(45, 39, 28, 0.15);
+  --lum-scrim: rgba(28, 24, 18, 0.36);
+  --lum-gold: #8d6b24;      /* antique gold, less luminous */
+  --lum-gold-soft: #a98a3d;
+
+  /* Keep legacy surface tokens coherent with the paper palette */
+  --color-surface-dark: var(--lum-panel);
+  --color-surface-darker: var(--lum-app);
+  --color-surface-reader: var(--lum-reader);
+  --color-surface-elevated: var(--lum-panel-2);
 }
 
 /* Base reset */
@@ -28,22 +81,31 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background-color: #050f1c;
-  color: rgba(255, 255, 255, 0.85);
+  background-color: var(--lum-app);
+  color: var(--lum-ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Light theme overrides */
-[data-theme="light"] {
-  --color-surface-dark: #f4f2ee;
-  --color-surface-darker: #ebe8e2;
-  --color-surface-reader: #faf9f7;
-  --color-surface-elevated: #ffffff;
+/* Paper surface: invisible in dark mode, subtly textured in light mode. */
+.reader-paper-surface {
+  background-color: var(--lum-reader);
 }
 
-[data-theme="light"] body {
-  color: rgba(0, 0, 0, 0.8);
+[data-theme="light"] .reader-paper-surface {
+  background-image:
+    radial-gradient(circle at 14% 21%, rgba(86, 68, 42, 0.04) 0 0.8px, transparent 1.3px),
+    radial-gradient(circle at 72% 58%, rgba(255, 255, 255, 0.42) 0 0.9px, transparent 1.45px),
+    repeating-linear-gradient(8deg, rgba(66, 52, 30, 0.012) 0 1px, transparent 1px 9px),
+    repeating-linear-gradient(96deg, rgba(255, 255, 255, 0.10) 0 1px, transparent 1px 13px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.18), transparent 18%, rgba(88, 72, 42, 0.018) 52%, transparent 82%);
+  background-size: 17px 23px, 31px 29px, 100% 9px, 100% 13px, 100% 100%;
+  background-blend-mode: multiply, screen, multiply, screen, normal;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.48),
+    inset 0 -1px 0 rgba(61, 52, 34, 0.075),
+    inset 10px 0 28px rgba(71, 56, 31, 0.018),
+    inset -10px 0 28px rgba(255, 255, 255, 0.12);
 }
 
 /* Scrollbar */

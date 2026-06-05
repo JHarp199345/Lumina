@@ -33,7 +33,7 @@ export default function SideRail({
   };
 
   return (
-    <aside className="relative w-16 flex-shrink-0 flex flex-col items-center border-r border-sky-200/12 bg-[#06182a] py-3">
+    <aside className="relative w-16 flex-shrink-0 flex flex-col items-center border-r border-hair bg-panel py-3">
       {/* Reading progress bar — left edge, full height, fills as reader advances */}
       <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-white/4">
         <div
@@ -103,7 +103,7 @@ function RailButton({
           ? "border-lumina-gold/45 bg-lumina-gold/12 text-lumina-gold"
           : primary
             ? "border-lumina-gold/30 bg-lumina-gold/10 text-lumina-gold/85 hover:bg-lumina-gold/15 hover:text-lumina-gold"
-            : "border-sky-200/14 bg-sky-100/[0.035] text-sky-100/48 hover:border-sky-100/24 hover:bg-sky-100/[0.07] hover:text-sky-50/80",
+            : "border-hair bg-ink/[0.05] text-ink-soft hover:border-hair hover:bg-ink/[0.07] hover:text-ink/80",
       ].join(" ")}
     >
       {children}

@@ -251,7 +251,7 @@ export default function HighlightLayer() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.95 }}
             transition={{ duration: 0.12 }}
-            className="fixed z-50 flex items-center gap-1.5 px-2 py-1.5 bg-surface-dark/95 border border-white/10 rounded-lg shadow-xl backdrop-blur-sm"
+            className="fixed z-50 flex items-center gap-1.5 px-2 py-1.5 bg-surface-dark/95 border border-hair rounded-lg shadow-xl backdrop-blur-sm"
             style={{
               left: selectionMenu.x,
               top: selectionMenu.y,
@@ -298,9 +298,9 @@ export default function HighlightLayer() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 bg-surface-dark border border-white/10 rounded-xl shadow-2xl p-4 space-y-3"
+              className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 bg-surface-dark border border-hair rounded-xl shadow-2xl p-4 space-y-3"
             >
-              <p className="text-xs text-white/40 font-medium">Add a note</p>
+              <p className="text-xs text-ink-faint font-medium">Add a note</p>
               <textarea
                 autoFocus
                 value={noteText}
@@ -314,7 +314,7 @@ export default function HighlightLayer() {
                 }}
                 placeholder="Your thoughts..."
                 rows={3}
-                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/70 placeholder:text-white/15 focus:outline-none focus:border-lumina-gold/40 resize-none transition-colors"
+                className="w-full bg-black/30 border border-hair rounded-lg px-3 py-2 text-sm text-ink-soft placeholder:text-ink-faint focus:outline-none focus:border-lumina-gold/40 resize-none transition-colors"
               />
               <div className="flex gap-2 justify-end">
                 <button
@@ -322,7 +322,7 @@ export default function HighlightLayer() {
                     setNoteModal(null);
                     setNoteText("");
                   }}
-                  className="px-3 py-1.5 rounded text-xs text-white/30 hover:text-white/50 transition-colors"
+                  className="px-3 py-1.5 rounded text-xs text-ink-faint hover:text-ink-soft transition-colors"
                 >
                   Skip
                 </button>
@@ -333,7 +333,7 @@ export default function HighlightLayer() {
                   Save note
                 </button>
               </div>
-              <p className="text-xs text-white/15">⌘↵ to save</p>
+              <p className="text-xs text-ink-faint">⌘↵ to save</p>
             </motion.div>
           </>
         )}

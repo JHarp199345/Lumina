@@ -30,7 +30,7 @@ export default function OnboardingModal({ onComplete }: OnboardingModalProps) {
         initial={{ opacity: 0, y: 20, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ delay: 0.1, type: "spring", damping: 25 }}
-        className="w-full max-w-md bg-surface-dark border border-white/8 rounded-2xl overflow-hidden shadow-2xl"
+        className="w-full max-w-md bg-surface-dark border border-hair rounded-2xl overflow-hidden shadow-2xl"
       >
         <AnimatePresence mode="wait">
           {step === "welcome" && (
@@ -65,8 +65,8 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
           <Sparkles size={18} className="text-lumina-gold" />
         </div>
         <div>
-          <h1 className="text-white/85 font-semibold text-lg">Welcome to Lumina</h1>
-          <p className="text-white/30 text-xs">Symbolic reading, amplified</p>
+          <h1 className="text-ink/85 font-semibold text-lg">Welcome to Lumina</h1>
+          <p className="text-ink-faint text-xs">Symbolic reading, amplified</p>
         </div>
       </div>
 
@@ -88,11 +88,11 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
             desc: "Atmospheric and symbolic, not literal. Your mind does the real work.",
           },
         ].map(({ icon: Icon, title, desc }) => (
-          <div key={title} className="flex gap-3 p-3 rounded-xl bg-white/3">
+          <div key={title} className="flex gap-3 p-3 rounded-xl bg-ink/[0.04]">
             <Icon size={15} className="text-lumina-gold/60 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-xs text-white/70 font-medium">{title}</p>
-              <p className="text-xs text-white/30 leading-relaxed">{desc}</p>
+              <p className="text-xs text-ink-soft font-medium">{title}</p>
+              <p className="text-xs text-ink-faint leading-relaxed">{desc}</p>
             </div>
           </div>
         ))}
@@ -126,7 +126,7 @@ function ApiKeyStep({
       <ApiKeySetup onComplete={onNext} isOnboarding />
       <button
         onClick={onSkip}
-        className="w-full py-2 text-xs text-white/20 hover:text-white/40 transition-colors"
+        className="w-full py-2 text-xs text-ink-faint hover:text-ink-faint transition-colors"
       >
         Skip for now — I'll add my key in settings
       </button>
@@ -153,8 +153,8 @@ function ReadyStep({ onComplete }: { onComplete: () => void }) {
       </div>
 
       <div className="space-y-2">
-        <h2 className="text-white/80 font-serif text-xl">You're ready</h2>
-        <p className="text-white/30 text-sm leading-relaxed">
+        <h2 className="text-ink/80 font-serif text-xl">You're ready</h2>
+        <p className="text-ink-faint text-sm leading-relaxed">
           Open a book with the button in the top bar. Choose your visual style and begin.
         </p>
       </div>
@@ -166,7 +166,7 @@ function ReadyStep({ onComplete }: { onComplete: () => void }) {
         Open Lumina
       </button>
 
-      <p className="text-xs text-white/15">
+      <p className="text-xs text-ink-faint">
         Personal use. Process only books you own. Text is analyzed via your API key — never stored
         by Lumina.
       </p>

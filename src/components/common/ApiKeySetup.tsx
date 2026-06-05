@@ -39,8 +39,8 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
     >
       {isOnboarding && (
         <div className="space-y-1">
-          <h2 className="text-white/80 font-medium text-sm">Connect your API key</h2>
-          <p className="text-white/30 text-xs leading-relaxed">
+          <h2 className="text-ink/80 font-medium text-sm">Connect your API key</h2>
+          <p className="text-ink-faint text-xs leading-relaxed">
             Lumina uses Google AI Studio to analyze books and generate imagery. Your key is stored
             locally and never shared.
           </p>
@@ -49,7 +49,7 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
 
       {/* Google AI Key */}
       <div className="space-y-2">
-        <label className="text-xs text-white/50 flex items-center gap-2">
+        <label className="text-xs text-ink-soft flex items-center gap-2">
           <Key size={11} />
           Google AI Studio Key
           <span className="text-red-400/60">required</span>
@@ -59,7 +59,7 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
           value={googleKey}
           onChange={(e) => setGoogleKey(e.target.value)}
           placeholder="AIzaSy••••••••••••••••••••••••••••"
-          className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white/60 placeholder:text-white/15 focus:outline-none focus:border-lumina-gold/50 transition-colors font-mono"
+          className="w-full bg-black/30 border border-hair rounded-lg px-3 py-2.5 text-sm text-ink-soft placeholder:text-ink-faint focus:outline-none focus:border-lumina-gold/50 transition-colors font-mono"
         />
         <a
           href="https://aistudio.google.com/app/apikey"
@@ -74,17 +74,17 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
 
       {/* Fal.ai Key (optional) */}
       <div className="space-y-2">
-        <label className="text-xs text-white/30 flex items-center gap-2">
+        <label className="text-xs text-ink-faint flex items-center gap-2">
           <Key size={11} />
           fal.ai Key
-          <span className="text-white/20">optional — fallback image generation</span>
+          <span className="text-ink-faint">optional — fallback image generation</span>
         </label>
         <input
           type="password"
           value={falKey}
           onChange={(e) => setFalKey(e.target.value)}
           placeholder="••••••••••••••••••••••••"
-          className="w-full bg-black/20 border border-white/5 rounded-lg px-3 py-2.5 text-sm text-white/40 placeholder:text-white/10 focus:outline-none focus:border-white/20 transition-colors font-mono"
+          className="w-full bg-black/20 border border-hair rounded-lg px-3 py-2.5 text-sm text-ink-faint placeholder:text-ink-faint focus:outline-none focus:border-hair transition-colors font-mono"
         />
       </div>
 
@@ -155,7 +155,7 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
         </button>
       )}
 
-      <p className="text-xs text-white/15 leading-relaxed">
+      <p className="text-xs text-ink-faint leading-relaxed">
         Your key is stored locally on this device in Lumina's private data directory. It is never
         transmitted except directly to Google's API.
       </p>

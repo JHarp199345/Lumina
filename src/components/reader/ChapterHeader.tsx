@@ -36,10 +36,10 @@ export default function ChapterHeader({
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -6 }}
         transition={{ duration: 0.35, ease: [0.25, 0.1, 0.25, 1] }}
-        className="flex-shrink-0 px-8 pt-6 pb-5 border-b border-white/5"
+        className="flex-shrink-0 px-8 pt-6 pb-5 border-b border-hair"
       >
         {/* Book title — smallest, most muted, always present */}
-        <p className="text-xs tracking-[0.18em] text-white/20 uppercase mb-1 font-medium">
+        <p className="text-xs tracking-[0.18em] text-ink-faint uppercase mb-1 font-medium">
           {bookTitle}
         </p>
 
@@ -52,7 +52,7 @@ export default function ChapterHeader({
 
         {/* Primary chapter title — largest, most prominent */}
         <h1
-          className="font-serif text-white/90 leading-tight tracking-tight"
+          className="font-serif text-ink leading-tight tracking-tight"
           style={{ fontSize: `${Math.round(fontSize * 1.55)}px` }}
         >
           {display.title}
@@ -61,7 +61,7 @@ export default function ChapterHeader({
         {/* Subtitle — e.g. "The Reaper" from "Chapter One: The Reaper" */}
         {display.subtitle && (
           <p
-            className="font-serif text-white/45 leading-snug mt-1 italic"
+            className="font-serif text-ink-soft leading-snug mt-1 italic"
             style={{ fontSize: `${Math.round(fontSize * 1.1)}px` }}
           >
             {display.subtitle}

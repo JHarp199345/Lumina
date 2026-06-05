@@ -78,8 +78,8 @@ export default function DesktopLayout({ onImport, onLibraryOpen }: DesktopLayout
           <VisualPanel />
         </Panel>
 
-        <Separator className="group relative w-1 flex-shrink-0 bg-white/5 hover:bg-white/15 transition-colors duration-150 cursor-col-resize">
-          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-white/10 group-hover:bg-lumina-gold/40 transition-colors duration-150" />
+        <Separator className="group relative w-1 flex-shrink-0 bg-ink/5 hover:bg-white/15 transition-colors duration-150 cursor-col-resize">
+          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-ink/10 group-hover:bg-lumina-gold/40 transition-colors duration-150" />
         </Separator>
 
         <Panel
