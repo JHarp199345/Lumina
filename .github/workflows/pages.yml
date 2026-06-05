@@ -10,6 +10,9 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -26,6 +29,9 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
 
       - name: Install dependencies
         run: npm ci
