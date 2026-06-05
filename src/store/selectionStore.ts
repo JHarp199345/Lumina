@@ -2,29 +2,43 @@ import { create } from "zustand";
 import type { HighlightColor } from "@/types";
 
 /**
- * selectionStore — the "just highlighted" refinement state.
+ * selectionStore — drives the selection action bar.
  *
- * When the reader selects text in the book, a highlight is created and saved
- * immediately (one step). This store holds the id/color of that fresh highlight
- * so a small action bar can offer refinement (change lens, add note, remove)
- * without requiring the reader to have done anything beyond selecting.
+ * Two phases:
+ *   pending  — text is selected but not yet highlighted. The bar offers the lens
+ *              choices ("Highlight as…"). Highlighting is a deliberate tap, not
+ *              automatic, so selecting text to read or copy never marks the book.
+ *   active   — a highlight was just created. The bar offers refinement: recolour,
+ *              add a note, remove.
  */
 
+export interface PendingSelection {
+  cfiRange: string;
+  text: string;
+}
+
 interface SelectionStore {
+  // Phase 1: a live selection awaiting the "Highlight" action
+  pending: PendingSelection | null;
+  setPending: (pending: PendingSelection | null) => void;
+
+  // Phase 2: the freshly-created highlight being refined
   activeHighlightId: string | null;
   activeColor: HighlightColor;
-  activeText: string;
-  setActive: (id: string, color: HighlightColor, text: string) => void;
+  setActive: (id: string, color: HighlightColor) => void;
   setColor: (color: HighlightColor) => void;
+
   clear: () => void;
 }
 
 export const useSelectionStore = create<SelectionStore>()((set) => ({
+  pending: null,
+  setPending: (pending) => set({ pending }),
+
   activeHighlightId: null,
   activeColor: "yellow",
-  activeText: "",
-  setActive: (activeHighlightId, activeColor, activeText) =>
-    set({ activeHighlightId, activeColor, activeText }),
+  setActive: (activeHighlightId, activeColor) => set({ activeHighlightId, activeColor }),
   setColor: (activeColor) => set({ activeColor }),
-  clear: () => set({ activeHighlightId: null, activeText: "" }),
+
+  clear: () => set({ pending: null, activeHighlightId: null }),
 }));

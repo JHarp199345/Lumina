@@ -1,11 +1,12 @@
 /**
- * SelectionActionBar — appears after a passage is highlighted (which happens the
- * instant text is selected). It offers optional refinement without requiring any
- * action: change the lens colour, add a note, or remove the highlight. Doing
- * nothing keeps the highlight in the default lens.
+ * SelectionActionBar — the app's own selection menu (the OS callout bar with
+ * Copy/Share/Ask is system-level and cannot be extended by a web app).
  *
- * Anchored bottom-centre of the viewport so it is thumb-reachable on a tablet and
- * never depends on fragile in-iframe selection coordinates.
+ * Two phases, anchored bottom-centre (thumb-reachable on a tablet, no fragile
+ * in-iframe coordinate math):
+ *
+ *   PENDING  — text is selected, not yet highlighted. Tap a lens to highlight it.
+ *   ACTIVE   — just highlighted. Recolour, add a note, or remove. Auto-dismisses.
  */
 
 import { useEffect, useRef } from "react";
@@ -26,34 +27,54 @@ const LENSES: { color: HighlightColor; label: string; dot: string }[] = [
 
 const AUTO_DISMISS_MS = 5500;
 
+type Win = Window & {
+  luminaCreateHighlight?: (cfiRange: string, text: string, color: HighlightColor) => string;
+  luminaSetHighlightColor?: (id: string, color: HighlightColor) => void;
+  luminaRemoveHighlight?: (id: string) => void;
+};
+
 export default function SelectionActionBar() {
-  const { activeHighlightId, activeColor, clear } = useSelectionStore();
+  const { pending, activeHighlightId, activeColor, setActive, setColor, clear } = useSelectionStore();
   const { addNote } = useAnnotationStore();
   const { activeBook } = useBookStore();
   const { openSunburst } = useDrawerStore();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auto-dismiss after a few seconds of inactivity.
+  const isActive = Boolean(activeHighlightId);
+  const isPending = Boolean(pending) && !isActive;
+  const visible = isActive || isPending;
+
+  // Auto-dismiss the ACTIVE bar after a few seconds. Pending stays until acted on
+  // or the selection clears (the renderer clears pending when selection collapses).
   useEffect(() => {
-    if (!activeHighlightId) return;
+    if (!isActive) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => clear(), AUTO_DISMISS_MS);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [activeHighlightId, activeColor, clear]);
+  }, [isActive, activeColor, clear]);
 
+  const win = window as Win;
+
+  // PENDING → tap a lens to create the highlight.
+  const highlightAs = (color: HighlightColor) => {
+    if (!pending) return;
+    const id = win.luminaCreateHighlight?.(pending.cfiRange, pending.text, color);
+    if (id) setActive(id, color);
+    else clear();
+  };
+
+  // ACTIVE → recolour in place.
   const recolour = (color: HighlightColor) => {
     if (!activeHighlightId) return;
-    (window as Window & { luminaSetHighlightColor?: (id: string, c: HighlightColor) => void })
-      .luminaSetHighlightColor?.(activeHighlightId, color);
-    useSelectionStore.getState().setColor(color);
+    win.luminaSetHighlightColor?.(activeHighlightId, color);
+    setColor(color);
   };
 
   const remove = () => {
     if (!activeHighlightId) return;
-    (window as Window & { luminaRemoveHighlight?: (id: string) => void })
-      .luminaRemoveHighlight?.(activeHighlightId);
+    win.luminaRemoveHighlight?.(activeHighlightId);
     clear();
   };
 
@@ -74,7 +95,7 @@ export default function SelectionActionBar() {
 
   return (
     <AnimatePresence>
-      {activeHighlightId && (
+      {visible && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -83,43 +104,48 @@ export default function SelectionActionBar() {
           className="fixed bottom-6 left-1/2 z-[58] -translate-x-1/2"
         >
           <div className="flex items-center gap-1.5 rounded-full border border-hair bg-surface-dark/95 px-2.5 py-2 shadow-2xl shadow-black/40 backdrop-blur-md">
-            <span className="pl-1 pr-1.5 text-[11px] font-medium text-ink-faint">Highlighted</span>
+            <span className="pl-1 pr-1 text-[11px] font-medium text-ink-faint">
+              {isActive ? "Highlighted" : "Highlight"}
+            </span>
 
             <div className="h-5 w-px bg-hair" />
 
-            {/* Lens recolour */}
+            {/* Lens choices — create (pending) or recolour (active) */}
             <div className="flex items-center gap-1 px-0.5">
               {LENSES.map(({ color, label, dot }) => (
                 <button
                   key={color}
-                  onClick={() => recolour(color)}
+                  onClick={() => (isActive ? recolour(color) : highlightAs(color))}
                   title={label}
                   aria-label={label}
-                  className={`h-6 w-6 rounded-full ring-1 transition-transform hover:scale-110 ${dot} ${
-                    activeColor === color ? "ring-2 ring-white/70" : "ring-white/20"
+                  className={`h-7 w-7 rounded-full ring-1 transition-transform hover:scale-110 active:scale-95 ${dot} ${
+                    isActive && activeColor === color ? "ring-2 ring-white/70" : "ring-white/25"
                   }`}
                 />
               ))}
             </div>
 
-            <div className="h-5 w-px bg-hair" />
-
-            <button
-              onClick={addNoteToHighlight}
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] text-lumina-gold/85 transition-colors hover:bg-lumina-gold/12 hover:text-lumina-gold"
-            >
-              <StickyNote size={13} />
-              Note
-            </button>
-
-            <button
-              onClick={remove}
-              title="Remove highlight"
-              aria-label="Remove highlight"
-              className="flex h-7 w-7 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-rose-500/12 hover:text-rose-300"
-            >
-              <Trash2 size={13} />
-            </button>
+            {/* Refinement actions only once a highlight exists */}
+            {isActive && (
+              <>
+                <div className="h-5 w-px bg-hair" />
+                <button
+                  onClick={addNoteToHighlight}
+                  className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] text-lumina-gold/85 transition-colors hover:bg-lumina-gold/12 hover:text-lumina-gold"
+                >
+                  <StickyNote size={13} />
+                  Note
+                </button>
+                <button
+                  onClick={remove}
+                  title="Remove highlight"
+                  aria-label="Remove highlight"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-rose-500/12 hover:text-rose-300"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </>
+            )}
 
             <button
               onClick={clear}

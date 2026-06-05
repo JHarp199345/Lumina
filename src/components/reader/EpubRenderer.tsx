@@ -231,36 +231,69 @@ export default function EpubRenderer({
     for (const h of getHighlightsForBook(bookId)) applyOneHighlight(h);
   }, [bookId, getHighlightsForBook, applyOneHighlight]);
 
-  // ── Instant highlight on text selection (one step) ─────────────────────────
+  // ── Selection → deliberate highlight ───────────────────────────────────────
   // The book renders in an iframe, so top-document selection listeners never see
-  // it. EPUB.js's own "selected" event fires inside the iframe and hands us the
-  // CFI directly. We create + persist + paint the highlight immediately, then let
-  // the action bar offer refinement (recolour / note / remove).
+  // it. We attach listeners to the iframe document (on each section render) and,
+  // when text is selected, surface a "Highlight" action bar (selectionStore.pending).
+  // Highlighting only happens when the reader taps a lens — selecting to read or
+  // copy never marks the book.
 
-  const DEFAULT_LENS: HighlightColor = "yellow";
-
-  const handleSelected = useCallback(
-    (cfiRange: string, contents: { window?: Window }) => {
+  // Read the current selection inside a rendered section and publish it as pending.
+  const publishSelection = useCallback(
+    (contents: { window?: Window; cfiFromRange?: (r: Range) => string }) => {
       const sel = contents?.window?.getSelection?.();
       const text = sel?.toString().trim() ?? "";
-      if (!cfiRange || text.length < 3) return;
+      if (!sel || sel.rangeCount === 0 || text.length < 3) {
+        // Only clear pending — never wipe an active (already-created) highlight bar.
+        if (useSelectionStore.getState().pending) useSelectionStore.getState().setPending(null);
+        return;
+      }
+      let cfiRange = "";
+      try {
+        cfiRange = contents.cfiFromRange?.(sel.getRangeAt(0)) ?? "";
+      } catch { cfiRange = ""; }
+      if (!cfiRange) return;
+      useSelectionStore.getState().setPending({ cfiRange, text });
+    },
+    []
+  );
 
+  // Attach selection detection to a freshly-rendered section's iframe document.
+  const wireSelectionDetection = useCallback(
+    (contents: { window?: Window; document?: Document; cfiFromRange?: (r: Range) => string } | undefined) => {
+      const doc = contents?.document;
+      if (!doc || !contents) return;
+      const onChange = () => publishSelection(contents);
+      doc.addEventListener("mouseup", onChange);
+      doc.addEventListener("touchend", onChange);
+      doc.addEventListener("selectionchange", onChange);
+    },
+    [publishSelection]
+  );
+
+  // Create + persist + paint a highlight from a pending selection. Returns the id.
+  const createHighlight = useCallback(
+    (cfiRange: string, text: string, color: HighlightColor): string => {
       const highlight: Highlight = {
         id: `h_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         bookId,
         cfiRange,
-        color: DEFAULT_LENS,
+        color,
         selectedText: text,
         createdAt: new Date().toISOString(),
       };
-
       addHighlight(highlight);
       applyOneHighlight(highlight);
-
-      // Clear the native selection so the lens is visible, not the selection band.
-      try { sel?.removeAllRanges(); } catch { /* ignore */ }
-
-      useSelectionStore.getState().setActive(highlight.id, highlight.color, text);
+      // Clear the native selection so the lens shows, not the selection band.
+      try {
+        const contents = renditionRef.current?.getContents?.() as unknown as
+          | Array<{ window?: Window }>
+          | { window?: Window }
+          | undefined;
+        const list = Array.isArray(contents) ? contents : contents ? [contents] : [];
+        list.forEach((c) => c.window?.getSelection?.()?.removeAllRanges());
+      } catch { /* ignore */ }
+      return highlight.id;
     },
     [bookId, addHighlight, applyOneHighlight]
   );
@@ -501,15 +534,16 @@ export default function EpubRenderer({
     // Inject reader + highlight + search-mark styles
     applyReaderTheme(rendition);
 
-    // Re-apply highlights every time a new section renders
-    rendition.on("rendered", (_section: unknown, view: { contents?: { document?: Document } }) => {
+    // Re-apply highlights + wire selection detection every time a section renders
+    rendition.on("rendered", (_section: unknown, view: { contents?: { document?: Document; window?: Window; cfiFromRange?: (r: Range) => string } }) => {
       applyHighlights();
       wireContentNavigation(view?.contents?.document);
+      wireSelectionDetection(view?.contents);
     });
 
-    // Instant highlight when text is selected inside the book iframe.
-    rendition.on("selected", (cfiRange: string, contents: { window?: Window }) => {
-      handleSelected(cfiRange, contents);
+    // EPUB.js also emits "selected" — use it as a secondary trigger.
+    rendition.on("selected", (_cfiRange: string, contents: { window?: Window; cfiFromRange?: (r: Range) => string }) => {
+      publishSelection(contents);
     });
 
     // Track location — single place progress is saved
@@ -544,7 +578,7 @@ export default function EpubRenderer({
   }, [
     epubPath, fontSize, lineHeight,
     applyReaderTheme,
-    applyHighlights, handleSelected, findChapterIndex, scheduleSave,
+    applyHighlights, wireSelectionDetection, publishSelection, findChapterIndex, scheduleSave,
     setCurrentCfi, setPercentComplete, setCurrentChapterIndex,
     onTocReady, initialCfi, onInitialDisplayComplete,
   ]);
@@ -595,8 +629,12 @@ export default function EpubRenderer({
       luminaClearSearchMarks?: () => void;
       luminaSetHighlightColor?: (id: string, color: HighlightColor) => void;
       luminaRemoveHighlight?:   (id: string) => void;
+      luminaCreateHighlight?:   (cfiRange: string, text: string, color: HighlightColor) => string;
     };
     const win = window as LuminaWin;
+
+    // Create a highlight from the pending selection (used by the action bar).
+    win.luminaCreateHighlight = (cfiRange, text, color) => createHighlight(cfiRange, text, color);
 
     // Recolour a highlight in place (used by the selection action bar).
     win.luminaSetHighlightColor = (id: string, color: HighlightColor) => {
@@ -697,11 +735,13 @@ export default function EpubRenderer({
       delete win.luminaClearSearchMarks;
       delete win.luminaSetHighlightColor;
       delete win.luminaRemoveHighlight;
+      delete win.luminaCreateHighlight;
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [
     goNextPage, goPrevPage, navigateToTarget,
     bookId, getHighlightsForBook, updateHighlightColor, removeHighlight, applyOneHighlight,
+    createHighlight,
   ]);
 
   return (
