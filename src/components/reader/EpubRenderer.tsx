@@ -14,9 +14,11 @@ import type { Book as EpubBook, Rendition, NavItem } from "epubjs";
 import { useReaderStore } from "@/store/readerStore";
 import { useBookStore } from "@/store/bookStore";
 import { useAnnotationStore } from "@/store/annotationStore";
+import { useSelectionStore } from "@/store/selectionStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { storage } from "@/storage";
 import { toAssetUrl } from "@/utils/tauriBridge";
+import type { Highlight, HighlightColor } from "@/types";
 
 interface EpubRendererProps {
   epubPath: string;
@@ -109,7 +111,8 @@ export default function EpubRenderer({
 
   const { setCurrentCfi, setPercentComplete, setCurrentChapterIndex } = useReaderStore();
   const { activeStructure } = useBookStore();
-  const { getHighlightsForBook } = useAnnotationStore();
+  const { getHighlightsForBook, addHighlight, removeHighlight, updateHighlightColor } =
+    useAnnotationStore();
   const { fontSize, lineHeight, theme } = useSettingsStore();
   // Resolve the active reader palette (re-resolves whenever the theme setting changes).
   const resolvedReaderTheme = theme === "system" ? useSettingsStore.getState().resolvedTheme() : theme;
@@ -207,23 +210,60 @@ export default function EpubRenderer({
 
   // ── Re-apply persisted highlights ─────────────────────────────────────────
 
-  const applyHighlights = useCallback(() => {
+  // Apply a single highlight to the rendition (remove-then-add so colour changes
+  // update in place). Shared by restore, fresh-selection, and recolour paths.
+  const applyOneHighlight = useCallback((h: { id: string; cfiRange: string; color: string }) => {
     const r = renditionRef.current;
-    if (!r) return;
-    for (const h of getHighlightsForBook(bookId)) {
-      if (!h.cfiRange || h.cfiRange.startsWith("dom:")) continue;
-      try {
-        r.annotations.remove(h.id, "highlight");
-        r.annotations.highlight(
-          h.cfiRange,
-          { id: h.id },
-          undefined,
-          HIGHLIGHT_CLASS[h.color] ?? "lumina-hl-yellow",
-          LENS_FILL[h.color] ?? LENS_FILL.yellow
-        );
-      } catch { /* CFI may not be on the visible section */ }
-    }
-  }, [bookId, getHighlightsForBook]);
+    if (!r || !h.cfiRange || h.cfiRange.startsWith("dom:")) return;
+    try {
+      r.annotations.remove(h.id, "highlight");
+      r.annotations.highlight(
+        h.cfiRange,
+        { id: h.id },
+        undefined,
+        HIGHLIGHT_CLASS[h.color] ?? "lumina-hl-yellow",
+        LENS_FILL[h.color] ?? LENS_FILL.yellow
+      );
+    } catch { /* CFI may not be on the visible section */ }
+  }, []);
+
+  const applyHighlights = useCallback(() => {
+    for (const h of getHighlightsForBook(bookId)) applyOneHighlight(h);
+  }, [bookId, getHighlightsForBook, applyOneHighlight]);
+
+  // ── Instant highlight on text selection (one step) ─────────────────────────
+  // The book renders in an iframe, so top-document selection listeners never see
+  // it. EPUB.js's own "selected" event fires inside the iframe and hands us the
+  // CFI directly. We create + persist + paint the highlight immediately, then let
+  // the action bar offer refinement (recolour / note / remove).
+
+  const DEFAULT_LENS: HighlightColor = "yellow";
+
+  const handleSelected = useCallback(
+    (cfiRange: string, contents: { window?: Window }) => {
+      const sel = contents?.window?.getSelection?.();
+      const text = sel?.toString().trim() ?? "";
+      if (!cfiRange || text.length < 3) return;
+
+      const highlight: Highlight = {
+        id: `h_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        bookId,
+        cfiRange,
+        color: DEFAULT_LENS,
+        selectedText: text,
+        createdAt: new Date().toISOString(),
+      };
+
+      addHighlight(highlight);
+      applyOneHighlight(highlight);
+
+      // Clear the native selection so the lens is visible, not the selection band.
+      try { sel?.removeAllRanges(); } catch { /* ignore */ }
+
+      useSelectionStore.getState().setActive(highlight.id, highlight.color, text);
+    },
+    [bookId, addHighlight, applyOneHighlight]
+  );
 
   // ── Map EPUB.js href to chapter index ──────────────────────────────────────
 
@@ -467,6 +507,11 @@ export default function EpubRenderer({
       wireContentNavigation(view?.contents?.document);
     });
 
+    // Instant highlight when text is selected inside the book iframe.
+    rendition.on("selected", (cfiRange: string, contents: { window?: Window }) => {
+      handleSelected(cfiRange, contents);
+    });
+
     // Track location — single place progress is saved
     rendition.on(
       "relocated",
@@ -499,7 +544,7 @@ export default function EpubRenderer({
   }, [
     epubPath, fontSize, lineHeight,
     applyReaderTheme,
-    applyHighlights, findChapterIndex, scheduleSave,
+    applyHighlights, handleSelected, findChapterIndex, scheduleSave,
     setCurrentCfi, setPercentComplete, setCurrentChapterIndex,
     onTocReady, initialCfi, onInitialDisplayComplete,
   ]);
@@ -548,8 +593,24 @@ export default function EpubRenderer({
       luminaEpubSearch?:       (q: string) => Promise<{ cfi: string; excerpt: string }[]>;
       luminaMarkSearchResult?: (cfi: string) => void;
       luminaClearSearchMarks?: () => void;
+      luminaSetHighlightColor?: (id: string, color: HighlightColor) => void;
+      luminaRemoveHighlight?:   (id: string) => void;
     };
     const win = window as LuminaWin;
+
+    // Recolour a highlight in place (used by the selection action bar).
+    win.luminaSetHighlightColor = (id: string, color: HighlightColor) => {
+      const h = getHighlightsForBook(bookId).find((x) => x.id === id);
+      if (!h) return;
+      updateHighlightColor(id, color);
+      applyOneHighlight({ id, cfiRange: h.cfiRange, color });
+    };
+
+    // Remove a highlight from the rendition and the store.
+    win.luminaRemoveHighlight = (id: string) => {
+      try { renditionRef.current?.annotations.remove(id, "highlight"); } catch { /* ignore */ }
+      removeHighlight(id);
+    };
 
     win.luminaNavigate = (target: string) => {
       navigateToTarget(target);
@@ -634,9 +695,14 @@ export default function EpubRenderer({
       delete win.luminaEpubSearch;
       delete win.luminaMarkSearchResult;
       delete win.luminaClearSearchMarks;
+      delete win.luminaSetHighlightColor;
+      delete win.luminaRemoveHighlight;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [goNextPage, goPrevPage, navigateToTarget]);
+  }, [
+    goNextPage, goPrevPage, navigateToTarget,
+    bookId, getHighlightsForBook, updateHighlightColor, removeHighlight, applyOneHighlight,
+  ]);
 
   return (
     <div

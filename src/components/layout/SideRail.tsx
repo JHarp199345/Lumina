@@ -1,4 +1,4 @@
-import { BookOpen, FolderOpen, Menu, Moon, Settings, Sun, Monitor, Highlighter } from "lucide-react";
+import { BookOpen, FolderOpen, Menu, Moon, Settings, Sun, Monitor, NotebookTabs } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useBookStore } from "@/store/bookStore";
@@ -74,7 +74,7 @@ export default function SideRail({
         {activeBook && (
           <div className="relative">
             <RailButton label="Annotations" onClick={() => openDrawer("menu")}>
-              <Highlighter size={17} />
+              <NotebookTabs size={17} />
             </RailButton>
             {annotationCount > 0 && (
               <span className="pointer-events-none absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-lumina-gold px-1 text-[9px] font-semibold text-black">
