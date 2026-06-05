@@ -8,9 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "web:dev": "vite --host 0.0.0.0 --port 5173",
+    "web:dev": "vite --host 0.0.0.0 --port 5175",
     "web:build": "tsc && vite build",
-    "web:preview": "vite preview --host 0.0.0.0 --port 5173"
+    "web:preview": "vite preview --host 0.0.0.0 --port 5175"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",

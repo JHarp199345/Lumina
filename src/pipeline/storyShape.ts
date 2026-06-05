@@ -12,7 +12,7 @@
  * 5. Confirm inflection points with narrative context
  */
 
-import type { ArcShape, InflectionPoint } from "@/types";
+import type { AnalysisProgressReporter, ArcShape, InflectionPoint } from "@/types";
 import { LUMINA_CONFIG } from "@/config";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -43,9 +43,15 @@ export async function analyzeStoryShape(
   chapters: { id: string; title: string; index: number; rawText?: string }[],
   bookTitle: string,
   apiKey: string,
-  onProgress?: (msg: string) => void
+  onProgress?: AnalysisProgressReporter
 ): Promise<StoryShapeResult> {
-  onProgress?.("Scoring emotional trajectory…");
+  onProgress?.({
+    phase: "scoring",
+    message: `Scoring the emotional tone of ${chapters.length} chapters…`,
+    percent: 8,
+    current: 0,
+    total: chapters.length,
+  });
 
   // Step 1: Score each chapter
   const sentimentScores = await scoreChapters(chapters, bookTitle, apiKey, onProgress);
@@ -73,7 +79,7 @@ async function scoreChapters(
   chapters: { id: string; title: string; index: number; rawText?: string }[],
   bookTitle: string,
   apiKey: string,
-  onProgress?: (msg: string) => void
+  onProgress?: AnalysisProgressReporter
 ): Promise<number[]> {
   // Batch chapters into groups to minimize API calls
   const BATCH_SIZE = 8;
@@ -81,9 +87,15 @@ async function scoreChapters(
 
   for (let i = 0; i < chapters.length; i += BATCH_SIZE) {
     const batch = chapters.slice(i, i + BATCH_SIZE);
-    onProgress?.(
-      `Scoring chapters ${i + 1}-${Math.min(i + BATCH_SIZE, chapters.length)} of ${chapters.length}…`
-    );
+    const end = Math.min(i + BATCH_SIZE, chapters.length);
+    onProgress?.({
+      phase: "scoring",
+      message: `Scoring chapters ${i + 1}-${end} of ${chapters.length}…`,
+      percent: 8 + Math.round((end / Math.max(1, chapters.length)) * 30),
+      current: end,
+      total: chapters.length,
+      itemLabel: batch.map((chapter) => chapter.title).join(", "),
+    });
     const batchScores = await scoreBatch(batch, bookTitle, apiKey);
     batchScores.forEach((score, j) => {
       scores[i + j] = score;

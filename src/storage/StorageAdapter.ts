@@ -50,6 +50,8 @@ export interface StorageAdapter {
   loadAllBooks(): Promise<Book[]>;
   deleteBook(bookId: string): Promise<void>;
   updateLastOpened(bookId: string): Promise<void>;
+  saveBookStructure(structure: BookStructure): Promise<void>;
+  loadBookStructure(bookId: string): Promise<BookStructure | null>;
 
   // ── Reading progress ──────────────────────────────────────────────────────
 

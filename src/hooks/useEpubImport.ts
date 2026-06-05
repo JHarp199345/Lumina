@@ -99,6 +99,16 @@ export function useEpubImport() {
     };
 
     await runStep("Saving book to library…", () => storage.saveBook(book));
+    await runStep("Saving book structure…", () => storage.saveBookStructure(structure));
+    await runStep("Resetting reading position…", () =>
+      storage.saveProgress({
+        bookId: book.id,
+        currentCfi: "lumina://cover",
+        currentChapterIndex: 0,
+        percentComplete: 0,
+        lastRead: new Date().toISOString(),
+      })
+    );
 
     onProgress?.("Mounting book in Lumina…");
 
@@ -147,14 +157,17 @@ export function useEpubImport() {
       const progress = await storage.loadProgress(book.id);
       const savedCfi = progress?.currentCfi ?? null;
 
-      // 2. Re-parse EPUB structure (chapters/sections not stored in DB)
-      let structure = null;
+      // 2. Load the stable imported structure. Re-parse only as a fallback.
+      let structure = await storage.loadBookStructure(book.id);
       try {
-        onProgress?.("Reading saved EPUB file…");
-        const bytes = await storage.getEpubBytes(book);
-        onProgress?.("Parsing saved EPUB structure…");
-        const parsed = await parseEpub(bytes, onProgress);
-        structure = parsed.structure;
+        if (!structure) {
+          onProgress?.("Reading saved EPUB file…");
+          const bytes = await storage.getEpubBytes(book);
+          onProgress?.("Parsing saved EPUB structure…");
+          const parsed = await parseEpub(bytes, onProgress);
+          structure = parsed.structure;
+          await storage.saveBookStructure(structure);
+        }
       } catch (err) {
         console.warn("[OpenBook] Could not re-parse EPUB:", err);
         onProgress?.(

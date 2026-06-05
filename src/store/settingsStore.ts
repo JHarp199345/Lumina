@@ -14,6 +14,7 @@ interface SettingsStore extends UserSettings {
   setPanelOrder: (order: PanelOrder) => void;
   setHasCompletedOnboarding: (completed: boolean) => void;
   setApiKeyConfigured: (configured: boolean) => void;
+  setVisualInterpretationLevel: (level: number) => void;
   resolvedTheme: () => "dark" | "light";
 }
 
@@ -46,6 +47,7 @@ export const useSettingsStore = create<SettingsStore>()(
       panelOrder: { panels: ["toc", "visual", "reader"] },
       hasCompletedOnboarding: false,
       apiKeyConfigured: false,
+      visualInterpretationLevel: 80,
 
       // Actions
       setTheme: (theme) => set({ theme }),
@@ -57,6 +59,8 @@ export const useSettingsStore = create<SettingsStore>()(
       setPanelOrder: (panelOrder) => set({ panelOrder }),
       setHasCompletedOnboarding: (hasCompletedOnboarding) => set({ hasCompletedOnboarding }),
       setApiKeyConfigured: (apiKeyConfigured) => set({ apiKeyConfigured }),
+      setVisualInterpretationLevel: (visualInterpretationLevel) =>
+        set({ visualInterpretationLevel: Math.max(0, Math.min(100, visualInterpretationLevel)) }),
 
       setLayoutPreset: (preset) => {
         const { layout, order } = LAYOUT_PRESETS[preset];

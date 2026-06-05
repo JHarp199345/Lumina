@@ -12,6 +12,7 @@
 import type { StorageAdapter } from "./StorageAdapter";
 import type {
   Book,
+  BookStructure,
   ReadingProgress,
   SemanticMap,
   StyleSeedId,
@@ -37,6 +38,8 @@ import {
   dbLoadAllBooks,
   dbDeleteBook,
   dbUpdateLastOpened,
+  dbSaveBookStructure,
+  dbLoadBookStructure,
   dbSaveProgress,
   dbLoadProgress,
   dbSaveHighlight,
@@ -94,6 +97,14 @@ export class TauriStorageAdapter implements StorageAdapter {
 
   async updateLastOpened(bookId: string): Promise<void> {
     await dbUpdateLastOpened(bookId);
+  }
+
+  async saveBookStructure(structure: BookStructure): Promise<void> {
+    await dbSaveBookStructure(structure);
+  }
+
+  async loadBookStructure(bookId: string): Promise<BookStructure | null> {
+    return dbLoadBookStructure(bookId);
   }
 
   // ── Progress ─────────────────────────────────────────────────────────────
@@ -172,7 +183,7 @@ export class TauriStorageAdapter implements StorageAdapter {
     const relativePath = `${LUMINA_CONFIG.IMAGE_CACHE_DIR}/${meta.bookId}/${fileName}`;
     const fullPath = `${appDataDir}/${relativePath}`;
     await writeFileBytes(fullPath, data);
-    const displayUrl = toAssetUrl(fullPath);
+    const displayUrl = `${toAssetUrl(fullPath)}?v=${encodeURIComponent(meta.generatedAt)}`;
     await dbSaveImageCache({ ...meta, filePath: displayUrl });
     return displayUrl;
   }

@@ -1,17 +1,17 @@
 # Lumina — Plan III
-## The Visual Director: Symbolic Cinematic Companion
+## The Visual Director: Depictive Cinematic Companion
 
 ---
 
 ## North Star
 
-Lumina should feel like a sensitive visual intelligence reading alongside you — one that notices not just what happens, but what the moment means emotionally and symbolically. It chooses images with taste. It remembers what it has already shown. It knows when to be grand and when to be quiet. It paces itself against the emotional arc of the story rather than firing off dramatic images at every scene break.
+Lumina should feel like a sensitive visual intelligence reading alongside you — one that depicts what happens clearly enough to satisfy the reader's desire to see the story, while still noticing what the moment means emotionally, symbolically, and cinematically. It chooses images with taste. It remembers what it has already shown. It knows when to be grand and when to be quiet. It paces itself against the emotional arc of the story rather than firing off dramatic images at every scene break.
 
 The feature is not "AI-generated images for books."
 
 The feature is:
 
-> A symbolic visual companion that moves through a book's emotional architecture, stages each image with intention, maintains visual continuity across the whole reading journey, and never lets the visual panel go dead or go boring.
+> A depictive visual companion that stages concrete book moments with cinematic intention, emotional intelligence, visual continuity, and enough symbolic emphasis to make each image feel meaningful rather than generic.
 
 ---
 
@@ -30,7 +30,7 @@ Book text
 
 This works, but it has no visual intelligence layer. The problems:
 
-**Literalism drift.** Without a director, Gemini defaults to illustrating the action: "a man runs toward an army," "two figures face each other in shadow," "a stormy battlefield at dusk." These are visually coherent but emotionally flat. They describe what happened, not what it means.
+**Lazy depiction drift.** Without a director, Gemini may depict the action in the most obvious way: "a man runs toward an army," "two figures face each other in shadow," "a stormy battlefield at dusk." These are visually coherent but often emotionally flat. The problem is not that they are literal; the problem is that they are undirected. Lumina should depict the scene, but choose the angle, focus, scale, motion, and emotional emphasis with intention.
 
 **Tonal monotony.** Every image becomes maximally dramatic. Dark palette, lone figure, storm atmosphere, sweeping scale. After three images like that, the reader's eye glazes. A book like Red Rising has moments that deserve silence, intimacy, and restraint — not just spectacle.
 
@@ -56,7 +56,7 @@ The new module `src/pipeline/visualDirector.ts` sits between semantic analysis a
 6. Produce a structured `VisualDirectorBrief` — a complete, organized visual specification
 7. From that brief, construct the final image prompt
 
-The director does not pick what scene to illustrate. That is the job of semantic analysis. The director decides *how* to illustrate a scene that has already been selected — and how literally or interpretively to render it.
+The director does not pick what scene to illustrate. That is the job of semantic analysis. The director decides *how* to illustrate a scene that has already been selected: which instant, which point of view, which subject focus, which scale, which emotional emphasis, and which details from the text must remain legible. The default bias is depictive and scene-faithful, not deliberately ambiguous.
 
 ---
 
@@ -139,25 +139,27 @@ export type VisualStrategy =
 
 **Strategy guidance by moment function:**
 
-| Moment Function | Preferred Strategies | Avoid |
+This table should be read through the corrected premise: Lumina is depictive first. "Avoid" means "do not use as a lazy default," not "never depict the scene." Even when the image is object-centered, atmospheric, or aftermath-focused, it should still feel anchored to the actual book moment through concrete scene details.
+
+| Moment Function | Preferred Strategies | Avoid as lazy default |
 |---|---|---|
-| threshold | threshold_composition, character_silhouette | literal_iconic |
-| transformation | symbolic_abstraction, emotional_landscape | literal_iconic, ritualized_action |
-| loss_of_innocence | aftermath_tableau, negative_space | literal_iconic |
+| threshold | literal_iconic, threshold_composition, character_silhouette | generic emotional_landscape |
+| transformation | ritualized_action, literal_iconic, symbolic_abstraction | vague symbolic_abstraction without scene anchors |
+| loss_of_innocence | aftermath_tableau, literal_iconic, negative_space | generic darkness/sadness |
 | promise_made | object_centered, ritualized_action | emotional_landscape |
-| promise_delivered | object_centered, character_silhouette | literal_iconic |
-| betrayal | aftermath_tableau, negative_space, environmental_pressure | literal_iconic |
-| collision | scale_contrast, rare_aerial (once) | symbolic_abstraction |
-| sacrifice | scale_contrast, character_silhouette | literal_iconic, aftermath_tableau |
-| cost_of_triumph | aftermath_tableau, negative_space | literal_iconic |
-| revelation | threshold_composition, symbolic_abstraction | literal_iconic |
+| promise_delivered | literal_iconic, object_centered, character_silhouette | vague glow/abstract triumph |
+| betrayal | literal_iconic, aftermath_tableau, negative_space, environmental_pressure | melodramatic face closeup |
+| collision | literal_iconic, scale_contrast, rare_aerial (once) | pure symbolic_abstraction |
+| sacrifice | literal_iconic, scale_contrast, character_silhouette | gore or over-heroic posing |
+| cost_of_triumph | aftermath_tableau, literal_iconic, negative_space | simple victory pose |
+| revelation | literal_iconic, threshold_composition, symbolic_abstraction | generic mystic light |
 | moral_choice | threshold_composition, character_silhouette | emotional_landscape |
-| grief | emotional_landscape, negative_space | literal_iconic, scale_contrast |
+| grief | literal_iconic, emotional_landscape, negative_space | generic crying portrait |
 | isolation | negative_space, emotional_landscape | scale_contrast |
-| dread | environmental_pressure, emotional_landscape | literal_iconic |
+| dread | literal_iconic, environmental_pressure, emotional_landscape | formless fog/darkness only |
 | gathering | scale_contrast, rare_aerial (once), environmental_pressure | object_centered |
-| aftermath | aftermath_tableau, negative_space, emotional_landscape | literal_iconic |
-| opening_world | emotional_landscape, symbolic_abstraction | literal_iconic |
+| aftermath | aftermath_tableau, literal_iconic, negative_space, emotional_landscape | action pose after action is over |
+| opening_world | literal_iconic, emotional_landscape, symbolic_abstraction | spoilers or over-specific later plot |
 
 These are tendencies, not rules. The director may override based on context, but must justify the override when the diversity checker asks.
 
@@ -169,9 +171,9 @@ The strategy guidance table above represents behavior at the midpoint (~50). The
 |---|---|---|
 | 0–20 | symbolic_abstraction, emotional_landscape, negative_space | No figures. Pure mood, form, color, symbol. |
 | 20–40 | + object_centered, aftermath_tableau, threshold_composition, environmental_pressure | Objects and environment only. Figures at most as distant blur. |
-| 40–60 *(default)* | + anticipation_frame, character_silhouette, scale_contrast | Figures as silhouette or gestural form. Scene implied, not depicted. |
+| 40–60 | + anticipation_frame, character_silhouette, scale_contrast | Figures as silhouette or gestural form. Scene implied more than depicted. |
 | 60–80 | + ritualized_action, literal_iconic (reduced intensity) | Figures readable by posture and action. Scene depicted but stylized. |
-| 80–100 | All strategies including full literal_iconic | Scene depicted as closely as the style seed medium allows. Figures, action, setting all clear. |
+| 80–100 *(recommended default range)* | All strategies including full literal_iconic | Scene depicted as closely as the style seed medium allows. Figures, action, setting all clear. |
 
 Strategies are still ranked by moment function within the available set — the interpretation level determines *which strategies are reachable*, not which one wins.
 
@@ -375,7 +377,7 @@ The rolling window should be the last 3-4 images. Beyond 4, the memory becomes l
 
 It is **not** per-book. It is **not** tied to genre or story type. It is purely: what quality of image does *this reader* find most compelling?
 
-Some readers want pure mood — they want Lumina to evoke the feeling of a moment through colour, light, and symbol, letting their imagination supply the rest. Other readers want to see the scene — they want a visual record of what happened, filtered through the style seed's artistic medium. Both are valid. The slider lets the reader find their own balance.
+Some readers want pure mood — they want Lumina to evoke the feeling of a moment through colour, light, and symbol, letting their imagination supply the rest. Other readers want to see the scene — they want a visual record of what happened, filtered through the style seed's artistic medium. Both are valid. However, Lumina's product default should favor the second group: readers who want the book brought visibly to life. The slider lets the reader move away from that default if they personally prefer a more interpretive mode.
 
 ### Setting Type
 
@@ -386,7 +388,7 @@ export interface UserSettings {
 
   /**
    * Visual interpretation level: 0 = fully interpretive/symbolic,
-   * 100 = close scene depiction. Default 50.
+   * 100 = close scene depiction. Default 80.
    *
    * Controls which visual strategies the director may choose and how
    * literally the final image prompt describes the scene.
@@ -400,14 +402,14 @@ export interface UserSettings {
 
 ```ts
 // In src/store/settingsStore.ts — add to defaults:
-visualInterpretationLevel: 50,
+visualInterpretationLevel: 80,
 
 // Add action:
 setVisualInterpretationLevel: (level: number) =>
   set({ visualInterpretationLevel: Math.max(0, Math.min(100, level)) }),
 ```
 
-Default is **50** — the creative sweet spot where the director has full access to the middle-range strategies, figures appear as silhouette and gesture, and scene content is implied through composition and atmosphere rather than depicted literally. This is where "beneficial hallucination" produces the most consistently interesting images regardless of what the source material looks like.
+Default is **80** — the depictive sweet spot where figures, action, setting, and important objects are legible, while the director still applies taste, pacing, camera logic, emotional emphasis, and anti-repetition rules. This is where Lumina should normally live: the reader can see the scene, but the image still feels composed rather than mechanically illustrated.
 
 ### Semantic Anchors
 
@@ -415,8 +417,9 @@ Default is **50** — the creative sweet spot where the director has full access
 |---|---|---|
 | 0 | Pure interpretation | No figures, no action, no recognizable setting. Colour, form, texture, and abstract symbol only. The emotional world of the moment as pure painting. |
 | 25 | Atmospheric | Objects, environments, and thresholds carry the scene. Figures implied by their absence or reduced to trace. |
-| 50 *(default)* | Balanced | Figures present as silhouette and gesture. Scene implied through composition and symbol. The moment's emotional meaning is the subject. |
+| 50 | Balanced | Figures present as silhouette and gesture. Scene implied through composition and symbol. The moment's emotional meaning is the subject. |
 | 75 | Illustrative | Figures and action readable. Scene depicted but filtered through the style seed medium. |
+| 80 *(default)* | Depictive cinematic | Concrete scene content is clear. The director chooses the most meaningful angle, focus, and composition. |
 | 100 | Scene depiction | As close to the actual scene as the style seed allows. Action, figures, and setting all legible. Always mediated by the artistic medium — never photorealistic. |
 
 ### UI: The Slider
@@ -594,6 +597,12 @@ READER INTERPRETATION LEVEL: {interpretationLevel}/100
  form. The scene should be implied rather than depicted. Choose from the full strategy palette
  except literal_iconic. Faces must remain abstracted."
 
+ Level 80:
+ "The reader prefers depictive cinematic illustration. Depict the actual scene content with
+ readable figures, action, setting, and important objects, while choosing the camera angle,
+ composition, and emotional emphasis with taste. Faces remain gestural rather than portrait-like.
+ The image should feel scene-faithful, not vague."
+
  Level 90:
  "The reader prefers close scene depiction. Illustrate the actual scene action as clearly as
  the style seed's artistic medium allows. Figures, action, and setting should all be
@@ -733,7 +742,7 @@ export interface SceneScore {
   
   // Base scores (0.0 - 1.0)
   emotionalSignificance: number;     // from narrative weight
-  visualLegibility: number;          // can this be expressed without literal depiction?
+  visualLegibility: number;          // can this become a clear, compelling image?
   symbolicRichness: number;          // does the scene have strong symbolic anchors?
   narrativeTurningPoint: number;     // does something change permanently?
   objectPresence: number;            // is there a charged object that can carry the scene?
@@ -762,7 +771,7 @@ The final score is a weighted sum:
 ```ts
 finalScore = (
   emotionalSignificance * 0.25 +
-  symbolicRichness * 0.20 +
+  symbolicRichness * 0.15 +
   narrativeTurningPoint * 0.20 +
   pacingContribution * 0.15 +
   distanceFromLast * 0.10 +
@@ -785,8 +794,8 @@ The opening image is different from all other images. It is not tied to an infle
 **Opening image brief construction** differs:
 
 1. The moment function is always `opening_world`
-2. The visual strategy should lean toward `emotional_landscape` or `symbolic_abstraction`
-3. The subject focus should prefer `place`, `symbolic_motif`, or `natural_force` — NOT `person`
+2. The visual strategy should remain scene-faithful while avoiding spoilers
+3. The subject focus may be `person`, `place`, `object`, or `natural_force`, but it must establish the book's opening world without over-explaining later plot
 4. The palette should reflect the book's dominant emotional tone from the arc analysis
 5. The image should contain NO spoilers — no battles, deaths, betrayals, or plot-specific objects if possible
 6. It should be the most ambient, atmospheric image in the book
@@ -1261,7 +1270,7 @@ Update `src/types/index.ts`:
 - Add `visualInterpretationLevel: number` to `UserSettings`
 
 Update `src/store/settingsStore.ts`:
-- Add `visualInterpretationLevel: 50` to defaults
+- Add `visualInterpretationLevel: 80` to defaults
 - Add `setVisualInterpretationLevel: (level: number) => void` action
 
 ### Step 2 — Visual Director Core
@@ -1350,9 +1359,101 @@ Add optional verbose logging throughout the director pipeline:
 | `src/pipeline/imageGenerator.ts` | Modify | Use director brief as primary prompt source |
 | `src/hooks/useBookOrchestration.ts` | Modify | Run director, pass interpretation level, wire opening image protocol |
 | `src/types/index.ts` | Modify | Add `directorBrief` to `IdentifiedScene`, add `visualInterpretationLevel` to `UserSettings` |
-| `src/store/settingsStore.ts` | Modify | Add `visualInterpretationLevel` default (50) and action |
+| `src/store/settingsStore.ts` | Modify | Add `visualInterpretationLevel` default (80) and action |
 | `src/components/common/SettingsPanel.tsx` | Modify | Add Visual Style slider (Interpretive ↔ Illustrative) |
 | `src/components/visual/AmbientSceneLayer.tsx` | Modify | New phase states |
+
+---
+
+## Remaining Work / Corrections
+
+These are product corrections discovered during live testing and discussion. They should guide the next implementation pass.
+
+### Gallery Orientation
+
+The generated-image gallery should not be locked to one orientation.
+
+It should support:
+
+- **Horizontal gallery** for desktop/tablet landscape, where images read like a visual strip or panorama.
+- **Vertical gallery** for portrait/tablet/mobile, where images stack naturally and can be scanned like a visual chapter list.
+- A responsive default chosen by viewport and panel layout.
+- Future optional toggle if needed: horizontal / vertical.
+
+The current horizontal gallery is a first attempt and needs repair/polish. If it does not open, scroll, or show images reliably, fixing the gallery is a priority.
+
+### Plan The Whole Visual Story, Generate Sparingly
+
+Lumina should distinguish between **planning** images and **generating** images.
+
+Planning should be broad:
+
+```
+Book text
+→ emotional arc
+→ full visual pathway
+→ candidate beats from beginning to end
+→ scene blocks for important future moments
+→ director briefs / planned visual intentions
+```
+
+Generation should remain sparse and budget-aware:
+
+```
+Only selected default-range beats are generated automatically.
+Images generate one at a time.
+The next image can use previous generated images, prior briefs, book context,
+and the full storyboard pathway to stay coherent.
+```
+
+The system should be allowed to understand the whole book visually without trying to render every possible image. The planned-but-not-generated beats become the visual roadmap; generated images are the selected artifacts that actually cost money.
+
+### Future-Context-Aware Planning
+
+The storyboard should account for the whole piece, not just the current scene in isolation.
+
+Each planned beat should know:
+
+- What came before
+- What it is setting up
+- Whether it is suspense, mystery, promise, payoff, cost, aftermath, or closing
+- Which earlier visual elements it echoes
+- Which later visual elements it should prepare
+- Whether it deserves generation by default or should remain planned only
+
+This lets Lumina tell a coherent picture-story without generating too many images.
+
+### Generated vs Planned Images
+
+The gallery should eventually distinguish:
+
+- **Generated images**: visible thumbnails the reader can open or revisit.
+- **Planned images**: storyboard beats that exist as future visual intentions but have not been generated.
+- **Reader-requested images**: images created from highlighted passages and inserted into the visual story.
+
+This does not need to feel technical. It can be presented as a simple visual story timeline where generated images appear fully and planned beats appear as quiet placeholders.
+
+### Regeneration Replacement
+
+Regeneration must replace the old image for the same scene.
+
+Rules:
+
+- Keep the same `sceneId`.
+- Keep the same scene anchor.
+- Keep the same storyboard beat.
+- Replace the displayed image and cached image metadata.
+- Do not create a duplicate scene unless the reader explicitly requested a new inserted image from selected text.
+
+### Highlighted Passage Images
+
+Reader-selected images should:
+
+- Be created from highlighted/selected text.
+- Become custom scenes.
+- Be inserted between the generated/planned image before and after the selected passage.
+- Persist with the book's semantic map/storyboard.
+- Be marked as reader-requested so they are not confused with default sparse planned images.
 
 ---
 

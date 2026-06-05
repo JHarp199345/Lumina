@@ -3,8 +3,9 @@ import { useReaderStore } from "@/store/readerStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { BookOpen, ChevronLeft, ChevronRight, FolderOpen } from "lucide-react";
 import EpubRenderer from "@/components/reader/EpubRenderer";
+import StructuredTextRenderer from "@/components/reader/StructuredTextRenderer";
 import ChapterHeader from "@/components/reader/ChapterHeader";
-import type { NavItem } from "epubjs";
+import { isWeb } from "@/utils/runtime";
 
 const READING_WIDTH_CLASSES = {
   narrow: "max-w-[480px]",
@@ -42,13 +43,17 @@ export default function ReaderPanel({ onImport }: ReaderPanelProps) {
       >
         {!activeBook ? (
           <EmptyReaderState onImport={onImport} />
+        ) : isWeb ? (
+          <StructuredTextRenderer
+            initialCfi={initialCfi ?? undefined}
+            onInitialDisplayComplete={() => setInitialCfi(null)}
+          />
         ) : (
           <EpubRenderer
             epubPath={activeBook.filePath}
             bookId={activeBook.id}
             initialCfi={initialCfi ?? undefined}
             onInitialDisplayComplete={() => setInitialCfi(null)}
-            onTocReady={(_toc: NavItem[]) => {}}
           />
         )}
       </div>

@@ -17,6 +17,7 @@ import { storage } from "@/storage";
 
 import { LUMINA_CONFIG } from "@/config";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import type { IdentifiedScene, CachedImage } from "@/types";
 
 export function useImageTrigger() {
@@ -28,6 +29,7 @@ export function useImageTrigger() {
     setCurrentImage,
     setCurrentThemes,
     setIsTransitioning,
+    queue,
     enqueue,
     dequeue,
     updateQueueItemStatus,
@@ -83,6 +85,8 @@ export function useImageTrigger() {
     // ── Queue pass: enqueue generation for upcoming scenes ────────────────────
     for (const scene of scenes) {
       if (imageCache[scene.id]) continue; // already generated
+      const beat = activeSemanticMap.storyboard?.beats.find((item) => item.sceneId === scene.id);
+      if (beat?.generationIntent === "planned_only") continue;
 
       const scenePos = getSceneWordPosition(scene);
       const distance = scenePos - wordPosition;
@@ -96,7 +100,13 @@ export function useImageTrigger() {
           bookId: activeSemanticMap.bookId,
           priority: distance, // closer = higher priority (lower number)
           status: "pending",
-          description: scene.imageDescription || "",
+          description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
+        });
+        diagnosticInfo("image.queue.enqueue", "Queued upcoming image", {
+          sceneId: scene.id,
+          bookId: activeSemanticMap.bookId,
+          distance,
+          generationIntent: beat?.generationIntent ?? "default",
         });
       }
     }
@@ -124,6 +134,10 @@ export function useImageTrigger() {
     if (!styleSeed) return;
 
     isGeneratingRef.current = true;
+    diagnosticInfo("image.generation.start", "Image generation started", {
+      sceneId: next.sceneId,
+      bookId: next.bookId,
+    });
     setIsGenerating(true);
     updateQueueItemStatus(next.sceneId, "generating");
 
@@ -159,15 +173,33 @@ export function useImageTrigger() {
 
           // Display immediately if reader is at/past this scene
           const scenePos = getSceneWordPosition(scene);
-          if (wordPosition >= scenePos) {
+          const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
+          if (!hasCurrentImage || wordPosition >= scenePos) {
             transitionToImage(img);
           }
         },
       });
 
+      addToCache(cachedImage);
+      const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
+      const scenePos = getSceneWordPosition(scene);
+      if (!hasCurrentImage || wordPosition >= scenePos) {
+        transitionToImage(cachedImage);
+      }
+      console.info("[ImageTrigger] Generated image committed:", cachedImage.sceneId);
+      diagnosticInfo("image.generation.complete", "Image generation complete", {
+        sceneId: cachedImage.sceneId,
+        bookId: cachedImage.bookId,
+        filePath: cachedImage.filePath,
+      });
       updateQueueItemStatus(next.sceneId, "complete");
     } catch (err) {
       console.error("[ImageTrigger] Generation failed:", err);
+      diagnosticError("image.generation.failed", "Image generation failed", {
+        sceneId: next.sceneId,
+        bookId: next.bookId,
+        error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+      });
       updateQueueItemStatus(next.sceneId, "failed");
     } finally {
       isGeneratingRef.current = false;
@@ -203,6 +235,10 @@ export function useImageTrigger() {
   }, [wordPosition, checkProximity]);
 
   // Process queue periodically
+  useEffect(() => {
+    processQueue();
+  }, [processQueue, activeSemanticMap, activeStyleSeed, queue]);
+
   useEffect(() => {
     const interval = setInterval(processQueue, 3000);
     return () => clearInterval(interval);

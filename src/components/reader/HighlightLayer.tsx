@@ -1,8 +1,17 @@
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Sparkles } from "lucide-react";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useBookStore } from "@/store/bookStore";
-import type { HighlightColor } from "@/types";
+import { useReaderStore } from "@/store/readerStore";
+import { useImageStore } from "@/store/imageStore";
+import { useSettingsStore } from "@/store/settingsStore";
+import { getStyleSeedById } from "@/data/styleSeeds";
+import { createVisualDirectorBrief } from "@/pipeline/visualDirector";
+import { buildVisualStoryboard } from "@/pipeline/visualStoryboard";
+import { generateImage } from "@/pipeline/imageGenerator";
+import { storage } from "@/storage";
+import type { HighlightColor, IdentifiedScene } from "@/types";
 
 const HIGHLIGHT_COLORS: { color: HighlightColor; label: string; bg: string }[] = [
   { color: "yellow", label: "Yellow", bg: "bg-yellow-400/70" },
@@ -23,7 +32,10 @@ export default function HighlightLayer() {
   const [noteModal, setNoteModal] = useState<{ highlightId: string } | null>(null);
   const [noteText, setNoteText] = useState("");
   const { addHighlight, addNote } = useAnnotationStore();
-  const { activeBook } = useBookStore();
+  const { activeBook, activeStructure, activeSemanticMap, activeStyleSeed, setActiveSemanticMap } = useBookStore();
+  const { currentChapterIndex, wordPosition } = useReaderStore();
+  const { addToCache, setCurrentImage, setCurrentThemes, setIsGenerating } = useImageStore();
+  const { visualInterpretationLevel } = useSettingsStore();
 
   const handleMouseUp = useCallback(
     (e: MouseEvent) => {
@@ -104,6 +116,108 @@ export default function HighlightLayer() {
     setNoteText("");
   }, [noteModal, noteText, addNote, activeBook]);
 
+  const handleGenerateImage = useCallback(async () => {
+    if (!selectionMenu || !activeBook || !activeStructure || !activeSemanticMap || !activeStyleSeed) return;
+    const chapter = activeStructure.chapters[Math.max(0, currentChapterIndex)];
+    if (!chapter) return;
+
+    const styleSeed = getStyleSeedById(activeStyleSeed);
+    const googleKey = await storage.loadApiKey("lumina_google_ai_key");
+    const falKey = await storage.loadApiKey("lumina_fal_key");
+    if (!styleSeed || !googleKey) return;
+
+    const wordsBeforeChapter = activeStructure.chapters
+      .slice(0, chapter.index)
+      .reduce((sum, item) => sum + item.wordCount, 0);
+    const wordOffset = Math.max(0, Math.min(chapter.wordCount, wordPosition - wordsBeforeChapter));
+    const keywords = extractSelectionKeywords(selectionMenu.selectedText);
+    const sceneId = `scene_custom_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+    const customScene: IdentifiedScene = {
+      id: sceneId,
+      inflectionPointId: "reader_selected",
+      chapterId: chapter.id,
+      sectionId: chapter.sections[0]?.id ?? chapter.id,
+      anchorCfi: "",
+      anchor: {
+        href: chapter.href,
+        spineIndex: chapter.spineIndex,
+        wordOffset,
+      },
+      emotionalVector: ["reader-selected", "focused attention"],
+      symbolicMotifs: keywords.length ? keywords : ["selected passage", "reader focus"],
+      atmosphericQualities: ["scene-specific", "depictive"],
+      narrativeWeight: 0.7,
+      imageDescription: `Reader-selected passage for depiction: ${selectionMenu.selectedText.slice(0, 700)}`,
+    };
+
+    setSelectionMenu(null);
+    window.getSelection()?.removeAllRanges();
+    setIsGenerating(true);
+
+    try {
+      const brief = await createVisualDirectorBrief({
+        scene: customScene,
+        semanticMap: activeSemanticMap,
+        structure: activeStructure,
+        styleSeed,
+        interpretationLevel: visualInterpretationLevel,
+        recentBriefs: activeSemanticMap.scenes
+          .map((scene) => scene.directorBrief)
+          .filter((brief): brief is NonNullable<typeof brief> => Boolean(brief)),
+        apiKey: googleKey,
+      });
+      const directedScene = { ...customScene, directorBrief: brief, imageDescription: brief.finalPrompt };
+      const mergedScenes = [...activeSemanticMap.scenes.filter((scene) => scene.id !== directedScene.id), directedScene]
+        .sort((a, b) => a.anchor.spineIndex - b.anchor.spineIndex || a.anchor.wordOffset - b.anchor.wordOffset);
+      const storyboard = buildVisualStoryboard({
+        bookId: activeSemanticMap.bookId,
+        arcShape: activeSemanticMap.arcShape,
+        structure: activeStructure,
+        scenes: mergedScenes,
+        inflectionPoints: activeSemanticMap.inflectionPoints,
+        goldenNumber: Math.max(activeSemanticMap.goldenNumber, mergedScenes.length),
+      });
+      const nextMap = {
+        ...activeSemanticMap,
+        scenes: mergedScenes,
+        storyboard,
+        goldenNumber: Math.max(activeSemanticMap.goldenNumber, mergedScenes.length),
+      };
+      setActiveSemanticMap(nextMap);
+      await storage.saveSemanticMap(nextMap);
+
+      const image = await generateImage({
+        scene: directedScene,
+        styleSeed,
+        bookId: activeSemanticMap.bookId,
+        googleApiKey: googleKey,
+        falApiKey: falKey ?? undefined,
+      });
+      addToCache(image);
+      setCurrentImage(image);
+      setCurrentThemes(image.emotionalThemes);
+    } catch (err) {
+      console.error("[HighlightImage] Failed:", err);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [
+    selectionMenu,
+    activeBook,
+    activeStructure,
+    activeSemanticMap,
+    activeStyleSeed,
+    currentChapterIndex,
+    wordPosition,
+    visualInterpretationLevel,
+    setActiveSemanticMap,
+    addToCache,
+    setCurrentImage,
+    setCurrentThemes,
+    setIsGenerating,
+  ]);
+
   // Close menu on outside click
   const handleDocClick = useCallback(
     (e: MouseEvent) => {
@@ -152,6 +266,16 @@ export default function HighlightLayer() {
                 className={`w-5 h-5 rounded-full ${bg} hover:scale-110 transition-transform ring-1 ring-white/20`}
               />
             ))}
+            {activeSemanticMap && activeStyleSeed && (
+              <button
+                onClick={handleGenerateImage}
+                title="Generate image from selection"
+                className="ml-1 flex h-6 items-center gap-1 rounded-md border border-lumina-gold/25 bg-lumina-gold/10 px-2 text-[10px] uppercase tracking-[0.12em] text-lumina-gold/80 transition-colors hover:bg-lumina-gold/18 hover:text-lumina-gold"
+              >
+                <Sparkles size={11} />
+                Image
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -236,6 +360,37 @@ function getCfiFromSelection(range: Range): string | null {
     } catch { /* fall through */ }
   }
   return null;
+}
+
+function extractSelectionKeywords(text: string): string[] {
+  const stop = new Set([
+    "the",
+    "and",
+    "that",
+    "with",
+    "from",
+    "this",
+    "were",
+    "they",
+    "there",
+    "would",
+    "could",
+    "should",
+    "into",
+    "upon",
+    "about",
+    "through",
+  ]);
+  return Array.from(
+    new Set(
+      text
+        .toLowerCase()
+        .replace(/[^a-z0-9'\s-]/g, " ")
+        .split(/\s+/)
+        .filter((word) => word.length > 4 && !stop.has(word))
+        .slice(0, 8)
+    )
+  );
 }
 
 // ─── DOM Highlight Application ────────────────────────────────────────────────

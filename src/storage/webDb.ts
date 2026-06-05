@@ -6,10 +6,11 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const STORES = {
   BOOKS:         "books",           // keyed by book.id
+  BOOK_STRUCTURES: "book_structures", // BookStructure snapshots, keyed by bookId
   EPUBS:         "epubs",           // ArrayBuffer EPUB blobs, keyed by bookId
   PROGRESS:      "progress",        // ReadingProgress, keyed by bookId
   HIGHLIGHTS:    "highlights",      // Highlight[], keyed by id, indexed by bookId
@@ -42,6 +43,7 @@ export function openDb(): Promise<IDBDatabase> {
       };
 
       ensure(STORES.BOOKS,         { keyPath: "id" });
+      ensure(STORES.BOOK_STRUCTURES);                  // explicit key on put()
       ensure(STORES.EPUBS);                            // explicit key on put()
       ensure(STORES.PROGRESS,      { keyPath: "bookId" });
 

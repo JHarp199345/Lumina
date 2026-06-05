@@ -3,8 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { BookOpen, FolderOpen, Plus, Trash2, X } from "lucide-react";
 import { useBookStore } from "@/store/bookStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
-import { dbDeleteBook } from "@/services/db";
-import { deleteDirectory, getAppDataDir } from "@/utils/tauriBridge";
+import { storage } from "@/storage";
 
 interface LibraryPanelProps {
   onClose: () => void;
@@ -31,21 +30,10 @@ export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
   };
 
   const handleDelete = async (bookId: string) => {
-    await dbDeleteBook(bookId);
+    await storage.deleteAllBookData(bookId);
     removeBook(bookId);
     if (activeBook?.id === bookId) unmountActiveBook();
     setConfirmDelete(null);
-
-    try {
-      const appData = await getAppDataDir();
-      await Promise.allSettled([
-        deleteDirectory(`${appData}/books/${bookId}`),
-        deleteDirectory(`${appData}/lumina/cache/images/${bookId}`),
-        deleteDirectory(`${appData}/lumina/cache/images/${bookId}::`),
-      ]);
-    } catch {
-      // File cleanup is best-effort. The library record is already gone.
-    }
   };
 
   return (

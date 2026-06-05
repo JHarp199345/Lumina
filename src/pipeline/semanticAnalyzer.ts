@@ -8,12 +8,19 @@
  */
 
 import { analyzeStoryShape } from "./storyShape";
+import { buildVisualStoryboard } from "./visualStoryboard";
+import {
+  buildNarrativeBlueprint,
+  annotateScenesWithThreads,
+  selectNarrativeScenes,
+} from "./narrativeThreads";
 import type {
   BookStructure,
   MacroArc,
   InflectionPoint,
   IdentifiedScene,
   SemanticMap,
+  AnalysisProgressReporter,
 } from "@/types";
 import { LUMINA_CONFIG } from "@/config";
 
@@ -24,19 +31,30 @@ const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export async function analyzeBook(
   structure: BookStructure,
   apiKey: string,
-  onProgress?: (msg: string) => void
+  onProgress?: AnalysisProgressReporter
 ): Promise<SemanticMap> {
-  onProgress?.("Scoring emotional trajectory…");
+  const report = makeProgressReporter(onProgress);
+  report({
+    phase: "preparing",
+    message: `Preparing ${structure.chapters.length} chapters for analysis…`,
+    percent: 3,
+    current: 0,
+    total: structure.chapters.length,
+  });
 
   // Pass 1: Story shape via proper algorithm
   const shapeResult = await analyzeStoryShape(
     structure.chapters,
     structure.title,
     apiKey,
-    onProgress
+    report
   );
 
-  onProgress?.("Identifying key moments…");
+  report({
+    phase: "mapping",
+    message: "Mapping the book's emotional arc…",
+    percent: 40,
+  });
 
   // Enrich with dominant emotions and themes via Gemini
   const macroContext = await getMacroContext(structure, shapeResult.arcShape, apiKey);
@@ -48,10 +66,26 @@ export async function analyzeBook(
     inflectionPoints: shapeResult.inflectionPoints,
   };
 
-  // Pass 2: Scene identification at each inflection
-  const scenes = await identifyScenes(structure, macroArc, apiKey, onProgress);
+  // Pass 2.0: Narrative blueprint — the setup→payoff spine the rest of the
+  // pipeline reads from. One book-wide call; on failure selection degrades
+  // gracefully to emotional-weight ordering.
+  const narrativeBlueprint = await buildNarrativeBlueprint({
+    structure,
+    macroArc,
+    apiKey,
+    onProgress: report,
+  });
 
-  onProgress?.("Composing visual descriptions…");
+  // Pass 2: Scene identification at each inflection
+  const scenes = await identifyScenes(structure, macroArc, apiKey, report);
+
+  report({
+    phase: "prompts",
+    message: `Writing visual briefs for ${scenes.length} image moments…`,
+    percent: 68,
+    current: 0,
+    total: scenes.length,
+  });
 
   // Pass 3: Gemini generates the actual image description
   const scenesWithDescriptions = await generateImageDescriptions(
@@ -59,24 +93,132 @@ export async function analyzeBook(
     macroArc,
     structure.title,
     apiKey,
-    onProgress
+    report
   );
 
-  const goldenNumber = calculateGoldenNumber(
-    structure.totalWords,
-    scenesWithDescriptions.length
+  // Stamp each scene with its thread membership (id / role / motif). From here
+  // on, every stage reads narrative structure directly off the scene.
+  const annotatedScenes = annotateScenesWithThreads(
+    scenesWithDescriptions,
+    narrativeBlueprint,
+    structure
   );
-  const finalScenes = selectFinalScenes(scenesWithDescriptions, goldenNumber);
 
-  onProgress?.("");
+  const goldenNumber = calculateGoldenNumber(structure.totalWords, annotatedScenes.length);
+  // Structure-aware selection: prefer scenes that complete setup→payoff chains,
+  // and pull a payoff's setup in with it, instead of taking the top-sentiment N.
+  const defaultScenes = selectNarrativeScenes(annotatedScenes, goldenNumber, narrativeBlueprint);
+  const defaultSceneIds = new Set(defaultScenes.map((scene) => scene.id));
+
+  // Whole-book plan: merge directed scenes with one-per-uncovered-chapter scenes,
+  // then re-annotate so the planned chapter scenes also carry thread membership.
+  const plannedScenes = annotateScenesWithThreads(
+    mergeScenesForWholeBookPlan(
+      annotatedScenes,
+      buildPlannedChapterScenes(structure, macroArc, annotatedScenes)
+    ),
+    narrativeBlueprint,
+    structure
+  );
+
+  const storyboard = buildVisualStoryboard({
+    bookId: structure.bookId,
+    arcShape: macroArc.arcShape,
+    structure,
+    scenes: plannedScenes,
+    inflectionPoints: macroArc.inflectionPoints,
+    goldenNumber,
+    defaultSceneIds,
+  });
+
+  report({
+    phase: "complete",
+    message: `Analysis complete: ${defaultScenes.length} default images and ${plannedScenes.length} mapped moments.`,
+    percent: 88,
+    current: defaultScenes.length,
+    total: plannedScenes.length,
+  });
 
   return {
     bookId: structure.bookId,
     arcShape: macroArc.arcShape,
     inflectionPoints: macroArc.inflectionPoints,
-    scenes: finalScenes,
+    scenes: plannedScenes,
     goldenNumber,
     analyzedAt: new Date().toISOString(),
+    storyboard,
+    narrativeBlueprint,
+  };
+}
+
+function buildPlannedChapterScenes(
+  structure: BookStructure,
+  macroArc: MacroArc,
+  existingScenes: IdentifiedScene[]
+): IdentifiedScene[] {
+  const coveredChapterIds = new Set(existingScenes.map((scene) => scene.chapterId));
+  const planned: IdentifiedScene[] = [];
+
+  for (const chapter of structure.chapters) {
+    if (coveredChapterIds.has(chapter.id)) continue;
+    if (!chapter.rawText || chapter.wordCount < 250) continue;
+
+    const targetOffset = Math.floor(chapter.wordCount * 0.42);
+    const anchorSection = chapter.sections.reduce((best, section) => {
+      const bestDist = Math.abs((best.startWordOffset ?? 0) - targetOffset);
+      const sectionDist = Math.abs((section.startWordOffset ?? 0) - targetOffset);
+      return sectionDist < bestDist ? section : best;
+    }, chapter.sections[0] ?? { id: chapter.id, startWordOffset: targetOffset });
+
+    const scene = buildFallbackScene(chapter, structure, `planned_chapter_${chapter.index}`, {
+      id: `planned_chapter_${chapter.index}`,
+      approximateChapterIndex: chapter.index,
+      emotionalShift: macroArc.dominantEmotions.slice(0, 2).join(", ") || "emotional transition",
+      significance: 0.35,
+      narrativeLabel: chapter.title,
+    });
+
+    planned.push({
+      ...scene,
+      id: `scene_planned_${structure.bookId}_${chapter.id}`,
+      inflectionPointId: `planned_chapter_${chapter.index}`,
+      sectionId: anchorSection.id,
+      anchor: {
+        href: chapter.href,
+        spineIndex: chapter.spineIndex,
+        wordOffset: anchorSection.startWordOffset ?? targetOffset,
+      },
+      narrativeWeight: 0.35,
+      imageDescription: buildFallbackDescription(scene, macroArc),
+    });
+  }
+
+  return planned;
+}
+
+function mergeScenesForWholeBookPlan(
+  directedCandidates: IdentifiedScene[],
+  plannedCandidates: IdentifiedScene[]
+): IdentifiedScene[] {
+  const byId = new Map<string, IdentifiedScene>();
+  [...directedCandidates, ...plannedCandidates].forEach((scene) => {
+    byId.set(scene.id, scene);
+  });
+
+  return [...byId.values()].sort((a, b) =>
+    a.anchor.spineIndex - b.anchor.spineIndex ||
+    a.anchor.wordOffset - b.anchor.wordOffset ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+function makeProgressReporter(onProgress?: AnalysisProgressReporter): AnalysisProgressReporter {
+  return (progress) => {
+    if (!onProgress) return;
+    onProgress(typeof progress === "string" ? progress : {
+      ...progress,
+      percent: Math.max(0, Math.min(100, Math.round(progress.percent))),
+    });
   };
 }
 
@@ -122,28 +264,102 @@ async function identifyScenes(
   structure: BookStructure,
   macroArc: MacroArc,
   apiKey: string,
-  onProgress?: (msg: string) => void
+  onProgress?: AnalysisProgressReporter
 ): Promise<IdentifiedScene[]> {
   const scenes: IdentifiedScene[] = [];
+  const totalScenes = macroArc.inflectionPoints.length + (structure.chapters[0] ? 1 : 0);
 
   // Opening atmosphere — always first
   const openingChapter = structure.chapters[0];
   if (openingChapter) {
-    const scene = await identifyOpeningScene(openingChapter, structure, apiKey);
+    onProgress?.({
+      phase: "scenes",
+      message: "Finding the opening visual moment…",
+      percent: 45,
+      current: 1,
+      total: totalScenes,
+      itemLabel: openingChapter.title,
+    });
+    const scene = await identifyOpeningScene(openingChapter, structure, apiKey).catch((err) => {
+      console.warn("[Semantic] Opening scene identification failed, using fallback:", err);
+      return buildFallbackScene(openingChapter, structure, "opening");
+    });
     scenes.push(scene);
   }
 
   // One scene per inflection point
-  for (const point of macroArc.inflectionPoints) {
-    onProgress?.(`Examining chapter ${point.approximateChapterIndex + 1}…`);
+  for (let i = 0; i < macroArc.inflectionPoints.length; i++) {
+    const point = macroArc.inflectionPoints[i];
     const chapter = structure.chapters[point.approximateChapterIndex];
     if (!chapter) continue;
+    onProgress?.({
+      phase: "scenes",
+      message: `Finding key scene ${i + 1} of ${macroArc.inflectionPoints.length}…`,
+      percent: 48 + Math.round(((i + 1) / Math.max(1, macroArc.inflectionPoints.length)) * 17),
+      current: i + 2,
+      total: totalScenes,
+      itemLabel: chapter.title,
+    });
 
-    const scene = await identifySceneForInflection(chapter, point, structure, apiKey);
+    const scene = await identifySceneForInflection(chapter, point, structure, apiKey).catch((err) => {
+      console.warn("[Semantic] Inflection scene identification failed, using fallback:", err);
+      return buildFallbackScene(chapter, structure, point.id, point);
+    });
     scenes.push(scene);
   }
 
   return scenes;
+}
+
+function buildFallbackScene(
+  chapter: BookStructure["chapters"][0],
+  structure: BookStructure,
+  inflectionPointId: string,
+  inflectionPoint?: InflectionPoint
+): IdentifiedScene {
+  const targetOffset = inflectionPoint
+    ? Math.floor(chapter.wordCount * 0.35)
+    : 0;
+  const anchorSection = chapter.sections.reduce((best, section) => {
+    const bestDist = Math.abs((best.startWordOffset ?? 0) - targetOffset);
+    const sectionDist = Math.abs((section.startWordOffset ?? 0) - targetOffset);
+    return sectionDist < bestDist ? section : best;
+  }, chapter.sections[0] ?? { id: chapter.id, startWordOffset: targetOffset });
+
+  const text = (chapter.rawText || "").toLowerCase();
+  const emotionalVector = [
+    text.match(/war|kill|blood|fear|death|dark|pain/) ? "tension" : "uncertainty",
+    text.match(/hope|light|love|free|rise|home/) ? "longing" : "foreboding",
+  ];
+  const symbolicMotifs = [
+    "threshold",
+    "distant light",
+    inflectionPoint?.narrativeLabel || "unseen turning point",
+  ];
+  const atmosphericQualities = [
+    text.match(/cold|ice|snow|night|dark/) ? "cold shadow" : "muted atmosphere",
+    text.match(/fire|red|blood|sun/) ? "embered light" : "quiet pressure",
+  ];
+
+  return {
+    id:
+      inflectionPointId === "opening"
+        ? `scene_opening_${structure.bookId}`
+        : `scene_${inflectionPointId}_${chapter.id}`,
+    inflectionPointId,
+    chapterId: chapter.id,
+    sectionId: anchorSection.id,
+    anchorCfi: "",
+    anchor: {
+      href: chapter.href,
+      spineIndex: chapter.spineIndex,
+      wordOffset: anchorSection.startWordOffset ?? targetOffset,
+    },
+    emotionalVector,
+    symbolicMotifs,
+    atmosphericQualities,
+    narrativeWeight: inflectionPoint?.significance ?? 0.65,
+  };
 }
 
 async function identifyOpeningScene(
@@ -259,13 +475,20 @@ async function generateImageDescriptions(
   macroArc: MacroArc,
   bookTitle: string,
   apiKey: string,
-  onProgress?: (msg: string) => void
+  onProgress?: AnalysisProgressReporter
 ): Promise<IdentifiedScene[]> {
   const result: IdentifiedScene[] = [];
 
   for (let i = 0; i < scenes.length; i++) {
-    onProgress?.(`Composing image description ${i + 1} of ${scenes.length}…`);
     const scene = scenes[i];
+    onProgress?.({
+      phase: "prompts",
+      message: `Writing visual brief ${i + 1} of ${scenes.length}…`,
+      percent: 68 + Math.round(((i + 1) / Math.max(1, scenes.length)) * 17),
+      current: i + 1,
+      total: scenes.length,
+      itemLabel: scene.symbolicMotifs.slice(0, 2).join(" + ") || scene.chapterId,
+    });
 
     try {
       const description = await generateSingleDescription(scene, macroArc, bookTitle, apiKey);
@@ -345,19 +568,9 @@ function calculateGoldenNumber(totalWords: number, candidateCount: number): numb
   return Math.max(LUMINA_CONFIG.MIN_IMAGES, Math.min(cap, candidateCount));
 }
 
-function selectFinalScenes(scenes: IdentifiedScene[], goldenNumber: number): IdentifiedScene[] {
-  if (scenes.length <= goldenNumber) return scenes;
-
-  const opening = scenes.find((s) => s.inflectionPointId === "opening");
-  const rest = scenes.filter((s) => s.inflectionPointId !== "opening");
-  const sorted = rest.sort((a, b) => b.narrativeWeight - a.narrativeWeight);
-  const selected = sorted.slice(0, goldenNumber - (opening ? 1 : 0));
-  const final = [...(opening ? [opening] : []), ...selected].sort(
-    (a, b) => a.anchorCfi.localeCompare(b.anchorCfi)
-  );
-
-  return final;
-}
+// Scene selection now lives in narrativeThreads.ts (selectNarrativeScenes) —
+// it scores by setup→payoff role and completes chains instead of taking the
+// top-sentiment N.
 
 // ─── Gemini Helpers ───────────────────────────────────────────────────────────
 

@@ -477,7 +477,7 @@ function buildHierarchicalTitle(label: string, parentLabels: string[]): string {
   const meaningfulParents = parentLabels
     .map((p) => sanitizeRawLabel(normalizeTitle(p)))
     .filter(Boolean)
-    .filter((parent) => parent !== cleanLabel)
+    .filter((parent) => !areEquivalentTitleFragments(parent, cleanLabel))
     .filter((parent) => parent.length > 0);
 
   // Find the nearest group label (Book / Part / Volume / Act) that adds useful context
@@ -486,11 +486,41 @@ function buildHierarchicalTitle(label: string, parentLabels: string[]): string {
   );
 
   // Only prepend a group label if the chapter title doesn't already contain it
-  if (!nearestGroup || cleanLabel.toLowerCase().includes(nearestGroup.toLowerCase())) {
+  if (
+    !nearestGroup ||
+    cleanLabel.toLowerCase().includes(nearestGroup.toLowerCase()) ||
+    areEquivalentTitleFragments(nearestGroup, cleanLabel)
+  ) {
     return cleanLabel;
   }
 
   return `${nearestGroup} / ${cleanLabel}`;
+}
+
+function areEquivalentTitleFragments(a: string, b: string): boolean {
+  const left = normalizeComparableTitle(a);
+  const right = normalizeComparableTitle(b);
+  return Boolean(left && right && left === right);
+}
+
+function normalizeComparableTitle(title: string): string {
+  return sanitizeRawLabel(title)
+    .toLowerCase()
+    .replace(/\bchapter\s+chapter\b/g, "chapter")
+    .replace(/\b(chapter|chap\.?|ch\.?)\b/g, "chapter")
+    .replace(/\b(one|i)\b/g, "1")
+    .replace(/\b(two|ii)\b/g, "2")
+    .replace(/\b(three|iii)\b/g, "3")
+    .replace(/\b(four|iv)\b/g, "4")
+    .replace(/\b(five|v)\b/g, "5")
+    .replace(/\b(six|vi)\b/g, "6")
+    .replace(/\b(seven|vii)\b/g, "7")
+    .replace(/\b(eight|viii)\b/g, "8")
+    .replace(/\b(nine|ix)\b/g, "9")
+    .replace(/\b(ten|x)\b/g, "10")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function deriveCollectionGroups(chapters: Chapter[]): CollectionGroup[] {
@@ -817,6 +847,32 @@ function generateId(seed: string): string {
 // ─── Cover Extraction ─────────────────────────────────────────────────────────
 
 export async function extractCoverImage(zip: JSZip): Promise<string | undefined> {
+  const bytesToDataUrl = (bytes: Uint8Array, mimeType: string) => {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+    }
+    return `data:${mimeType};base64,${btoa(binary)}`;
+  };
+
+  const imageMimeType = (path: string, fallback = "image/jpeg") => {
+    const ext = path.split("?")[0].split("#")[0].split(".").pop()?.toLowerCase();
+    if (ext === "png") return "image/png";
+    if (ext === "webp") return "image/webp";
+    if (ext === "gif") return "image/gif";
+    if (ext === "svg") return "image/svg+xml";
+    if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+    return fallback;
+  };
+
+  const readImageAsDataUrl = async (path: string, fallbackMime = "image/jpeg") => {
+    const file = zip.file(normalizePath(path));
+    if (!file) return undefined;
+    const bytes = await file.async("uint8array");
+    return bytesToDataUrl(bytes, imageMimeType(path, fallbackMime));
+  };
+
   // Try common cover locations
   const coverPaths = [
     "OEBPS/cover.jpg",
@@ -827,31 +883,67 @@ export async function extractCoverImage(zip: JSZip): Promise<string | undefined>
   ];
 
   for (const path of coverPaths) {
-    const file = zip.file(path);
-    if (file) {
-      const bytes = await file.async("uint8array");
-      const blob = new Blob([bytes], { type: "image/jpeg" });
-      return URL.createObjectURL(blob);
-    }
+    const dataUrl = await readImageAsDataUrl(path);
+    if (dataUrl) return dataUrl;
   }
 
   // Try to find cover in OPF
   const opfFile = Object.values(zip.files).find((f) => f.name.endsWith(".opf"));
   if (opfFile) {
     const content = await opfFile.async("text");
-    const coverMatch = content.match(/id="cover[^"]*"\s+href="([^"]+)"/i);
-    if (coverMatch?.[1]) {
-      const base = opfFile.name.includes("/")
-        ? opfFile.name.substring(0, opfFile.name.lastIndexOf("/") + 1)
-        : "";
-      const file = zip.file(base + coverMatch[1]);
-      if (file) {
-        const bytes = await file.async("uint8array");
-        const ext = coverMatch[1].split(".").pop() || "jpeg";
-        const blob = new Blob([bytes], { type: `image/${ext}` });
-        return URL.createObjectURL(blob);
-      }
+    const opfDoc = parseXml(content);
+    const base = opfFile.name.includes("/")
+      ? opfFile.name.substring(0, opfFile.name.lastIndexOf("/") + 1)
+      : "";
+    const manifestEl = firstElementByTagName(opfDoc, "manifest");
+    const items = manifestEl ? elementsByTagName(manifestEl, "item") : [];
+    const metadata = firstElementByTagName(opfDoc, "metadata");
+    const metaEls = metadata ? elementsByTagName(metadata, "meta") : [];
+    const coverId =
+      metaEls.find((meta) => meta.getAttribute("name")?.toLowerCase() === "cover")
+        ?.getAttribute("content") ?? "";
+
+    const coverItem =
+      items.find((item) => coverId && item.getAttribute("id") === coverId) ||
+      items.find((item) => item.getAttribute("properties")?.split(/\s+/).includes("cover-image")) ||
+      items.find((item) => /cover/i.test(item.getAttribute("id") || "")) ||
+      items.find((item) => /cover/i.test(item.getAttribute("href") || ""));
+
+    if (coverItem) {
+      const href = coverItem.getAttribute("href") || "";
+      const mediaType = coverItem.getAttribute("media-type") || imageMimeType(href);
+      const dataUrl = await readImageAsDataUrl(base + href, mediaType);
+      if (dataUrl) return dataUrl;
     }
+
+    const firstLargeImage = items.find((item) => {
+      const mediaType = item.getAttribute("media-type") || "";
+      const href = item.getAttribute("href") || "";
+      return mediaType.startsWith("image/") && !/logo|icon|glyph|ornament/i.test(href);
+    });
+    if (firstLargeImage) {
+      const href = firstLargeImage.getAttribute("href") || "";
+      const mediaType = firstLargeImage.getAttribute("media-type") || imageMimeType(href);
+      const dataUrl = await readImageAsDataUrl(base + href, mediaType);
+      if (dataUrl) return dataUrl;
+    }
+  }
+
+  const anyCoverImage = Object.keys(zip.files).find((path) =>
+    /cover/i.test(path) && /\.(jpe?g|png|webp|gif|svg)$/i.test(path)
+  );
+  if (anyCoverImage) {
+    const dataUrl = await readImageAsDataUrl(anyCoverImage);
+    if (dataUrl) return dataUrl;
+  }
+
+  const anyImage = Object.keys(zip.files).find((path) => {
+    if (!/\.(jpe?g|png|webp)$/i.test(path)) return false;
+    return !/logo|icon|glyph|ornament/i.test(path);
+  });
+  if (anyImage) {
+    const dataUrl = await readImageAsDataUrl(anyImage);
+    if (dataUrl) return dataUrl;
   }
 
   return undefined;

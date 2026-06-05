@@ -9,6 +9,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import type {
   Book,
+  BookStructure,
   ReadingProgress,
   Highlight,
   Note,
@@ -54,6 +55,14 @@ async function initSchema(db: Database): Promise<void> {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS book_structures (
+      book_id TEXT PRIMARY KEY,
+      structure_json TEXT NOT NULL,
+      saved_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS highlights (
       id TEXT PRIMARY KEY,
       book_id TEXT NOT NULL,
@@ -82,9 +91,15 @@ async function initSchema(db: Database): Promise<void> {
       inflection_points TEXT NOT NULL,
       scenes TEXT NOT NULL,
       golden_number INTEGER NOT NULL,
-      analyzed_at TEXT NOT NULL
+      analyzed_at TEXT NOT NULL,
+      storyboard TEXT,
+      visual_lore TEXT,
+      narrative_blueprint TEXT
     );
   `);
+  await db.execute(`ALTER TABLE semantic_maps ADD COLUMN storyboard TEXT`).catch(() => {});
+  await db.execute(`ALTER TABLE semantic_maps ADD COLUMN visual_lore TEXT`).catch(() => {});
+  await db.execute(`ALTER TABLE semantic_maps ADD COLUMN narrative_blueprint TEXT`).catch(() => {});
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS image_cache (
@@ -151,12 +166,36 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   const db = await getDb();
   const segmentPrefix = `${bookId}::%`;
   await db.execute(`DELETE FROM books WHERE id = $1`, [bookId]);
+  await db.execute(`DELETE FROM book_structures WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM highlights WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM notes WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+}
+
+export async function dbSaveBookStructure(structure: BookStructure): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO book_structures (book_id, structure_json, saved_at)
+     VALUES ($1, $2, $3)`,
+    [structure.bookId, JSON.stringify(structure), new Date().toISOString()]
+  );
+}
+
+export async function dbLoadBookStructure(bookId: string): Promise<BookStructure | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT structure_json FROM book_structures WHERE book_id = $1`,
+    [bookId]
+  );
+  if (rows.length === 0) return null;
+  try {
+    return JSON.parse(String(rows[0].structure_json)) as BookStructure;
+  } catch {
+    return null;
+  }
 }
 
 function rowToBook(row: Record<string, unknown>): Book {
@@ -306,8 +345,8 @@ export async function dbSaveSemanticMap(map: SemanticMap): Promise<void> {
   const db = await getDb();
   await db.execute(
     `INSERT OR REPLACE INTO semantic_maps
-     (book_id, arc_shape, inflection_points, scenes, golden_number, analyzed_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+     (book_id, arc_shape, inflection_points, scenes, golden_number, analyzed_at, storyboard, visual_lore, narrative_blueprint)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
       map.bookId,
       map.arcShape,
@@ -315,6 +354,9 @@ export async function dbSaveSemanticMap(map: SemanticMap): Promise<void> {
       JSON.stringify(map.scenes),
       map.goldenNumber,
       map.analyzedAt,
+      JSON.stringify(map.storyboard ?? null),
+      JSON.stringify(map.visualLore ?? null),
+      JSON.stringify(map.narrativeBlueprint ?? null),
     ]
   );
 }
@@ -339,6 +381,18 @@ export async function dbLoadSemanticMap(bookId: string): Promise<SemanticMap | n
     scenes: JSON.parse(String(row.scenes)),
     goldenNumber: Number(row.golden_number),
     analyzedAt: String(row.analyzed_at),
+    storyboard:
+      row.storyboard && String(row.storyboard) !== "null"
+        ? JSON.parse(String(row.storyboard))
+        : undefined,
+    visualLore:
+      row.visual_lore && String(row.visual_lore) !== "null"
+        ? JSON.parse(String(row.visual_lore))
+        : undefined,
+    narrativeBlueprint:
+      row.narrative_blueprint && String(row.narrative_blueprint) !== "null"
+        ? JSON.parse(String(row.narrative_blueprint))
+        : undefined,
   };
 }
 

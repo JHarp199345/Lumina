@@ -9,8 +9,7 @@ import { STYLE_SEEDS, getStyleSeedById } from "@/data/styleSeeds";
 import { useBookOrchestration } from "@/hooks/useBookOrchestration";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { useEpubImport } from "@/hooks/useEpubImport";
-import { dbDeleteBook } from "@/services/db";
-import { getAppDataDir, deleteDirectory } from "@/utils/tauriBridge";
+import { storage } from "@/storage";
 import ApiKeySetup from "./ApiKeySetup";
 
 interface SettingsPanelProps {
@@ -126,8 +125,13 @@ function ReadingSection() {
 // ─── Visuals ─────────────────────────────────────────────────────────────────
 
 function VisualSection() {
-  const { imageGenerationEnabled, setImageGenerationEnabled } = useSettingsStore();
-  const { activeBook, activeStyleSeed, activeStructure } = useBookStore();
+  const {
+    imageGenerationEnabled,
+    setImageGenerationEnabled,
+    visualInterpretationLevel,
+    setVisualInterpretationLevel,
+  } = useSettingsStore();
+  const { activeBook, activeStyleSeed, activeStructure, setAnalysisProgressDetail } = useBookStore();
   const { currentChapterIndex } = useReaderStore();
   const { clearQueue } = useImageStore();
   const { reAnalyzeBook, regenerateAllImages } = useBookOrchestration();
@@ -145,6 +149,13 @@ function VisualSection() {
     setIsReanalyzing(true);
     try {
       await reAnalyzeBook(activeStructure);
+    } catch (err) {
+      console.error("[Settings] Re-analysis failed:", err);
+      setAnalysisProgressDetail({
+        phase: "error",
+        message: err instanceof Error ? err.message : "Re-analysis failed before it could finish.",
+        percent: 0,
+      });
     } finally {
       setIsReanalyzing(false);
     }
@@ -156,6 +167,13 @@ function VisualSection() {
     try {
       // Keeps the semantic map — only re-generates image files
       await regenerateAllImages();
+    } catch (err) {
+      console.error("[Settings] Image regeneration queue failed:", err);
+      setAnalysisProgressDetail({
+        phase: "error",
+        message: err instanceof Error ? err.message : "Image regeneration could not start.",
+        percent: 0,
+      });
     } finally {
       setIsRegeneratingAll(false);
     }
@@ -194,6 +212,31 @@ function VisualSection() {
             <p className="text-xs text-white/25 leading-relaxed">{currentSeed.description}</p>
           </div>
         )}
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs text-white/40">Visual Style</label>
+            <span className="text-xs text-lumina-gold/80">
+              {visualStyleLabel(visualInterpretationLevel)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={visualInterpretationLevel}
+            onChange={(e) => setVisualInterpretationLevel(Number(e.target.value))}
+            className="w-full accent-lumina-gold"
+          />
+          <div className="mt-1 flex justify-between text-[10px] uppercase tracking-[0.12em] text-white/18">
+            <span>Interpretive</span>
+            <span>Depictive</span>
+          </div>
+          <p className="text-xs text-white/22 mt-2 leading-relaxed">
+            {visualStyleDescription(visualInterpretationLevel)}
+          </p>
+        </div>
 
         {/* Book-specific actions */}
         {activeBook && imageGenerationEnabled && (
@@ -234,6 +277,22 @@ function VisualSection() {
   );
 }
 
+function visualStyleLabel(level: number): string {
+  if (level < 25) return "Interpretive";
+  if (level < 50) return "Atmospheric";
+  if (level < 70) return "Balanced";
+  if (level < 90) return "Depictive";
+  return "Scene Detail";
+}
+
+function visualStyleDescription(level: number): string {
+  if (level < 25) return "Mood, symbol, and atmosphere lead. Figures and action are minimized.";
+  if (level < 50) return "Objects, places, and atmosphere carry the scene with light depiction.";
+  if (level < 70) return "The scene is recognizable, with figures and action handled through gesture.";
+  if (level < 90) return "Concrete scenes, action, setting, and important objects are clearly shown.";
+  return "Closest scene depiction the selected art style allows, with cinematic restraint.";
+}
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 function ApiSection() {
@@ -265,27 +324,10 @@ function LibrarySection({ onClose }: { onClose: () => void }) {
   };
 
   const handleDelete = async (bookId: string) => {
-    const book = library.find((b) => b.id === bookId);
-
-    // Remove DB rows first
-    await dbDeleteBook(bookId);
+    await storage.deleteAllBookData(bookId);
     removeBook(bookId);
     if (activeBook?.id === bookId) unmountActiveBook();
     setConfirmDelete(null);
-
-    // Remove files from disk (non-blocking — don't block UI on file errors)
-    try {
-      const appData = await getAppDataDir();
-      await Promise.allSettled([
-        // EPUB file directory
-        deleteDirectory(`${appData}/books/${bookId}`),
-        // Generated image cache directory
-        deleteDirectory(`${appData}/lumina/cache/images/${bookId}`),
-        deleteDirectory(`${appData}/lumina/cache/images/${bookId}::`),
-      ]);
-    } catch {
-      // File cleanup is best-effort — DB deletion already succeeded
-    }
   };
 
   if (library.length === 0) return null;

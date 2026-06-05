@@ -38,7 +38,10 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   queue: [],
   isGenerating: false,
 
-  setCurrentImage: (currentImage) => set({ currentImage }),
+  setCurrentImage: (currentImage) => {
+    console.info("[ImageStore] setCurrentImage:", currentImage?.sceneId ?? "null");
+    set({ currentImage });
+  },
   setCurrentThemes: (currentThemes) => set({ currentThemes }),
   setIsTransitioning: (isTransitioning) => set({ isTransitioning }),
 
@@ -69,15 +72,21 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
 
   clearQueue: () => set({ queue: [] }),
 
-  clearImageCache: () => set({ imageCache: {}, currentImage: null, currentThemes: [] }),
+  clearImageCache: () => {
+    console.info("[ImageStore] clearImageCache");
+    set({ imageCache: {}, currentImage: null, currentThemes: [] });
+  },
 
   clearImagesForUnmount: () =>
-    set({
+    {
+      console.info("[ImageStore] clearImagesForUnmount");
+      set({
       currentImage: null,
       currentThemes: [],
       isTransitioning: false,
       imageCache: {},
       queue: [],
       isGenerating: false,
-    }),
+      });
+    },
 }));

@@ -8,6 +8,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles } from "lucide-react";
+import type { AnalysisProgressDetail } from "@/types";
 
 // ─── Arc-to-gradient map ──────────────────────────────────────────────────────
 // Each gradient is tuned to the emotional world of its arc shape.
@@ -79,6 +80,7 @@ interface AmbientSceneLayerProps {
   arcShape?: string;
   phase: AmbientPhase;
   progressText?: string;
+  progressDetail?: AnalysisProgressDetail | null;
   /** If provided, renders a call-to-action button below the status text */
   onAction?: () => void;
   /** Label for the action button. Defaults to "Get Started" */
@@ -89,6 +91,7 @@ export default function AmbientSceneLayer({
   arcShape,
   phase,
   progressText,
+  progressDetail,
   onAction,
   actionLabel = "Get Started",
 }: AmbientSceneLayerProps) {
@@ -96,7 +99,11 @@ export default function AmbientSceneLayer({
   const pColor = particleColor(arcShape);
   const primaryText = PHASE_PRIMARY[phase] ?? "";
   // When analyzing, prefer the live progress message over the generic text
-  const displayPrimary = phase === "analyzing" && progressText ? progressText : primaryText;
+  const displayPrimary =
+    phase === "analyzing" && (progressDetail?.message || progressText)
+      ? progressDetail?.message || progressText || primaryText
+      : primaryText;
+  const progressPercent = Math.max(0, Math.min(100, progressDetail?.percent ?? 0));
 
   return (
     <div className="absolute inset-0 overflow-hidden">
@@ -141,17 +148,33 @@ export default function AmbientSceneLayer({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.4, ease: "easeOut" }}
-              className="flex flex-col items-center gap-1 text-center"
+              className="flex w-full max-w-sm flex-col items-center gap-2 text-center"
             >
               <p className="text-sm text-white/25 font-light tracking-wide leading-relaxed">
                 {displayPrimary}
               </p>
 
-              {/* Secondary line — raw progress message when analyzing */}
-              {phase === "analyzing" && progressText && progressText !== displayPrimary && (
-                <p className="text-xs text-white/15 tracking-wide">
-                  {progressText}
-                </p>
+              {phase === "analyzing" && progressDetail && (
+                <div className="w-full pt-1">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-sky-100/10">
+                    <motion.div
+                      className="h-full rounded-full bg-lumina-gold/70 shadow-[0_0_16px_rgba(199,169,96,0.35)]"
+                      initial={false}
+                      animate={{ width: `${progressPercent}%` }}
+                      transition={{ duration: 0.45, ease: "easeOut" }}
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.16em] text-sky-100/24">
+                    <span>{progressDetail.phase.replace("-", " ")}</span>
+                    <span>{progressPercent}%</span>
+                  </div>
+                  {progressDetail.current != null && progressDetail.total != null && (
+                    <p className="mt-2 text-[11px] text-sky-100/28">
+                      {progressDetail.current} of {progressDetail.total}
+                      {progressDetail.itemLabel ? ` · ${progressDetail.itemLabel}` : ""}
+                    </p>
+                  )}
+                </div>
               )}
             </motion.div>
           </AnimatePresence>

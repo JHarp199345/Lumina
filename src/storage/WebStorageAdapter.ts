@@ -14,6 +14,7 @@
 import type { StorageAdapter } from "./StorageAdapter";
 import type {
   Book,
+  BookStructure,
   ReadingProgress,
   SemanticMap,
   StyleSeedId,
@@ -30,7 +31,6 @@ import {
   dbGetAll,
   dbGetByIndex,
   dbDeleteByIndex,
-  dbDeleteByPrefix,
 } from "./webDb";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -43,6 +43,37 @@ function makeBlobUrl(data: Uint8Array, mimeType: string): string {
   const url = URL.createObjectURL(blob);
   activeBlobUrls.add(url);
   return url;
+}
+
+function makeDataUrl(data: Uint8Array, mimeType: string): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < data.length; i += chunkSize) {
+    binary += String.fromCharCode(...data.slice(i, i + chunkSize));
+  }
+  return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
+function detectImageMimeType(data: Uint8Array): string {
+  if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) {
+    return "image/png";
+  }
+  if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    data[0] === 0x52 &&
+    data[1] === 0x49 &&
+    data[2] === 0x46 &&
+    data[3] === 0x46 &&
+    data[8] === 0x57 &&
+    data[9] === 0x45 &&
+    data[10] === 0x42 &&
+    data[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return "image/png";
 }
 
 // ─── Adapter ──────────────────────────────────────────────────────────────────
@@ -124,6 +155,14 @@ export class WebStorageAdapter implements StorageAdapter {
     }
   }
 
+  async saveBookStructure(structure: BookStructure): Promise<void> {
+    await dbPut(STORES.BOOK_STRUCTURES, structure, structure.bookId);
+  }
+
+  async loadBookStructure(bookId: string): Promise<BookStructure | null> {
+    return (await dbGet<BookStructure>(STORES.BOOK_STRUCTURES, bookId)) ?? null;
+  }
+
   // ── Progress ─────────────────────────────────────────────────────────────
 
   async saveProgress(progress: ReadingProgress): Promise<void> {
@@ -201,8 +240,9 @@ export class WebStorageAdapter implements StorageAdapter {
     // Persist blob in IndexedDB
     await dbPut(STORES.IMAGE_BLOBS, data, meta.sceneId);
 
-    // Create session-scoped display URL
-    const displayUrl = makeBlobUrl(data, "image/png");
+    // Use a data URL for immediate display in the PWA. It is larger than a
+    // blob URL, but avoids mobile browser blob lifecycle edge cases.
+    const displayUrl = makeDataUrl(data, detectImageMimeType(data));
 
     // Persist metadata (with placeholder — real URL recreated on load)
     const fullMeta: CachedImage = { ...meta, filePath: `idb-img://${meta.sceneId}` };
@@ -218,12 +258,6 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async loadImagesForPrefix(bookId: string): Promise<CachedImage[]> {
     // Load exact match + any collection segment keys (bookId::segmentId)
-    const exact = await dbGetByIndex<CachedImage>(STORES.IMAGE_META, "bookId", bookId);
-    const prefixed = await dbDeleteByPrefix(STORES.IMAGE_META, "bookId", `${bookId}::`)
-      .then(() => []) // deleteByPrefix is wrong here — use getAllByPrefix
-      .catch(() => [] as CachedImage[]);
-
-    // Workaround: load all image meta and filter client-side
     const all = await dbGetAll<CachedImage>(STORES.IMAGE_META);
     const matched = all.filter(
       (m) => m.bookId === bookId || m.bookId.startsWith(`${bookId}::`)
@@ -267,6 +301,7 @@ export class WebStorageAdapter implements StorageAdapter {
   async deleteAllBookData(bookId: string): Promise<void> {
     await Promise.allSettled([
       dbDelete(STORES.BOOKS, bookId),
+      dbDelete(STORES.BOOK_STRUCTURES, bookId),
       dbDelete(STORES.EPUBS, bookId),
       dbDelete(STORES.PROGRESS, bookId),
       dbDeleteByIndex(STORES.HIGHLIGHTS, "bookId", bookId),
@@ -284,7 +319,7 @@ export class WebStorageAdapter implements StorageAdapter {
       metas.map(async (meta) => {
         const data = await dbGet<Uint8Array>(STORES.IMAGE_BLOBS, meta.sceneId);
         if (!data) return meta; // no blob — filePath stays as placeholder
-        return { ...meta, filePath: makeBlobUrl(data, "image/png") };
+        return { ...meta, filePath: makeDataUrl(data, detectImageMimeType(data)) };
       })
     );
   }

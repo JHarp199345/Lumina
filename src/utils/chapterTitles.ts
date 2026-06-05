@@ -19,9 +19,10 @@ export function formatChapterTitle(rawTitle: string, fallbackIndex = 0): Display
   const lastPart = parts[parts.length - 1] || normalized;
   const cleanedTitle = cleanTitleFragment(lastPart) || `Chapter ${fallbackIndex + 1}`;
   const bookContext = parts.length > 1 ? cleanBookContext(parts[0]) : "";
+  const fallbackChapter = `Chapter ${fallbackIndex + 1}`;
 
   return {
-    eyebrow: bookContext || `Chapter ${fallbackIndex + 1}`,
+    eyebrow: bookContext || (isGenericChapterLabel(cleanedTitle) ? "" : fallbackChapter),
     title: cleanedTitle,
   };
 }
@@ -41,4 +42,10 @@ function cleanBookContext(context: string): string {
     .replace(/\s+by\s+[^/]+$/iu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isGenericChapterLabel(title: string): boolean {
+  return /^chapter\s+([0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten)\.?$/iu.test(
+    title.trim()
+  );
 }

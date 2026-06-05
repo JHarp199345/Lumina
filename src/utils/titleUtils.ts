@@ -41,6 +41,9 @@ export function parseChapterDisplay(raw: string): ChapterDisplay {
     const candidateGroup = remainder.slice(0, slashIdx).trim();
     groupLabel = candidateGroup || null;
     remainder = remainder.slice(slashIdx + 3).trim();
+    if (groupLabel && areEquivalentTitleFragments(groupLabel, remainder)) {
+      groupLabel = null;
+    }
   }
 
   // Split title from subtitle on a colon followed by a space
@@ -64,6 +67,31 @@ export function parseChapterDisplay(raw: string): ChapterDisplay {
   }
 
   return { groupLabel, title: remainder, subtitle: null };
+}
+
+function areEquivalentTitleFragments(a: string, b: string): boolean {
+  const left = normalizeComparableTitle(a);
+  const right = normalizeComparableTitle(b);
+  return Boolean(left && right && left === right);
+}
+
+function normalizeComparableTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\b(chapter|chap\.?|ch\.?)\b/g, "chapter")
+    .replace(/\b(one|i)\b/g, "1")
+    .replace(/\b(two|ii)\b/g, "2")
+    .replace(/\b(three|iii)\b/g, "3")
+    .replace(/\b(four|iv)\b/g, "4")
+    .replace(/\b(five|v)\b/g, "5")
+    .replace(/\b(six|vi)\b/g, "6")
+    .replace(/\b(seven|vii)\b/g, "7")
+    .replace(/\b(eight|viii)\b/g, "8")
+    .replace(/\b(nine|ix)\b/g, "9")
+    .replace(/\b(ten|x)\b/g, "10")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**

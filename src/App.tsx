@@ -7,6 +7,9 @@ import { useBookOrchestration } from "@/hooks/useBookOrchestration";
 import { useReadPosition } from "@/hooks/useReadPosition";
 import { useImageTrigger } from "@/hooks/useImageTrigger";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
+import { storage } from "@/storage";
+import { parseEpub } from "@/pipeline/epubParser";
+import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import TopNav from "@/components/layout/TopNav";
 import SideRail from "@/components/layout/SideRail";
 import PanelContainer from "@/components/layout/PanelContainer";
@@ -19,11 +22,18 @@ import LibraryPanel from "@/components/common/LibraryPanel";
 import type { StyleSeedId, BookStructure } from "@/types";
 
 function App() {
-  const { resolvedTheme, hasCompletedOnboarding } = useSettingsStore();
-  const { activeBook, activeStructure, activeStyleSeed, analysisRequested, setAnalysisRequested } = useBookStore();
+  const { resolvedTheme, hasCompletedOnboarding, setApiKeyConfigured } = useSettingsStore();
+  const {
+    activeBook,
+    activeStructure,
+    activeStyleSeed,
+    analysisRequested,
+    setAnalysisRequested,
+    setActiveStructure,
+  } = useBookStore();
   const [showOnboarding, setShowOnboarding] = useState(!hasCompletedOnboarding);
   const { importEpub, loadLibrary } = useEpubImport();
-  const { startOrchestration } = useBookOrchestration();
+  const { startOrchestration, reAnalyzeBook } = useBookOrchestration();
   const { isTablet, isPortrait } = useDeviceLayout();
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -42,8 +52,16 @@ function App() {
 
   // Load library from SQLite on startup
   useEffect(() => {
+    diagnosticInfo("library.load.start", "Loading library");
     loadLibrary();
   }, [loadLibrary]);
+
+  useEffect(() => {
+    storage
+      .loadApiKey("lumina_google_ai_key")
+      .then((key) => setApiKeyConfigured(Boolean(key)))
+      .catch(() => setApiKeyConfigured(false));
+  }, [setApiKeyConfigured]);
 
   const [pendingSeedSelection, setPendingSeedSelection] = useState<{
     structure: BookStructure;
@@ -57,17 +75,102 @@ function App() {
   //   seed already saved → startOrchestration immediately
   //   no seed → show SeedPicker; handleSeedSelected calls startOrchestration
   useEffect(() => {
-    if (!analysisRequested || !activeBook || !activeStructure) return;
-    setAnalysisRequested(false);
-
-    if (activeStyleSeed) {
-      // Seed is already known — go straight to analysis
-      startOrchestration(activeStructure, activeStyleSeed);
-    } else {
-      // Show seed picker; after selection the normal handleSeedSelected path runs
-      setPendingSeedSelection({ structure: activeStructure });
+    if (!analysisRequested) return;
+    if (!activeBook) {
+      setAnalysisRequested(false);
+      return;
     }
-  }, [analysisRequested, activeBook, activeStructure, activeStyleSeed, setAnalysisRequested, startOrchestration]);
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        let structure = activeStructure;
+
+        if (!structure) {
+          setImportProgress("Restoring book structure…");
+          structure = await storage.loadBookStructure(activeBook.id).catch(() => null);
+          if (structure && !cancelled) {
+            setActiveStructure(structure);
+          }
+        }
+
+        if (!structure) {
+          setImportProgress("Rebuilding book structure…");
+          const bytes = await storage.getEpubBytes(activeBook).catch(() => null);
+          if (bytes) {
+            const parsed = await parseEpub(bytes, (message) => setImportProgress(message)).catch(() => null);
+            structure = parsed?.structure ?? null;
+            if (structure && !cancelled) {
+              await storage.saveBookStructure(structure).catch(() => {});
+              setActiveStructure(structure);
+              setImportProgress("");
+            }
+          }
+        }
+
+        if (!structure) {
+          setAnalysisRequested(false);
+          setImportFailed(true);
+          setImportProgress("Analysis cannot start: Lumina could not rebuild this book structure from the saved EPUB.");
+          return;
+        }
+
+        console.info("[Lumina Analysis] Request accepted", {
+          bookId: activeBook.id,
+          chapters: structure.chapters.length,
+          hasSeed: Boolean(activeStyleSeed),
+        });
+        diagnosticInfo("analysis.request.accepted", "Analysis request accepted", {
+          bookId: activeBook.id,
+          chapters: structure.chapters.length,
+          hasSeed: Boolean(activeStyleSeed),
+        });
+        setImportFailed(false);
+        setImportProgress("Starting visual analysis…");
+
+        setAnalysisRequested(false);
+
+        if (activeStyleSeed) {
+          if (useBookStore.getState().activeSemanticMap) {
+            await reAnalyzeBook(structure);
+          } else {
+            await startOrchestration(structure, activeStyleSeed);
+          }
+          setImportProgress("");
+        } else {
+          setImportProgress("");
+          setPendingSeedSelection({ structure });
+        }
+      } catch (err) {
+        console.error("[Lumina Analysis] Failed to start:", err);
+        diagnosticError("analysis.start.failed", "Analysis failed to start", {
+          error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+        });
+        setAnalysisRequested(false);
+        setImportFailed(true);
+        setImportProgress(
+          err instanceof Error
+            ? `Analysis failed: ${err.message}`
+            : "Analysis failed before it could start."
+        );
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    analysisRequested,
+    activeBook,
+    activeStructure,
+    activeStyleSeed,
+    setAnalysisRequested,
+    setActiveStructure,
+    startOrchestration,
+    reAnalyzeBook,
+  ]);
 
   // Activate read-position tracking and image triggering
   useReadPosition();
@@ -115,6 +218,9 @@ function App() {
       }
     } catch (err) {
       console.error("Import failed:", err);
+      diagnosticError("import.failed", "Import failed", {
+        error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+      });
       const message = err instanceof Error ? err.message : String(err);
       failed = true;
       setImportFailed(true);
@@ -126,8 +232,26 @@ function App() {
 
   const handleSeedSelected = async (seedId: StyleSeedId) => {
     if (!pendingSeedSelection) return;
+    const { structure } = pendingSeedSelection;
     setPendingSeedSelection(null);
-    await startOrchestration(pendingSeedSelection.structure, seedId);
+    try {
+      setImportFailed(false);
+      setImportProgress("Starting visual analysis…");
+      await startOrchestration(structure, seedId);
+      setImportProgress("");
+    } catch (err) {
+      console.error("[Lumina Analysis] Failed after style selection:", err);
+      diagnosticError("analysis.seed_selection.failed", "Analysis failed after style selection", {
+        seedId,
+        error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+      });
+      setImportFailed(true);
+      setImportProgress(
+        err instanceof Error
+          ? `Analysis failed: ${err.message}`
+          : "Analysis failed after style selection."
+      );
+    }
   };
 
   return (

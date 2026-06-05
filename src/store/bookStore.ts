@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Book, BookStructure, SemanticMap, StyleSeedId } from "@/types";
+import type { AnalysisProgressDetail, Book, BookStructure, SemanticMap, StyleSeedId } from "@/types";
 
 interface BookStore {
   // Library
@@ -32,8 +32,10 @@ interface BookStore {
   // Analysis state
   isAnalyzing: boolean;
   analysisProgress: string;
+  analysisProgressDetail: AnalysisProgressDetail | null;
   setIsAnalyzing: (analyzing: boolean) => void;
   setAnalysisProgress: (progress: string) => void;
+  setAnalysisProgressDetail: (progress: AnalysisProgressDetail | null) => void;
 
   /**
    * Set to true by VisualPanel when the user clicks "Analyze This Book".
@@ -75,12 +77,23 @@ export const useBookStore = create<BookStore>()((set) => ({
       initialCfi: null,
       isAnalyzing: false,
       analysisProgress: "",
+      analysisProgressDetail: null,
     }),
 
   isAnalyzing: false,
   analysisProgress: "",
+  analysisProgressDetail: null,
   setIsAnalyzing: (isAnalyzing) => set({ isAnalyzing }),
-  setAnalysisProgress: (analysisProgress) => set({ analysisProgress }),
+  setAnalysisProgress: (analysisProgress) =>
+    set((state) => ({
+      analysisProgress,
+      analysisProgressDetail: analysisProgress ? state.analysisProgressDetail : null,
+    })),
+  setAnalysisProgressDetail: (analysisProgressDetail) =>
+    set({
+      analysisProgressDetail,
+      analysisProgress: analysisProgressDetail?.message ?? "",
+    }),
 
   analysisRequested: false,
   setAnalysisRequested: (analysisRequested) => set({ analysisRequested }),

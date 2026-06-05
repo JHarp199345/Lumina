@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lumina Recovery</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #03101d;
+        color: rgba(224, 242, 254, 0.75);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      main {
+        max-width: 520px;
+        border: 1px solid rgba(186, 230, 253, 0.16);
+        border-radius: 14px;
+        background: #071525;
+        padding: 22px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 650;
+      }
+
+      p {
+        margin: 10px 0 0;
+        color: rgba(224, 242, 254, 0.42);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Refreshing Lumina</h1>
+      <p>Clearing the old PWA shell and loading a fresh reader.</p>
+    </main>
+
+    <script>
+      async function recover() {
+        try {
+          if ("serviceWorker" in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+          }
+
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(
+              keys.filter((key) => key.startsWith("lumina-")).map((key) => caches.delete(key))
+            );
+          }
+        } catch (error) {
+          console.warn("[Lumina Recovery] Could not fully clear cache:", error);
+        } finally {
+          window.location.replace("/");
+        }
+      }
+
+      recover();
+    </script>
+  </body>
+</html>

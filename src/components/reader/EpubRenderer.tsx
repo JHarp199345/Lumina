@@ -52,6 +52,8 @@ export default function EpubRenderer({
   const renditionRef      = useRef<Rendition | null>(null);
   const saveTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialDisplayed  = useRef(false);   // gate: only display initialCfi once
+  const touchStartRef     = useRef<{ x: number; y: number } | null>(null);
+  const wiredDocsRef      = useRef<WeakSet<Document>>(new WeakSet());
 
   const { setCurrentCfi, setPercentComplete, setCurrentChapterIndex } = useReaderStore();
   const { activeStructure } = useBookStore();
@@ -107,6 +109,174 @@ export default function EpubRenderer({
       }, 4000);
     },
     [bookId]
+  );
+
+  const displayRelativeChapter = useCallback(async (direction: 1 | -1) => {
+    const r = renditionRef.current;
+    const structure = useBookStore.getState().activeStructure;
+    if (!r || !structure?.chapters.length) return false;
+
+    const { currentChapterIndex } = useReaderStore.getState();
+    const nextIndex = Math.max(
+      0,
+      Math.min(structure.chapters.length - 1, currentChapterIndex + direction)
+    );
+    if (nextIndex === currentChapterIndex) return false;
+
+    const chapter = structure.chapters[nextIndex];
+    const target = chapter.startCfi || chapter.href;
+    if (!target) return false;
+
+    const before = useReaderStore.getState().currentCfi;
+    await r.display(target);
+    const after = useReaderStore.getState().currentCfi;
+    setCurrentChapterIndex(nextIndex);
+    return Boolean(after && after !== before);
+  }, [setCurrentChapterIndex]);
+
+  const displayRelativeSpineItem = useCallback(async (direction: 1 | -1) => {
+    const r = renditionRef.current;
+    const book = bookRef.current as
+      | (EpubBook & {
+          spine?: {
+            items?: Array<{ href?: string; hrefNormalized?: string }>;
+          };
+        })
+      | null;
+    if (!r || !book?.spine?.items?.length) return false;
+
+    const location = (
+      r as unknown as {
+        currentLocation?: () => { start?: { href?: string; index?: number } };
+      }
+    ).currentLocation?.();
+    const currentHref = location?.start?.href;
+    const currentIndex =
+      typeof location?.start?.index === "number"
+        ? location.start.index
+        : book.spine.items.findIndex((item) =>
+            Boolean(
+              currentHref &&
+                (item.href === currentHref ||
+                  item.hrefNormalized === currentHref ||
+                  currentHref.endsWith(item.href ?? ""))
+            )
+          );
+    const nextIndex = Math.max(
+      0,
+      Math.min(book.spine.items.length - 1, currentIndex + direction)
+    );
+    if (nextIndex === currentIndex) return false;
+
+    const target = book.spine.items[nextIndex]?.hrefNormalized || book.spine.items[nextIndex]?.href;
+    if (!target) return false;
+
+    await r.display(target);
+    return true;
+  }, []);
+
+  const goNextPage = useCallback(() => {
+    const r = renditionRef.current;
+    if (!r) return;
+
+    const before = useReaderStore.getState().currentCfi;
+    void Promise.resolve(r.next()).then(() => {
+      window.setTimeout(() => {
+        const after = useReaderStore.getState().currentCfi;
+        if (after && after !== before) return;
+        void displayRelativeChapter(1).then((moved) => {
+          if (!moved) void displayRelativeSpineItem(1);
+        });
+      }, 300);
+    });
+  }, [displayRelativeChapter, displayRelativeSpineItem]);
+
+  const goPrevPage = useCallback(() => {
+    const r = renditionRef.current;
+    if (!r) return;
+
+    const before = useReaderStore.getState().currentCfi;
+    void Promise.resolve(r.prev()).then(() => {
+      window.setTimeout(() => {
+        const after = useReaderStore.getState().currentCfi;
+        if (after && after !== before) return;
+        void displayRelativeChapter(-1).then((moved) => {
+          if (!moved) void displayRelativeSpineItem(-1);
+        });
+      }, 300);
+    });
+  }, [displayRelativeChapter, displayRelativeSpineItem]);
+
+  const navigateToTarget = useCallback((target: string) => {
+    const r = renditionRef.current;
+    if (!r || !target) return;
+
+    void Promise.resolve(r.display(target)).catch(() => {
+      const fileName = target.split("#")[0]?.split("/").pop();
+      if (!fileName) return;
+      const book = bookRef.current as
+        | (EpubBook & {
+            spine?: {
+              items?: Array<{ href?: string; hrefNormalized?: string }>;
+            };
+          })
+        | null;
+      const match = book?.spine?.items?.find((item) =>
+        Boolean(
+          (item.href && item.href.endsWith(fileName)) ||
+            (item.hrefNormalized && item.hrefNormalized.endsWith(fileName))
+        )
+      );
+      const fallback = match?.hrefNormalized || match?.href;
+      if (fallback) void r.display(fallback);
+    });
+  }, []);
+
+  const wireContentNavigation = useCallback(
+    (doc: Document | undefined) => {
+      if (!doc || wiredDocsRef.current.has(doc)) return;
+      wiredDocsRef.current.add(doc);
+
+      const isInteractive = (target: EventTarget | null) =>
+        target instanceof Element &&
+        Boolean(target.closest("a,button,input,textarea,select,[role='button']"));
+
+      const onTouchStart = (event: TouchEvent) => {
+        const touch = event.touches[0];
+        if (!touch) return;
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      };
+
+      const onTouchEnd = (event: TouchEvent) => {
+        if (isInteractive(event.target)) return;
+        const start = touchStartRef.current;
+        const touch = event.changedTouches[0];
+        touchStartRef.current = null;
+        if (!start || !touch) return;
+
+        const dx = touch.clientX - start.x;
+        const dy = touch.clientY - start.y;
+        if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+          event.preventDefault();
+          if (dx < 0) goNextPage();
+          else goPrevPage();
+        }
+      };
+
+      const onClick = (event: MouseEvent) => {
+        if (isInteractive(event.target)) return;
+        if (doc.getSelection()?.toString()) return;
+        const width = doc.defaultView?.innerWidth || doc.documentElement.clientWidth;
+        if (!width) return;
+        if (event.clientX > width * 0.72) goNextPage();
+        if (event.clientX < width * 0.28) goPrevPage();
+      };
+
+      doc.addEventListener("touchstart", onTouchStart, { passive: true });
+      doc.addEventListener("touchend", onTouchEnd, { passive: false });
+      doc.addEventListener("click", onClick);
+    },
+    [goNextPage, goPrevPage]
   );
 
   // ── Init EPUB.js ───────────────────────────────────────────────────────────
@@ -189,7 +359,10 @@ export default function EpubRenderer({
     });
 
     // Re-apply highlights every time a new section renders
-    rendition.on("rendered", () => applyHighlights());
+    rendition.on("rendered", (_section: unknown, view: { contents?: { document?: Document } }) => {
+      applyHighlights();
+      wireContentNavigation(view?.contents?.document);
+    });
 
     // Track location — single place progress is saved
     rendition.on(
@@ -269,6 +442,7 @@ export default function EpubRenderer({
   useEffect(() => {
     type LuminaWin = Window & {
       luminaNavigate?:         (target: string) => void;
+      luminaNavigateToScene?:  (target: string, wordOffset?: number) => void;
       luminaNextPage?:         () => void;
       luminaPrevPage?:         () => void;
       luminaEpubBook?:         { getCfiFromRange?: (r: Range) => string };
@@ -279,15 +453,18 @@ export default function EpubRenderer({
     const win = window as LuminaWin;
 
     win.luminaNavigate = (target: string) => {
-      renditionRef.current?.display(target);
+      navigateToTarget(target);
+    };
+    win.luminaNavigateToScene = (target: string) => {
+      navigateToTarget(target);
     };
 
     win.luminaNextPage = () => {
-      renditionRef.current?.next();
+      goNextPage();
     };
 
     win.luminaPrevPage = () => {
-      renditionRef.current?.prev();
+      goPrevPage();
     };
 
     win.luminaEpubBook = {
@@ -341,16 +518,17 @@ export default function EpubRenderer({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event.key === "ArrowRight" || event.key === "PageDown") {
-        renditionRef.current?.next();
+        goNextPage();
       }
       if (event.key === "ArrowLeft" || event.key === "PageUp") {
-        renditionRef.current?.prev();
+        goPrevPage();
       }
     };
     window.addEventListener("keydown", onKeyDown);
 
     return () => {
       delete win.luminaNavigate;
+      delete win.luminaNavigateToScene;
       delete win.luminaNextPage;
       delete win.luminaPrevPage;
       delete win.luminaEpubBook;
@@ -359,7 +537,7 @@ export default function EpubRenderer({
       delete win.luminaClearSearchMarks;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, []);
+  }, [goNextPage, goPrevPage, navigateToTarget]);
 
   return (
     <div

@@ -17,7 +17,8 @@ export const LUMINA_CONFIG = {
 
   // API
   SEMANTIC_CHUNK_MAX_TOKENS: 400,
-  GEMINI_MODEL: "gemini-2.0-flash",
+  GEMINI_MODEL: "gemini-3-flash-preview",
+  GEMINI_IMAGE_MODEL: "gemini-2.5-flash-image",
   IMAGEN_MODEL: "imagen-3.0-generate-002",
 
   // Storage

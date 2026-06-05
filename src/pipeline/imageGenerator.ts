@@ -2,7 +2,7 @@
  * Image Generation Pipeline
  *
  * Primary: Imagen 3 via Google AI Studio (same key as Gemini)
- * Fallback: Flux via fal.ai
+ * Fallbacks: Gemini native image generation, then Flux via fal.ai
  *
  * Style seed injected into every prompt.
  * Style continuity maintained via prior palette context.
@@ -11,15 +11,16 @@
 import type { IdentifiedScene, StyleSeed, CachedImage } from "@/types";
 import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
+import { buildFinalImagePrompt } from "./visualDirector";
 
 const IMAGEN_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const FAL_BASE = "https://queue.fal.run";
 
 // Negative prompt applied to every generation
 const NEGATIVE_PROMPT =
-  "photorealistic, photograph, literal scene depiction, comic book, anime, cartoon, " +
-  "manga, text, words, letters, watermarks, faces visible, crowd, people portrait, " +
-  "modern objects, digital art style, 3d render, CGI";
+  "photorealistic, photograph, celebrity likeness, portrait photography, comic book, anime, cartoon, " +
+  "manga, readable text, words, letters, watermarks, graphic gore, mutilation, " +
+  "modern objects, low quality, digital art style, 3d render, CGI";
 
 // ─── Main Generator ───────────────────────────────────────────────────────────
 
@@ -38,26 +39,36 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
 
   // Build the full prompt
   const prompt = buildImagePrompt(scene, styleSeed, priorPaletteContext);
+  const negativePrompt = scene.directorBrief?.negativePrompt ?? NEGATIVE_PROMPT;
 
   // Try Imagen 3 first
   let imageData: Uint8Array | null = null;
-  let apiUsed: "imagen3" | "flux" = "imagen3";
+  let apiUsed: CachedImage["generationApi"] = "imagen3";
 
   try {
-    imageData = await generateWithImagen3(prompt, googleApiKey);
+    imageData = await generateWithImagen3(prompt, googleApiKey, negativePrompt);
   } catch (err) {
-    console.warn("[ImageGen] Imagen 3 failed, trying Flux fallback:", err);
+    console.warn("[ImageGen] Imagen failed, trying Gemini image fallback:", err);
 
-    if (falApiKey) {
-      try {
-        imageData = await generateWithFlux(prompt, falApiKey);
-        apiUsed = "flux";
-      } catch (fluxErr) {
-        console.error("[ImageGen] Flux also failed:", fluxErr);
-        throw new Error("Image generation failed on all available APIs");
+    try {
+      imageData = await generateWithGeminiImage(prompt, googleApiKey);
+      apiUsed = "gemini-image";
+    } catch (geminiErr) {
+      console.warn("[ImageGen] Gemini image fallback failed:", geminiErr);
+
+      if (falApiKey) {
+        try {
+          imageData = await generateWithFlux(prompt, falApiKey);
+          apiUsed = "flux";
+        } catch (fluxErr) {
+          console.error("[ImageGen] Flux also failed:", fluxErr);
+          throw new Error("Image generation failed on all available APIs");
+        }
+      } else {
+        throw new Error(
+          `Image generation failed. Imagen: ${describeError(err)}. Gemini image: ${describeError(geminiErr)}.`
+        );
       }
-    } else {
-      throw err;
     }
   }
 
@@ -71,7 +82,7 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
     descriptionUsed: prompt,
     styleSeed: styleSeed.id,
     generatedAt: new Date().toISOString(),
-    generationApi: apiUsed as "imagen3" | "flux",
+    generationApi: apiUsed,
     emotionalThemes: scene.emotionalVector,
   };
 
@@ -84,6 +95,46 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
   return cachedImage;
 }
 
+// ─── Gemini Native Image Generation ──────────────────────────────────────────
+
+async function generateWithGeminiImage(prompt: string, apiKey: string): Promise<Uint8Array> {
+  const url = `${IMAGEN_BASE}/models/${LUMINA_CONFIG.GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.85,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Gemini image error ${response.status}: ${err}`);
+  }
+
+  const data = await response.json();
+  const parts = data.candidates?.[0]?.content?.parts ?? [];
+  const inlinePart = parts.find((part: unknown) => {
+    const p = part as { inlineData?: unknown; inline_data?: unknown };
+    return p.inlineData || p.inline_data;
+  }) as { inlineData?: { data?: string }; inline_data?: { data?: string } } | undefined;
+  const base64 = inlinePart?.inlineData?.data ?? inlinePart?.inline_data?.data;
+  if (!base64) {
+    const text = parts
+      .map((part: { text?: string }) => part.text)
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    throw new Error(text || "No image in Gemini image response");
+  }
+
+  return base64ToUint8Array(base64);
+}
+
 // ─── Prompt Builder ───────────────────────────────────────────────────────────
 
 export function buildImagePrompt(
@@ -91,6 +142,13 @@ export function buildImagePrompt(
   styleSeed: StyleSeed,
   priorPaletteContext?: string
 ): string {
+  if (scene.directorBrief) {
+    const directorPrompt = buildFinalImagePrompt(scene.directorBrief, styleSeed);
+    return priorPaletteContext
+      ? `${directorPrompt} Maintain visual continuity with established style: ${priorPaletteContext}.`
+      : directorPrompt;
+  }
+
   const parts: string[] = [];
 
   // Core symbolic description
@@ -109,7 +167,7 @@ export function buildImagePrompt(
 
   // Universal quality directives
   parts.push(
-    "Fine art quality. Symbolic rather than literal. No text or writing. No human faces or portraits. Atmospheric and evocative."
+    "Fine art quality. Depictive cinematic illustration. Show the actual scene clearly through the chosen art style. No readable text or writing. Faces gestural rather than portrait-like. Atmospheric and evocative."
   );
 
   return parts.join(". ");
@@ -118,7 +176,7 @@ export function buildImagePrompt(
 function buildFallbackDescription(scene: IdentifiedScene): string {
   const emotions = scene.emotionalVector.slice(0, 2).join(" and ");
   const motifs = scene.symbolicMotifs.slice(0, 3).join(", ");
-  return `Abstract symbolic composition evoking ${emotions}, with visual motifs of ${motifs}`;
+  return `Depictive cinematic book illustration evoking ${emotions}, with readable scene action and visual motifs of ${motifs}`;
 }
 
 // Extract palette context to pass to next generation
@@ -129,7 +187,7 @@ export function extractPaletteContext(styleSeed: StyleSeed, prevPrompts: string[
 
 // ─── Imagen 3 ─────────────────────────────────────────────────────────────────
 
-async function generateWithImagen3(prompt: string, apiKey: string): Promise<Uint8Array> {
+async function generateWithImagen3(prompt: string, apiKey: string, negativePrompt: string): Promise<Uint8Array> {
   const url = `${IMAGEN_BASE}/models/${LUMINA_CONFIG.IMAGEN_MODEL}:predict?key=${apiKey}`;
 
   const response = await fetch(url, {
@@ -140,8 +198,8 @@ async function generateWithImagen3(prompt: string, apiKey: string): Promise<Uint
       parameters: {
         sampleCount: 1,
         aspectRatio: LUMINA_CONFIG.IMAGE_ASPECT_RATIO,
-        negativePrompt: NEGATIVE_PROMPT,
-        personGeneration: "DONT_ALLOW",
+        negativePrompt,
+        personGeneration: "ALLOW_ADULT",
         safetySetting: "BLOCK_MOST",
         addWatermark: false,
       },
@@ -231,4 +289,14 @@ function base64ToUint8Array(base64: string): Uint8Array {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "Unknown error";
+  }
 }
