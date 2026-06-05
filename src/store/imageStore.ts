@@ -51,11 +51,20 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   getCachedImage: (sceneId) => get().imageCache[sceneId],
 
   enqueue: (item) =>
-    set((state) => ({
-      queue: [...state.queue.filter((q) => q.sceneId !== item.sceneId), item].sort(
-        (a, b) => a.priority - b.priority
-      ),
-    })),
+    set((state) => {
+      const existing = state.queue.find((q) => q.sceneId === item.sceneId);
+      if (existing?.status === "generating" || existing?.status === "complete") {
+        return state;
+      }
+      const queue = existing
+        ? state.queue.map((q) =>
+            q.sceneId === item.sceneId && q.status === "pending"
+              ? { ...q, priority: Math.min(q.priority, item.priority), description: item.description }
+              : q
+          )
+        : [...state.queue, item];
+      return { queue: queue.sort((a, b) => a.priority - b.priority) };
+    }),
 
   dequeue: () => {
     const { queue } = get();

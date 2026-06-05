@@ -369,6 +369,20 @@ export function useBookOrchestration() {
         return;
       }
 
+      const persisted = (await storage.loadImages(semanticBookId).catch(() => [] as CachedImage[])).find(
+        (image) => image.sceneId === scene.id
+      );
+      if (persisted) {
+        addToCache(persisted);
+        setCurrentImage(persisted);
+        setCurrentThemes(persisted.emotionalThemes);
+        diagnosticInfo("image.scene.persisted_cache", "Using persisted image instead of regenerating", {
+          sceneId: scene.id,
+          bookId: semanticBookId,
+        });
+        return;
+      }
+
       const styleSeed = getStyleSeedById(styleSeedId);
       const googleKey = await storage.loadApiKey("lumina_google_ai_key");
       const falKey = await storage.loadApiKey("lumina_fal_key");

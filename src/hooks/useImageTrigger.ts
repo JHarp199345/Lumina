@@ -130,6 +130,29 @@ export function useImageTrigger() {
     const scene = activeSemanticMap?.scenes.find((s) => s.id === next.sceneId);
     if (!scene) return;
 
+    const existingMemoryImage = useImageStore.getState().imageCache[scene.id];
+    if (existingMemoryImage) {
+      updateQueueItemStatus(next.sceneId, "complete");
+      return;
+    }
+
+    const existingPersistedImage = (await storage.loadImages(next.bookId).catch(() => [] as CachedImage[])).find(
+      (image) => image.sceneId === scene.id
+    );
+    if (existingPersistedImage) {
+      addToCache(existingPersistedImage);
+      const scenePos = getSceneWordPosition(scene);
+      if (!useImageStore.getState().currentImage || wordPosition >= scenePos) {
+        transitionToImage(existingPersistedImage);
+      }
+      updateQueueItemStatus(next.sceneId, "complete");
+      diagnosticInfo("image.generation.persisted_cache", "Using persisted image instead of regenerating", {
+        sceneId: scene.id,
+        bookId: next.bookId,
+      });
+      return;
+    }
+
     const styleSeed = activeStyleSeed ? getStyleSeedById(activeStyleSeed) : null;
     if (!styleSeed) return;
 
