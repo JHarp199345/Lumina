@@ -15,18 +15,21 @@ export function useApiKeys() {
       setIsSaving(true);
       setError(null);
       try {
-        // Validate key format
-        if (!key.startsWith("AIza") || key.length < 30) {
-          throw new Error("Invalid Google AI Studio key format. Keys start with 'AIza'.");
+        const normalizedKey = key.trim();
+
+        // Google has used more than one key shape over time. Avoid hard-coding a
+        // prefix and let the API tell us whether the key can actually be used.
+        if (normalizedKey.length < 20 || /\s/.test(normalizedKey)) {
+          throw new Error("That key looks incomplete. Paste the full Google AI Studio key.");
         }
 
         // Test key with a minimal Gemini call
-        const valid = await testGoogleKey(key);
+        const valid = await testGoogleKey(normalizedKey);
         if (!valid) {
           throw new Error("Key validation failed. Please check your Google AI Studio key.");
         }
 
-        await storage.saveApiKey(GOOGLE_KEY_NAME, key);
+        await storage.saveApiKey(GOOGLE_KEY_NAME, normalizedKey);
         setApiKeyConfigured(true);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to save key");
@@ -76,7 +79,7 @@ export function useApiKeys() {
 async function testGoogleKey(key: string): Promise<boolean> {
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
       { method: "GET" }
     );
     return response.ok;

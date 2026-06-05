@@ -58,7 +58,7 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
           type="password"
           value={googleKey}
           onChange={(e) => setGoogleKey(e.target.value)}
-          placeholder="AIzaSy••••••••••••••••••••••••••••"
+          placeholder="Paste your Google AI Studio key"
           className="w-full bg-black/30 border border-hair rounded-lg px-3 py-2.5 text-sm text-ink-soft placeholder:text-ink-faint focus:outline-none focus:border-lumina-gold/50 transition-colors font-mono"
         />
         <a
