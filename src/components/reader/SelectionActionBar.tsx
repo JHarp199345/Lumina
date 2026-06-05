@@ -28,7 +28,7 @@ const LENSES: { color: HighlightColor; label: string; dot: string }[] = [
 const AUTO_DISMISS_MS = 5500;
 
 type Win = Window & {
-  luminaCreateHighlight?: (cfiRange: string, text: string, color: HighlightColor) => string;
+  luminaCreateHighlight?: (color: HighlightColor) => string;
   luminaSetHighlightColor?: (id: string, color: HighlightColor) => void;
   luminaRemoveHighlight?: (id: string) => void;
 };
@@ -60,7 +60,7 @@ export default function SelectionActionBar() {
   // PENDING → tap a lens to create the highlight.
   const highlightAs = (color: HighlightColor) => {
     if (!pending) return;
-    const id = win.luminaCreateHighlight?.(pending.cfiRange, pending.text, color);
+    const id = win.luminaCreateHighlight?.(color);
     if (id) setActive(id, color);
     else clear();
   };

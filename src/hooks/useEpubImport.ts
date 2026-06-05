@@ -44,7 +44,12 @@ export function useEpubImport() {
 
   // ── Import a new EPUB file ──────────────────────────────────────────────────
 
-  const importEpub = useCallback(async (onProgress?: (message: string) => void) => {
+  // Core import routine — everything after a file has been chosen. Shared by the
+  // normal picker flow and the dev test-book loader.
+  const runImport = useCallback(async (
+    picked: File | string,
+    onProgress?: (message: string) => void
+  ) => {
     const runStep = async <T,>(label: string, action: () => Promise<T>): Promise<T> => {
       onProgress?.(label);
       try {
@@ -55,9 +60,6 @@ export function useEpubImport() {
         throw new Error(`${label} failed: ${describeError(err)}`);
       }
     };
-
-    const picked = await runStep("Opening file picker…", () => storage.pickEpubFile());
-    if (!picked) return null;
 
     // Read bytes from the File object (web) or file path (Tauri)
     let bytes: Uint8Array;
@@ -128,6 +130,18 @@ export function useEpubImport() {
 
     return { book, structure };
   }, [addBook, setActiveBook, setActiveStructure, setInitialCfi, unmountActiveBook]);
+
+  const importEpub = useCallback(async (onProgress?: (message: string) => void) => {
+    const picked = await storage.pickEpubFile();
+    if (!picked) return null;
+    return runImport(picked, onProgress);
+  }, [runImport]);
+
+  // Dev/test only: import a book directly from a File, bypassing the picker.
+  const importEpubFile = useCallback(
+    (file: File, onProgress?: (message: string) => void) => runImport(file, onProgress),
+    [runImport]
+  );
 
   // ── Load the full library from SQLite on startup ────────────────────────────
 
@@ -275,5 +289,5 @@ export function useEpubImport() {
     [unmountActiveBook, openBook]
   );
 
-  return { importEpub, loadLibrary, openBook, switchBook, unmountActiveBook };
+  return { importEpub, importEpubFile, loadLibrary, openBook, switchBook, unmountActiveBook };
 }

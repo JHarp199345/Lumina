@@ -218,7 +218,8 @@ function GlossaryView({ onBack, onClose }: { onBack: () => void; onClose: () => 
 
   const navigateTo = (h: Highlight) => {
     const nav = (window as Window & { luminaNavigate?: (t: string) => void }).luminaNavigate;
-    if (nav && h.cfiRange) nav(h.cfiRange);
+    const target = h.locator || h.cfiRange; // structured locator first, else EPUB CFI
+    if (nav && target) nav(target);
     close(); // glossary entry tap closes the drawer and returns to the book
   };
 

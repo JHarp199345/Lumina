@@ -457,10 +457,14 @@ export type HighlightColor = "yellow" | "blue" | "green" | "red";
 export interface Highlight {
   id: string;
   bookId: string;
-  cfiRange: string;
+  cfiRange: string;          // EPUB.js path. Empty for the structured web reader.
   color: HighlightColor;
   selectedText: string;
   createdAt: string;
+  // Structured (web) reader anchor — character-offset position anchor into a page.
+  locator?: string;          // lumina://chapter/{ch}/page/{pg}
+  startOffset?: number;      // char offset into the page's textContent
+  endOffset?: number;
 }
 
 export interface Note {

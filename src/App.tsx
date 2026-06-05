@@ -35,7 +35,27 @@ function App() {
     setActiveStructure,
   } = useBookStore();
   const [showOnboarding, setShowOnboarding] = useState(!hasCompletedOnboarding);
-  const { importEpub, loadLibrary } = useEpubImport();
+  const { importEpub, importEpubFile, loadLibrary } = useEpubImport();
+
+  // Dev-only: ?test=1 auto-loads a bundled test EPUB and skips onboarding so the
+  // reader (and highlight selection) can be exercised in preview without a picker.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("test")) return;
+    setShowOnboarding(false);
+    (async () => {
+      try {
+        const res = await fetch(`${import.meta.env.BASE_URL}test-book.epub`);
+        const blob = await res.blob();
+        const file = new File([blob], "test-book.epub", { type: "application/epub+zip" });
+        await importEpubFile(file);
+        console.info("[test] test book loaded");
+      } catch (e) {
+        console.error("[test] auto-load failed", e);
+      }
+    })();
+  }, [importEpubFile]);
   const { startOrchestration, reAnalyzeBook } = useBookOrchestration();
   const { isTablet, isPortrait } = useDeviceLayout();
   const [showSettings, setShowSettings] = useState(false);

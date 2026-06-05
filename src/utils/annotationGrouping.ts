@@ -31,12 +31,26 @@ export function spineIndexFromCfi(cfi: string): number {
   return Math.floor(step / 2) - 1;
 }
 
+/** Read the chapter index from a structured-reader locator. */
+export function chapterIndexFromLocator(locator: string | undefined): number {
+  const m = locator?.match(/^lumina:\/\/chapter\/(-?\d+)\/page\/\d+$/);
+  return m ? Number(m[1]) : -1;
+}
+
 /** Find the chapter a highlight belongs to, or null if it can't be resolved. */
 export function chapterForHighlight(
   highlight: Highlight,
   structure: BookStructure | null
 ): Chapter | null {
   if (!structure) return null;
+
+  // Structured (web) reader: chapter index lives in the lumina:// locator.
+  const locIndex = chapterIndexFromLocator(highlight.locator);
+  if (locIndex >= 0) {
+    return structure.chapters.find((ch) => ch.index === locIndex) ?? null;
+  }
+
+  // EPUB.js reader: derive from the CFI spine step.
   const spineIndex = spineIndexFromCfi(highlight.cfiRange);
   if (spineIndex < 0) return null;
   return (

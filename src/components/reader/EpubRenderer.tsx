@@ -629,12 +629,15 @@ export default function EpubRenderer({
       luminaClearSearchMarks?: () => void;
       luminaSetHighlightColor?: (id: string, color: HighlightColor) => void;
       luminaRemoveHighlight?:   (id: string) => void;
-      luminaCreateHighlight?:   (cfiRange: string, text: string, color: HighlightColor) => string;
+      luminaCreateHighlight?:   (color: HighlightColor) => string;
     };
     const win = window as LuminaWin;
 
     // Create a highlight from the pending selection (used by the action bar).
-    win.luminaCreateHighlight = (cfiRange, text, color) => createHighlight(cfiRange, text, color);
+    win.luminaCreateHighlight = (color) => {
+      const p = useSelectionStore.getState().pending;
+      return p?.cfiRange ? createHighlight(p.cfiRange, p.text, color) : "";
+    };
 
     // Recolour a highlight in place (used by the selection action bar).
     win.luminaSetHighlightColor = (id: string, color: HighlightColor) => {

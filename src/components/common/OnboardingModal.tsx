@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, BookOpen, Image, ArrowRight } from "lucide-react";
+import { Sparkles, BookOpen, Image, ArrowRight, X } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
 import ApiKeySetup from "./ApiKeySetup";
 
@@ -30,8 +30,19 @@ export default function OnboardingModal({ onComplete }: OnboardingModalProps) {
         initial={{ opacity: 0, y: 20, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ delay: 0.1, type: "spring", damping: 25 }}
-        className="w-full max-w-md bg-surface-dark border border-hair rounded-2xl overflow-hidden shadow-2xl"
+        className="relative w-full max-w-md bg-surface-dark border border-hair rounded-2xl overflow-hidden shadow-2xl"
       >
+        {/* Dismiss — skip onboarding entirely. An API key is only needed for image
+            generation and can be added later in Settings. */}
+        <button
+          onClick={handleComplete}
+          aria-label="Skip setup"
+          title="Skip — add an API key later in Settings"
+          className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-ink/[0.08] hover:text-ink-soft"
+        >
+          <X size={16} />
+        </button>
+
         <AnimatePresence mode="wait">
           {step === "welcome" && (
             <WelcomeStep key="welcome" onNext={() => setStep("api-key")} />

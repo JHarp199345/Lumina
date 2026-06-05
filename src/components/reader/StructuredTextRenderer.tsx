@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storage } from "@/storage";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { parseChapterDisplay } from "@/utils/titleUtils";
+import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
 
 const WORDS_PER_PAGE = 220;
 
@@ -95,6 +96,7 @@ export default function StructuredTextRenderer({
   } = useReaderStore();
   const { fontSize, lineHeight } = useSettingsStore();
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const chapterPages = useMemo(
     () =>
@@ -233,6 +235,12 @@ export default function StructuredTextRenderer({
     win.luminaNextPage = nextPage;
     win.luminaPrevPage = prevPage;
     win.luminaNavigate = (target: string) => {
+      // Structured locator from a highlight: lumina://chapter/{ch}/page/{pg}
+      const loc = target.match(/^lumina:\/\/chapter\/(-?\d+)\/page\/(\d+)$/);
+      if (loc) {
+        goTo(Number(loc[1]), Number(loc[2]));
+        return;
+      }
       const index = activeStructure?.chapters.findIndex(
         (chapter) =>
           chapter.id === target ||
@@ -276,6 +284,15 @@ export default function StructuredTextRenderer({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [nextPage, prevPage]);
 
+  // Page locator for highlight anchoring (null on the cover).
+  const highlightLocator =
+    currentChapterIndex < 0 ? null : `lumina://chapter/${currentChapterIndex}/page/${pageIndex}`;
+  useStructuredHighlights({
+    containerRef: contentRef,
+    bookId: activeBook?.id,
+    locator: highlightLocator,
+  });
+
   if (!activeBook || !activeStructure) return null;
 
   const isCover = currentChapterIndex < 0;
@@ -287,6 +304,9 @@ export default function StructuredTextRenderer({
     <div
       className="reader-paper-surface relative h-full w-full overflow-hidden bg-reader px-6 py-5 text-ink"
       onClick={(event) => {
+        // Don't turn the page while the reader is selecting text.
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) return;
         const rect = event.currentTarget.getBoundingClientRect();
         const x = event.clientX - rect.left;
         if (x > rect.width * 0.72) nextPage();
@@ -349,7 +369,10 @@ export default function StructuredTextRenderer({
               {pageIndex + 1} / {Math.max(1, chapterPages[currentChapterIndex]?.length ?? 1)}
             </p>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 font-serif text-ink [text-wrap:pretty]">
+          <div
+            ref={contentRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 font-serif text-ink [text-wrap:pretty]"
+          >
             {currentText.split(/\n{2,}/).map((paragraph, index) => (
               <p
                 key={index}
