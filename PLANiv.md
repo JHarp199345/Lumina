@@ -1,351 +1,424 @@
 # PLANiv — Reading Surface, Knowledge Layer, and Atmosphere Layer
-# Glass Lens Highlighting · Annotations Drawer · Notes · Sound Studio
+# Glass Lens Highlighting · Main Drawer · Glossary · Notepad · Sunburst · Sound Studio
 
 ---
 
 ## CONTEXT AND PHILOSOPHY
 
-This plan governs the next phase of Lumina development covering three feature groups
-that were conceived together and must be built in a way that leaves room for future
-additions without becoming structurally tangled.
+This plan governs the next phase of Lumina development. It covers three feature groups
+that were conceived together and must be built so that each new feature has a clean,
+predictable home — so that future additions never require re-architecting what exists.
 
 ### The Three Layers
 
-Every feature in Lumina belongs to one of three conceptual layers:
+Every feature in Lumina belongs to exactly one of three conceptual layers. This is the
+permanent organizing principle. When a new feature is proposed, the first question is
+always: which layer does it live in? That answer determines its interaction model, its
+persistence strategy, and where its UI lives.
 
 **Reading Surface** — What happens inside the text itself.
-Direct interaction with the content. Highlighting is the primary citizen here.
+Direct interaction with the rendered book content. Highlighting is the primary citizen.
 Future surface features: inline dictionary, translation, text-to-speech triggers.
 
-**Knowledge Layer** — What the reader accumulates about what they have read.
-The drawer system is the home for this. Highlights, bookmarks, notes.
+**Knowledge Layer** — What the reader accumulates from what they have read.
+Reached through the Main Drawer. Highlights (as a glossary), notes (as a notepad).
 Future knowledge features: tags, collections, export to Markdown/PDF, sharing.
 
 **Atmosphere Layer** — What surrounds and enhances the reading experience.
-Visual imagery is already built. Sound Studio is the next member.
-Future atmosphere features: adaptive lighting integration, haptic patterns on mobile.
+Visual imagery is already built. Sound Studio is the next member. Lives in Settings,
+not the drawer, because it is a reading preference rather than accumulated content.
+Future atmosphere features: adaptive lighting, haptic patterns on mobile.
 
-These three layers have different interaction models, different persistence needs,
-and different UI real estate. Keeping them conceptually separate prevents feature
-sprawl from bleeding one into another.
-
----
-
-## FEATURE DRAWER SYSTEM ARCHITECTURE
-
-### Overview
-
-The feature drawer is a right-side panel that slides in when summoned. It is the
-single home for all accumulated features. It has two levels:
-
-**Level 1 — Feature Menu**
-The landing view inside the drawer. Lists all available features as tappable entries.
-Each entry has a name, an icon, and optionally a badge (e.g., highlight count).
-
-Current entries:
-- Highlights
-- Notes
-
-Future entries will be added here as features are built. The drawer is the permanent
-organizational home. Adding a new feature = adding an entry here + building its sub-view.
-
-**Level 2 — Feature Sub-View**
-Tapping an entry in the Feature Menu opens the feature's dedicated sub-view.
-This slides in as a second layer within the same drawer (pushes Level 1 to the side)
-or replaces Level 1 with a back-button to return to the feature menu.
-
-The drawer does NOT require coding a new navigation system for every new feature.
-It uses a simple stack: Feature Menu → Sub-View → (optional deeper view).
-
-### Drawer Summoning
-
-The drawer is summoned via a dedicated icon. Candidates:
-- A bookmark/annotation icon in the side rail (on desktop and tablet)
-- A bottom bar icon on tablet portrait mode
-- A keyboard shortcut on desktop
-
-When the drawer is open, the reader panel either:
-a) Compresses to accommodate the drawer (preferred on desktop)
-b) Dims/overlays with the drawer on top (preferred on tablet to preserve reading area)
-
-The drawer can be dismissed via:
-- The X button in the drawer header
-- Tapping outside the drawer (tablet/mobile)
-- The keyboard shortcut (desktop)
-- Swiping the drawer to the right (tablet/mobile)
-
-### Persistent State
-
-The drawer remembers which feature sub-view was last open and reopens to it.
-If the reader was in the Highlights sub-view when they closed the drawer,
-it reopens to Highlights. This reduces friction for readers who use it frequently.
+Keeping these three layers conceptually separate is what prevents feature sprawl from
+bleeding one concern into another as the app grows.
 
 ---
 
-## FEATURE: GLASS LENS HIGHLIGHTING
+# PART ONE — THE KNOWLEDGE LAYER
 
-### Concept
+The Knowledge Layer is the most structurally important part of this plan because it
+introduces the navigation model that all future accumulated-content features will use.
+It must be designed carefully. Read this entire part before building any of it.
 
-A highlight in Lumina is not a colored rectangle laid over text.
-It is a quality of attention — a lens that focuses the reader's eye.
+## THE MAIN DRAWER — A NAVIGATION HUB, NOT A CONTENT SURFACE
 
-The visual language:
-- The highlight container (the mark element) has a glass/lens aesthetic:
-  a soft, semi-transparent wash in the color family, with gently feathered edges
-  and a barely-perceptible inner glow that makes the text feel illuminated rather
-  than obscured.
-- The text INSIDE the highlight receives a micro-enhancement — it is fractionally
-  heavier in weight and richer in color.
+### What it is
 
-The effect is: highlighted text feels MORE readable, not just differently colored.
+The Main Drawer is a slim panel that slides in from the right when summoned. It is a
+**pure navigation hub**. It contains buttons and nothing else. It does not list
+highlights. It does not list notes. It does not display any accumulated content of its
+own. Its only job is to be the launch point for the features of the Knowledge Layer.
 
-### Color Lenses — Four Distinct Aesthetics
+This is the critical correction to the earlier design: the Main Drawer is a menu of
+destinations, not a container of entries.
 
-Each lens color is a different quality of light. They share the same glass/glow
-character but are lit differently.
+### What it contains
 
-**Amber Lens (Yellow)**
-Warm. Soft warm gold wash, inner glow in the amber family.
-Light mode text: charcoal → near-black with a very slight warm undertone.
-Dark mode text: cool white → slightly warmer white, fractionally brighter.
+A small set of large, clearly-labeled buttons — each one opening a distinct feature
+experience. At launch:
 
-**Sapphire Lens (Blue)**
-Cool and focused. A clear cool-blue wash, crisp inner glow.
-Light mode text: charcoal → near-black with slight cool undertone.
-Dark mode text: matches the existing sky-blue text palette, brighter luminance.
+- **Highlights** — opens the Glossary
+- **Notes** — opens the Notepad
 
-**Verdant Lens (Green)**
-Natural, organic. A muted sage or forest green wash, softer glow.
-Light mode text: charcoal → near-black with very subtle warm green undertone.
-Dark mode text: cool white → fractionally brighter, slight green luminance shift.
+Room is intentionally left below these for future buttons (Collections, Tags, Export,
+and so on). Each future Knowledge Layer feature adds exactly one button here and one
+destination experience. The Main Drawer never becomes crowded with content; it only
+ever grows by a button at a time.
 
-**Ember Lens (Red)**
-Intense, urgent. A warm amber-to-red wash, a more distinct inner glow.
-Light mode text: charcoal → darker black, slightly heavier weight than other lenses.
-Dark mode text: cool white → brighter white, slight orange-warm shift at the edge.
+### Button design
 
-### CSS Implementation
+Each button is a full-width tappable row inside the drawer:
+- An icon on the left (a lens/marker glyph for Highlights, a page/pen glyph for Notes)
+- The feature name
+- An optional count badge on the right (e.g., the number of highlights in the current book)
+- A subtle chevron or affordance indicating it opens into something
 
-Highlights are applied via EPUB.js annotations:
-`rendition.annotations.highlight(cfiRange, data, callback, cssClassName)`
+The buttons are generously sized — comfortable for touch on a tablet, not cramped.
 
-The CSS class is injected into the EPUB.js iframe via:
-`rendition.themes.default({ ".lumina-hl-amber": { ... }, ... })`
+### Summoning and dismissing
 
-Each lens color is a separate CSS class with:
-- `background`: a gradient or solid with appropriate opacity (not flat)
-- `border-radius`: softened to avoid hard rectangular edges
-- `box-shadow`: inset glow (subtle — not neon)
-- `color`: text color enhancement (fractionally richer/darker/brighter)
-- `font-weight`: fractional increase (e.g., 400 → 450 if variable font; or subtle letter-spacing)
-- Possible: `text-shadow` for a subtle luminous quality on dark mode
+The Main Drawer is summoned via a dedicated icon in the side rail (desktop and tablet
+landscape) or a bottom-bar icon (tablet portrait). It is never opened automatically.
 
-The lens aesthetic should be developed by visually testing CSS in isolation
-(an HTML test file with sample text) before wiring into the EPUB renderer.
-The goal is to find the minimum CSS that achieves the desired effect — 
-lens/glow qualities tend to get over-engineered.
+Dismiss via: the X in the drawer header, tapping outside the drawer (touch), a keyboard
+shortcut (desktop), or swiping the drawer rightward (touch).
 
-### Highlight Creation — Interaction Model
+### What the Main Drawer does NOT do
 
-**Desktop (mouse):**
-1. User selects text
-2. Color picker appears near the selection (small floating chip, not a big modal)
-3. User clicks a lens color swatch
-4. Highlight is applied and persisted
+It does not stay open while you read a passage. It does not display highlight text. It
+does not display note text. The moment you choose a destination (Highlights or Notes),
+you leave the Main Drawer and enter that feature's own experience. The Main Drawer is a
+threshold, not a room.
 
-**Tablet/Mobile (touch):**
-1. User long-presses or double-taps to initiate text selection
-2. System text selection handles appear
-3. A color picker chip appears above/below the selection
-4. User taps a lens color swatch
-5. Highlight is applied and persisted
+---
 
-**Color Picker Design:**
-- Four circular swatches showing the lens colors (small, approximately 28-32px)
-- No labels — the colors are self-explanatory after brief use
-- Positioned to not obscure the selected text
-- Dismisses if the user taps elsewhere
+## DESTINATION ONE — THE GLOSSARY (Highlights)
 
-### Highlight Persistence
+### What it is
 
-Highlights are persisted immediately on creation via the storage adapter.
-On book open, all saved highlights for the book are loaded into the annotation store
-and re-applied to the rendition via `rendition.annotations.highlight()` after each
-section renders (this already exists in the codebase via the `rendered` event).
+Tapping **Highlights** in the Main Drawer opens the Glossary. The Glossary is a
+reference view of every highlight in the current book, organized exactly like a
+glossary or index — **grouped by chapter, in reading order within each chapter.**
 
-The lens CSS classes must be present in the rendition theme at all times so that
-re-applied highlights render correctly on every section load.
+The mental model is deliberately bookish: this is the back-of-the-book index of the
+passages that mattered to you.
 
-### Editing and Deleting Highlights
+### Layout
 
-- Long-press (tablet) or right-click (desktop) on a highlighted region opens a
-  context menu: Change Color | Remove Highlight | Add Note
-- The same gesture on the annotation in the drawer: Navigate | Edit Note | Remove
+```
+┌─────────────────────────────────────────┐
+│  ←            Glossary             [×]  │
+├─────────────────────────────────────────┤
+│  🔍 [ Search the book… ]            ◉   │   ◉ = filter bubble
+├─────────────────────────────────────────┤
+│                                         │
+│   CHAPTER 1 · The Gathering Storm   (3) │
+│   ───────────────────────────────────   │
+│   ▎ "The wind came cold across the…"    │   ▎ = amber lens edge
+│   ▎ "Kael tightened his cloak and…"  ◔  │   ◔ = has notes indicator
+│   ▎ "Before him, the mountains…"        │
+│                                         │
+│   CHAPTER 3 · The Old King          (1) │
+│   ───────────────────────────────────   │
+│   ▎ "Victory had cost him his sons." ◔◔ │   two notes
+│                                         │
+└─────────────────────────────────────────┘
+```
 
-### Highlight Data Model
+### Glossary entries
 
-Each highlight stores:
+Each entry is a card representing one highlight:
+- A thin left edge in the highlight's lens color (amber / sapphire / verdant / ember)
+- The highlighted text, truncated around 80 characters with an ellipsis
+- A small notes indicator if one or more notes are attached (e.g., a single dot, or a
+  count of dots up to a small max, then "◔ 3")
+
+Entries are grouped under collapsible chapter headers. Each chapter header shows the
+chapter title and a count of highlights in that chapter. Tapping a chapter header
+collapses or expands that group.
+
+### Tapping a glossary entry — the core behavior
+
+When the reader taps a glossary entry:
+
+1. **The Main Drawer / Glossary closes completely.** (Confirmed: it closes. The reader
+   wants to read, not split attention between a list and the book.)
+2. The reader navigates to the highlighted passage. The passage is brought into view —
+   positioned in the upper-to-middle region of the reader so it is unmistakably visible
+   and there is room below it for the note tray.
+3. If the highlight has one or more attached notes, the **Passage Note Tray** slides up
+   from the bottom of the reader (see next section).
+4. If the highlight has no notes, nothing else happens — the reader simply lands at the
+   passage, quietly.
+
+### Search
+
+The search field at the top of the Glossary searches the **entire book**, not just the
+highlights. It uses EPUB.js spine search. Results show matching passages with their
+chapter context. Passages that are highlighted are flagged with their lens color swatch.
+
+### The filter bubble
+
+The small filter bubble (◉) sits to the right of the search field. Tapping it opens a
+compact filter popover — not a full modal — with toggle rows.
+
+At launch, one filter:
+- **Highlighted passages only** — restricts search results to highlighted text
+
+The bubble's appearance changes (filled vs. outline, or a small color accent) when any
+filter is active, so the reader always knows the search is constrained. Future filters
+(by lens color, by date, by "has notes") are added as additional toggle rows here
+without any change to the surrounding UI.
+
+### Empty state
+
+If the book has no highlights: a quiet message — "Highlight any passage while reading,
+and it will appear here." No clutter.
+
+---
+
+## THE PASSAGE NOTE TRAY — surfacing notes attached to a highlight
+
+### The problem it solves
+
+A highlighted passage may have zero, one, or several notes attached to it. (A long
+passage spanning two pages might have accumulated three or four separate thoughts over
+multiple readings.) These notes must surface naturally when the reader arrives at the
+passage — without covering the passage, without overwhelming the reader, and without
+breaking the flow of being in the book.
+
+### The strategy
+
+A slim tray slides up from the bottom edge of the reader. It floats over the lower
+portion of the reading area. It never pushes the text up and never covers the
+highlighted passage, which is why navigation positions the passage in the upper-middle
+of the view.
+
+### Tray anatomy
+
+```
+        ┌───────────────────────────────────────┐
+        │   the highlighted passage stays        │
+        │   visible up here in the reader        │
+        │                                        │
+        │                                        │
+        ├────────────────────────────────────────┤  ← tray top edge
+        │  ◔  Note                       1 of 3  │
+        │  "The opening sets a tone of isolation │
+        │   that the whole first act sustains…"  │
+        │                            ‹    ›   [×] │
+        └────────────────────────────────────────┘
+```
+
+- A small header line: a note glyph, the word "Note", and — if there are multiple —
+  a "1 of N" position indicator.
+- A preview of the note's text — the first line or two, the way a message preview reads.
+- If multiple notes exist: left/right chevrons (‹ ›) to page through them one at a time.
+  Each chevron press swaps the preview to the next/previous note. No scrolling stack,
+  no chaos — one note at a time, sequenced.
+- A close affordance (×) that dismisses the tray and returns to plain reading.
+
+### Expanding a note from the tray
+
+Tapping the tray preview (or an explicit expand affordance) opens the **Sunburst Note
+Screen** for that note, as an overlay on top of the reader. Closing the Sunburst returns
+the reader to the tray and the passage — not all the way out to a list. (See the
+Sunburst section for the two-context close behavior.)
+
+### No-notes case
+
+If the highlight the reader navigated to has no notes, the tray does not appear at all.
+There is no empty tray. The reader just lands on the passage.
+
+---
+
+## DESTINATION TWO — THE NOTEPAD (Notes)
+
+### What it is
+
+Tapping **Notes** in the Main Drawer opens the Notepad. The Notepad is the directory of
+every note the reader has written in the current book. It is a list — a place to browse,
+search, and choose a note to read. It is NOT where a note is read in full; that is the
+Sunburst's job. The Notepad is the table of contents for your own thoughts.
+
+### Organization — dual view
+
+Notes have a dual nature. Some are about a specific highlighted passage (and belong, in
+the reader's mind, to a chapter). Others are free-floating thoughts written at a moment
+in the reading. To honor both, the Notepad supports **two organizations the reader can
+toggle between**:
+
+- **By Chapter** (default) — notes grouped under chapter headers, mirroring the Glossary.
+  A note linked to a highlight files under that highlight's chapter. A standalone note
+  files under the chapter the reader was in when they wrote it.
+- **By Time** (journal) — all notes in reverse-chronological order, most recent first,
+  like a running journal of thoughts as they occurred.
+
+A small segmented toggle at the top of the Notepad switches between the two. Default is
+By Chapter, to stay consistent with the Glossary's bookish logic. The reader's choice is
+remembered.
+
+### Layout
+
+```
+┌─────────────────────────────────────────┐
+│  ←            Notepad         [+]  [×]  │   [+] = new standalone note
+├─────────────────────────────────────────┤
+│  🔍 [ Search notes… ]                   │
+│  ┌─────────────┬─────────────┐          │
+│  │ By Chapter ●│  By Time     │          │   segmented toggle
+│  └─────────────┴─────────────┘          │
+├─────────────────────────────────────────┤
+│                                         │
+│   CHAPTER 1 · The Gathering Storm       │
+│   ───────────────────────────────────   │
+│   ▎ "The wind came cold…"               │   linked-highlight source (lens edge)
+│      The opening sets a tone of…        │   note preview
+│                                         │
+│   CHAPTER 3 · The Old King              │
+│   ───────────────────────────────────   │
+│   ◎ written here                        │   standalone note (no highlight)
+│      The parallel between this king…    │
+│                                         │
+└─────────────────────────────────────────┘
+```
+
+### Notepad entries
+
+Each entry is a card:
+- If the note is linked to a highlight: a lens-colored edge and the source highlight
+  text shown small above the note preview.
+- If the note is standalone: a neutral "written here" location marker (◎) with the
+  chapter and approximate position, above the note preview.
+- The note preview: first line or two of the note text.
+
+Tapping an entry opens the **Sunburst Note Screen** for that note.
+
+### Search
+
+The Notepad search field searches note text, linked source-highlight text, and chapter
+titles.
+
+### New note from the Notepad
+
+The [+] in the Notepad header creates a new standalone note, stamped at the reader's
+current position in the book. The reader does not need to have selected any text. This
+opens directly into the Sunburst in an editable state.
+
+### Back behavior
+
+The Notepad has a back affordance (←) that returns to the Main Drawer — because the
+reader came from the drawer and may want to visit another destination. (Contrast with
+tapping a glossary entry, which closes everything and returns to the book.)
+
+---
+
+## THE SUNBURST NOTE SCREEN — how a note is read
+
+### What it is
+
+The Sunburst is the dedicated visual space in which a single note is read in full. It is
+not the reader. It is not the Notepad. It is its own screen — a deliberate, atmospheric
+environment for one thought at a time.
+
+### The visual
+
+A dark radial field. The note's text lives in the solid dark center of the field. Moving
+outward from the text toward the edges of the screen, the darkness fades through three
+zones:
+
+- **Center (solid):** Full opacity darkness. The text sits here, fully legible, resting
+  on solid ground.
+- **Mid (opaque → translucent):** The darkness thins. A gradient transition.
+- **Edge (transparent):** At the periphery the field becomes transparent, and whatever
+  was behind the Sunburst — the reader, or the Notepad — bleeds faintly through.
+
+The effect: the note floats in its own pocket of darkness, focused and quiet, yet not
+severed from the world it came from. The book (or the list) glows faintly at the rim.
+
+Implementation note: this is a radial gradient overlay (a dark center fading to
+transparent at the edges) layered above the underlying screen, with the note text
+composited in the solid center region. The exact gradient stops and the text's maximum
+width within the solid zone should be tuned visually in isolation before integration.
+The text must always remain within the fully-solid central region so it never loses
+legibility against the fading background.
+
+### Reading and editing
+
+- The note text is displayed as the primary, central element — comfortable reading size,
+  generous line height.
+- An edit affordance turns the text into an editable field in place (the Sunburst
+  becomes an editor without changing screens). Save and dismiss controls appear.
+- A source affordance (subtle) shows what the note is linked to: the highlighted
+  passage(s), if any. Tapping a source could navigate the reader there (closing the
+  Sunburst and going to the book). "Add source" lets the reader link the note to an
+  additional existing highlight.
+
+### The two close contexts — IMPORTANT
+
+The Sunburst is reached from two different places, and its close behavior differs by
+origin. This must be tracked explicitly (a small navigation-origin flag) so it never
+becomes a bug.
+
+**Context A — opened from the book (via the Passage Note Tray).**
+The reader was reading, navigated to a highlighted passage, and expanded a note from the
+tray. Closing the Sunburst returns to the **reader**, with the passage still in view and
+the tray still present. The reader never loses their place in the book.
+
+**Context B — opened from the Notepad.**
+The reader was browsing the Notepad and tapped a note. Closing the Sunburst returns to
+the **Notepad list**, so they can continue browsing or open another note.
+
+The Sunburst itself is identical in both contexts. Only the return destination differs.
+A simple origin marker carried when the Sunburst is opened ("from-tray" vs
+"from-notepad") drives the close behavior.
+
+---
+
+## NOTE CREATION FLOWS (all paths)
+
+There are three ways a note comes into existence. All three must feel natural.
+
+**1. From a highlight (most common).**
+After the reader creates a highlight (selects text, picks a lens color), a gentle,
+low-friction "add note" prompt appears briefly near the selection. Tapping it opens a
+compact note editor (a bottom sheet on tablet, an inline panel on desktop) pre-linked to
+that highlight. Ignoring it (tapping anywhere else, or letting it fade after a few
+seconds) simply means no note — the highlight stands alone. The note can always be added
+later from the Glossary.
+
+**2. Standalone, from the Notepad.**
+The [+] button in the Notepad creates a note stamped at the reader's current position,
+with no highlight link. Opens into the Sunburst in editable state.
+
+**3. Retroactively linked.**
+From within the Sunburst's source affordance, "Add source" lets the reader link the note
+to one or more existing highlights after the fact. This supports the case where a thought
+relates to a passage highlighted earlier and the one being read now. This is a secondary,
+subtle feature — not prominent, but present.
+
+---
+
+## DATA MODELS (Knowledge Layer)
+
+### Highlight
+
 ```
 {
   id: string
   bookId: string
-  cfiRange: string          // EPUB CFI — the canonical location reference
-  color: "amber"|"sapphire"|"verdant"|"ember"
-  selectedText: string      // The text content of the selection
+  cfiRange: string            // EPUB CFI — canonical location reference
+  color: "amber" | "sapphire" | "verdant" | "ember"
+  selectedText: string
   chapterId: string
   chapterTitle: string
   chapterIndex: number
-  createdAt: string         // ISO timestamp
-  wordOffset: number        // approximate word position in book (for sorting)
+  wordOffset: number          // approximate book word position (for sorting)
+  createdAt: string           // ISO timestamp
 }
 ```
 
----
-
-## FEATURE: ANNOTATIONS DRAWER — HIGHLIGHTS SUB-VIEW
-
-### Layout
-
-The Highlights sub-view inside the feature drawer:
-
-```
-┌─────────────────────────────────────────┐
-│  ← Highlights              [×]          │
-├─────────────────────────────────────────┤
-│  🔍 [Search highlights and book...]  ◉  │  ← ◉ = filter bubble
-├─────────────────────────────────────────┤
-│                                         │
-│  Chapter 1 · The Gathering Storm    (3) │
-│  ─────────────────────────────────────  │
-│  [amber] "The wind came cold across…"   │
-│  [sapphire] "Kael tightened his cloak…" │
-│  [ember] "Before him, the mountains…"  │
-│                                         │
-│  Chapter 3 · The Old King           (1) │
-│  ─────────────────────────────────────  │
-│  [verdant] "Victory had cost him…"      │
-│                                         │
-│  (etc.)                                 │
-└─────────────────────────────────────────┘
-```
-
-### Search Bar
-
-The search field searches the ENTIRE book — not just highlights.
-It uses EPUB.js's spine-search capability to find passages by text.
-
-Behavior:
-- Typing shows results from the full book text, highlighted passages prominently
-- Results show: the matching excerpt, the chapter it's in, and whether it
-  is highlighted (if so, the lens color is shown as a small swatch)
-
-### Filter Bubble
-
-The filter bubble (◉) sits to the right of the search bar. It is small and minimal.
-Tapping it opens a compact filter selector panel (not a full modal):
-
-**Current filter option:**
-- "Highlighted passages only" — toggles search to only show results from highlighted text
-
-**Filter selector design:**
-- A small popover/sheet with toggle rows
-- Each filter has a label and a toggle
-- The bubble changes appearance (filled vs outline) to indicate active filters
-- Future filter rows can be added here: by date added, by lens color, by chapter
-
-When a filter is active, the search bar shows a subtle indicator (the bubble is lit/colored).
-
-### Highlight Cards
-
-Each highlight in the list is a card showing:
-- A thin left border in the lens color (amber/sapphire/verdant/ember)
-- The selected text excerpt (truncated at ~80 characters with "…" if longer)
-- The chapter name and a position indicator
-- A note icon (small) if a note is attached to this highlight
-
-Tapping a card:
-- Navigates to the highlight location in the reader
-- OPEN QUESTION: does the drawer stay open (reader compresses) or close?
-  Default recommendation: drawer stays open, reader jumps to location.
-  The reader can dismiss the drawer manually if they want full reading view.
-
-Long-pressing a card:
-- Options: Navigate | Change color | Add/edit note | Remove
-
-### Organization
-
-Highlights are grouped by chapter, sorted by reading order (word position) within each chapter.
-Chapter groups collapse/expand (tapping the chapter header collapses that group).
-An empty state message when no highlights exist: "Select any text while reading to highlight it."
-
----
-
-## FEATURE: ANNOTATIONS DRAWER — NOTES SUB-VIEW
-
-### Concept
-
-A note is a standalone artifact. It is a thought, observation, or annotation
-written by the reader. It exists at a location in the book and can optionally
-be linked to one or more highlights.
-
-Three note origins:
-1. Created FROM a highlight (most common) — note inherits the highlight's location
-   and is displayed with the source text
-2. Created at current reading position — no text selected, just a thought at a location
-3. Linked to an existing highlight after the fact — from within the note editor
-
-### Notes Sub-View Layout
-
-```
-┌─────────────────────────────────────────┐
-│  ← Notes                  [+ New] [×]  │
-├─────────────────────────────────────────┤
-│  🔍 [Search notes...]                   │
-├─────────────────────────────────────────┤
-│                                         │
-│  Chapter 1 · The Gathering Storm    (2) │
-│  ─────────────────────────────────────  │
-│  [amber] "The wind came cold…"          │
-│           Note: The opening sets a      │
-│           tone of isolation that…       │
-│                                         │
-│  Chapter 3 · The Old King           (1) │
-│  ─────────────────────────────────────  │
-│  ◎ [no highlight]                       │
-│           Note: The parallel between    │
-│           this king and the one in…     │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-Notes that are linked to a highlight show the source text in the lens color family.
-Notes with no highlight link show a neutral location indicator (◎) with the chapter
-and approximate position.
-
-### Note Creation Flow
-
-**From a highlight:**
-After a highlight is created (user selected color from color picker), a gentle prompt
-appears — a small "add note" affordance either in the color picker or as a follow-up
-chip that appears briefly. This should be dismissable with zero friction (tap anywhere
-to skip). The note is optional.
-
-If the user taps the note prompt:
-- A compact text entry panel slides up (bottom sheet on tablet, inline panel on desktop)
-- Text field, character count (optional — generous limit ~2000 chars)
-- Save / Dismiss
-- Note is linked to the highlight automatically
-
-**From current position (no highlight):**
-The [+ New] button in the Notes sub-view header creates a standalone note
-stamped at the reader's current position. The reader does NOT need to select text.
-
-**Linking a note to an additional highlight:**
-Inside the note editor, an "Add source" button opens a compact highlight picker
-showing the reader's existing highlights. They can link the note to multiple highlights.
-This is a secondary feature and should be visually subtle — not prominent in the main UI.
-
-### Note Data Model
+### Note
 
 ```
 {
@@ -354,64 +427,197 @@ This is a secondary feature and should be visually subtle — not prominent in t
   noteText: string
   createdAt: string
   updatedAt: string
-  locationBookId: string      // book position where note was written
+
+  // Where the reader WAS when the note was written (its own location):
   locationChapterId: string
   locationChapterTitle: string
+  locationChapterIndex: number
   locationWordOffset: number
-  linkedHighlightIds: string[] // 0 to many highlight IDs
-  isPinned: boolean            // future: allow pinning important notes
+
+  // What the note is ABOUT (zero to many highlights):
+  linkedHighlightIds: string[]
 }
 ```
 
-The separation of `linkedHighlightIds` (array) from the note's own location
-`locationChapterId/wordOffset` is intentional. The note's location is where the reader
-WAS when they wrote it. The linked highlights are what the note is ABOUT.
-These may be different locations if the note was written while thinking about
-a passage from earlier in the book.
+The deliberate separation between a note's own `location*` fields and its
+`linkedHighlightIds` array is what makes the whole notes system coherent. The location
+is where the thought was born; the links are what the thought concerns. They are often
+the same place but need not be — and a single note can concern several passages.
 
-### Note Display in the Highlights Sub-View
+### Derived relationships (not stored, computed)
 
-When a highlight has an associated note, the note text appears beneath the highlight
-card (collapsed by default — a "1 note" chip that expands on tap). This prevents the
-Highlights view from becoming a wall of text while still surfacing that notes exist.
-
-### Search in Notes
-
-The search bar in the Notes sub-view searches:
-- Note text content
-- The source highlight text (if linked)
-- Chapter titles
+- "Notes attached to highlight H" = all notes whose `linkedHighlightIds` includes H.id.
+  This is what the Passage Note Tray queries when the reader lands on a highlight.
+- "Notes in chapter C" (for the By-Chapter Notepad view) = notes whose
+  `locationChapterId` is C, OR notes linked to a highlight whose `chapterId` is C.
+  (A linked note files under its source's chapter; a standalone note files under where
+  it was written.)
 
 ---
 
-## SOUND STUDIO — SETTINGS FEATURE
+## NAVIGATION STACK SUMMARY (Knowledge Layer)
+
+To keep the close/back behaviors unambiguous, here is the full navigation model in one
+place. Every transition below must behave exactly as stated.
+
+```
+Reader (the book)
+  │  summon
+  ▼
+Main Drawer  ── tap Highlights ─▶  Glossary
+  │                                   │  tap entry
+  │                                   ▼
+  │                            (Glossary closes)
+  │                                   ▼
+  │                            Reader @ passage
+  │                                   │  (if notes) tray slides up
+  │                                   ▼
+  │                            Passage Note Tray
+  │                                   │  expand
+  │                                   ▼
+  │                            Sunburst (Context A)
+  │                                   │  close
+  │                                   ▼
+  │                            back to Reader + tray + passage
+  │
+  └── tap Notes ─▶  Notepad
+                      │  tap entry              │  back (←)
+                      ▼                         ▼
+                   Sunburst (Context B)      Main Drawer
+                      │  close
+                      ▼
+                   back to Notepad list
+```
+
+Key rules:
+- Tapping a **Glossary** entry CLOSES the drawer and returns to the book.
+- The **Notepad** back button returns to the Main Drawer (the reader came from there).
+- The **Sunburst** close returns to wherever it was opened from (tray → reader;
+  notepad → notepad), governed by the origin flag.
+
+---
+
+# PART TWO — THE READING SURFACE: GLASS LENS HIGHLIGHTING
+
+### Concept
+
+A highlight in Lumina is not a colored rectangle laid over text. It is a quality of
+attention — a lens that focuses the eye. The text inside a highlight should feel MORE
+readable, not merely tinted.
+
+The highlight does two things at once:
+- The container (the mark element) carries a glass/lens aesthetic: a soft, semi-
+  transparent wash in the color family, gently feathered edges, and a barely-perceptible
+  inner glow that makes the text feel illuminated rather than obscured.
+- The text inside receives a micro-enhancement: fractionally heavier weight and a richer,
+  more saturated/contrasted color value.
+
+### The four lenses — distinct qualities of light
+
+All four share the same glass/glow character but are lit differently. They should feel
+like the same kind of object under four different lights.
+
+**Amber Lens (warm gold)**
+Soft warm-gold wash, amber inner glow.
+Light mode text: charcoal → near-black with a faint warm undertone.
+Dark mode text: the existing sky-blue/white text → fractionally brighter and warmer.
+
+**Sapphire Lens (cool blue)**
+Clear cool-blue wash, crisp inner glow.
+Light mode text: charcoal → near-black with a faint cool undertone.
+Dark mode text: aligns to the sky-blue text palette, raised in luminance.
+
+**Verdant Lens (sage/forest green)**
+Muted natural-green wash, softer glow.
+Light mode text: charcoal → near-black, very subtle green-warm undertone.
+Dark mode text: → fractionally brighter, slight green luminance lift.
+
+**Ember Lens (warm red)**
+Warm amber-to-red wash, the most distinct inner glow of the four.
+Light mode text: charcoal → darker black, marginally heavier weight than the others.
+Dark mode text: → brighter white with a faint warm edge.
+
+### Implementation
+
+Highlights are applied through EPUB.js annotations:
+`rendition.annotations.highlight(cfiRange, data, callback, cssClassName)`
+
+The lens CSS classes are injected into the EPUB.js iframe via
+`rendition.themes.default({ ".lumina-lens-amber": {…}, … })`. Each lens is one class:
+- `background`: gradient or low-opacity fill (never a flat slab)
+- `border-radius`: softened to avoid hard rectangular corners
+- `box-shadow`: subtle inset glow (restrained — not neon)
+- `color`: enhanced text color per mode
+- `font-weight` / `letter-spacing`: a fractional enhancement for the "slightly bolder"
+  feel (exact mechanism depends on the rendered font being variable or not)
+- `text-shadow` (dark mode only, optional): a faint luminous lift
+
+The lens aesthetic MUST be developed and approved in an isolated HTML test file
+(sample paragraphs, all four colors, both light and dark mode) before being wired into
+the renderer. Lens/glow effects are easy to over-engineer; the goal is the minimum CSS
+that achieves the intended feeling.
+
+### Open technical question to verify first
+
+Confirm whether the glow can extend slightly beyond the text bounds within the EPUB.js
+iframe, or whether iframe isolation constrains it to the mark element's box. If
+constrained, the effect is achieved entirely within the box (inset glow, background,
+text enhancement) — which is almost certainly sufficient. Verify before designing the
+final visual.
+
+### Creation interaction
+
+**Desktop:** select text → a small floating chip of four lens swatches appears near the
+selection → click a swatch → highlight applied and persisted.
+
+**Tablet/touch:** long-press or double-tap to select → selection handles appear → a chip
+of four lens swatches appears above/below the selection → tap a swatch → applied and
+persisted.
+
+The swatch chip is small (circles ~28–32px), label-free, positioned to not obscure the
+selected text, and dismisses on outside tap.
+
+### Persistence and re-application
+
+Highlights persist immediately on creation via the storage adapter. On book open, all
+highlights load into the annotation store and re-apply to the rendition via
+`rendition.annotations.highlight()` after each section renders (the `rendered` event
+mechanism already exists). The lens CSS classes must always be present in the rendition
+theme so re-applied highlights render correctly on every section load.
+
+### Edit / delete
+
+Long-press (touch) or right-click (desktop) on a highlighted region opens a small
+context menu: Change Lens | Remove Highlight | Add Note. The same actions are available
+on the entry in the Glossary.
+
+---
+
+# PART THREE — THE ATMOSPHERE LAYER: SOUND STUDIO
 
 ### Placement
 
-Sound Studio lives in Settings. It is NOT in the feature drawer.
-It is a reading preference, not a content feature.
+Sound Studio lives in **Settings**, not the Main Drawer. It is a reading preference, not
+accumulated content. It is **toggled OFF by default** and can be toggled on or off at any
+time.
 
-In the Settings panel, Sound Studio appears as its own section with:
-- A master toggle (off by default)
-- When enabled: mood category selector and volume control become visible
-- The section is collapsed/minimal when disabled
+In Settings it is its own section: a master toggle, and — when enabled — a mood selector,
+volume control, and the Freesound API key field become visible. When disabled, the
+section stays collapsed and minimal.
 
-### Behavior When Enabled
+### Behavior when enabled
 
-When Sound Studio is enabled, a minimal persistent audio control appears
-at the bottom of the reading interface (small, unobtrusive — a play/pause button
-and a volume slider). This is the only visible indicator that Sound Studio is on.
+A minimal, persistent audio control appears at the bottom of the reading interface:
+play/pause, volume, skip. It does not autoplay — the reader starts it manually. Once
+playing, it continues until manually stopped, the app closes, or (optionally) the reader
+crosses into a markedly different emotional section.
 
-The audio does not autoplay. The reader manually starts playback.
-Once started, it continues until manually stopped, the app closes, or the reader
-moves to a very different emotional section (optional auto-mood-shift).
+### Mood categories
 
-### Mood Categories
+Lumina already derives emotional arc data from semantic analysis. Sound Studio uses it to
+suggest a starting mood, which the reader can override by cycling a mood chip.
 
-Lumina already has emotional arc data from the semantic analysis.
-Sound Studio uses this to suggest a starting mood, but the reader can override.
-
-Categories (these map to Freesound.org search terms and tags):
+Categories (mapped to Freesound search terms/tags):
 - Contemplative (quiet, sparse, ambient)
 - Tense (low drones, dissonance, suspense)
 - Expansive (orchestral, epic, wide)
@@ -419,138 +625,138 @@ Categories (these map to Freesound.org search terms and tags):
 - Mysterious (atmospheric, textural, ambiguous)
 - Triumphant (full orchestral, resolving, bright)
 
-The suggestion logic: take the arc shape and dominant emotions from the semantic map
-for the current section and map them to the closest mood category.
-The reader can tap the mood chip to cycle through other categories manually.
+### Audio source
 
-### Audio Source
+Primary: **Freesound.org public API** — free with API key registration, a large
+CC-licensed library strong on ambient/atmospheric/orchestral textures, searchable by
+tag and duration, returning playable preview URLs. The Freesound key is entered in
+Settings → Sound Studio (another BYOK entry). If no key is present, the section shows a
+"Get a free Freesound key" link.
 
-Primary source: **Freesound.org Public API**
-- Free to use with API key registration (another BYOK entry in Settings)
-- Massive CC-licensed ambient/atmospheric library
-- API supports search by mood, duration, tags
-- Returns preview URLs that can be fetched and played directly
-- Rate limited but generous for personal use
+Fallback: a small set of bundled royalty-free ambient loops for offline use or before a
+key is entered.
 
-Freesound API key is entered in Settings → Sound Studio section.
-If no key is entered, Sound Studio shows a "Get a free Freesound key" link.
+### Track behavior
 
-Fallback: a small set of royalty-free ambient tracks bundled with the app
-(a few short loops that can tile) for offline use or before the API key is entered.
+Tracks play in sequence within the chosen mood, prefer longer ambient pieces (> ~3 min),
+crossfade 1–2 seconds between tracks, shuffle within the mood, skip on demand, and start
+at a soft default volume (~40%) independent of system volume. Track metadata (name,
+attribution, CC license URL) is stored and surfaced via a small info/attribution chip,
+as the licenses require.
 
-### Track Behavior
+### Technical notes
 
-- Tracks play in sequence (next track auto-advances when current ends)
-- Tracks are long (prefer ambient pieces > 3 minutes, filter by duration)
-- Crossfade between tracks (1-2 second fade, seamless)
-- Tracks shuffle within the current mood category
-- The reader can skip to next track manually
-- Volume is independent from system volume (soft default, ~40%)
-
-### Technical Notes
-
-- Audio plays via the Web Audio API in the PWA and a standard HTML audio element
-- Freesound returns audio files as URLs — these are fetched and played directly
-- Track metadata (name, artist, license) is stored so it can be displayed (attribution)
-- The Freesound API response includes a CC license URL — attribution must be displayed
-  somewhere accessible (a small info chip that expands to show it is sufficient)
+Playback via Web Audio API (PWA) / HTML audio element. Freesound returns file URLs that
+are fetched and played directly. Attribution (CC license) must be displayed somewhere
+accessible.
 
 ---
 
-## IMPLEMENTATION ORDER
+# IMPLEMENTATION ORDER
 
-Build in this sequence. Each feature depends on the previous being stable.
+Build in sequence. Each phase should be stable before the next begins.
 
-### Phase A — Glass Lens Highlighting
+### Phase A — Glass Lens Highlighting (Reading Surface)
+1. Design and approve lens CSS in an isolated HTML test file — four colors, light + dark.
+2. Verify the iframe glow-extent question.
+3. Replace existing flat highlight classes in EpubRenderer with the four lens classes.
+4. Update the creation color picker to show the four lens swatches.
+5. Confirm persistence and re-application on section load in both modes.
+6. Update the color type to "amber" | "sapphire" | "verdant" | "ember" across the store
+   and data model.
 
-1. Design and validate the lens CSS in isolation (HTML test file, four colors)
-2. Replace flat highlight classes in EpubRenderer with lens classes
-3. Update the color picker to show lens swatches (not flat color chips)
-4. Verify highlight persistence and re-application on section load
-5. Update the annotation store color type if needed ("amber"|"sapphire"|"verdant"|"ember")
-6. Test in light mode AND dark mode — both must look intentional
+### Phase B — Main Drawer + Glossary (Knowledge Layer)
+1. Build the Main Drawer shell: slide-in from right, navigation buttons only.
+2. Wire the summon trigger (side rail / bottom bar) and dismiss behaviors.
+3. Build the Glossary: chapter-grouped highlight list, lens-edged entry cards, notes
+   indicators.
+4. Implement tap-entry behavior: close drawer → navigate to passage (positioned upper-
+   middle) in the reader.
+5. Add the full-book search field and the filter bubble ("highlighted passages only").
+6. Empty state.
 
-### Phase B — Feature Drawer + Highlights Sub-View
+### Phase C — Passage Note Tray + Notes data model
+1. Define the Note data model and storage-adapter methods (save/load/update/delete,
+   both Tauri and Web adapters).
+2. Build the Passage Note Tray: slides up on arrival at a highlight that has notes;
+   preview; "1 of N" paging with chevrons; close.
+3. Wire the "notes attached to highlight" query.
+4. No-notes case: tray does not appear.
 
-1. Build the Feature Drawer shell: slide-in from right, Feature Menu (Level 1)
-2. Wire the summoning trigger (icon in side rail / top nav)
-3. Build the Highlights Sub-View (Level 2): chapter-grouped list, highlight cards
-4. Add navigation: tap a highlight card → jump to location in reader
-5. Add search bar: full-book search with filter bubble
-6. Add filter bubble: "highlighted passages only" toggle
-7. Wire the drawer state persistence (remembers last open sub-view)
+### Phase D — Notepad + Sunburst
+1. Build the Notepad: directory list, By Chapter / By Time toggle, search, [+] new note,
+   back-to-drawer.
+2. Build the Sunburst Note Screen: radial dark-to-transparent field, centered text,
+   read + edit states, source affordance + "Add source".
+3. Implement the two-context close (origin flag: from-tray → reader; from-notepad →
+   notepad).
+4. Wire all three note-creation flows (from highlight, standalone, retroactive link).
 
-### Phase C — Notes
-
-1. Add note creation from highlight (post-highlight note prompt)
-2. Add note creation from current position (+ New in Notes sub-view)
-3. Build the Notes Sub-View in the feature drawer
-4. Display notes with source text context (from linked highlight)
-5. Add note editing (tap note in drawer → edit inline or in a sheet)
-6. Add note deletion
-7. Add search to Notes sub-view
-
-### Phase D — Sound Studio
-
-1. Settings section: Sound Studio toggle (default off)
-2. Freesound API key input in Settings → Sound Studio
-3. Mood category selector (6 categories)
-4. Audio playback engine (Web Audio / HTML audio)
-5. Freesound API integration: search by mood/duration, retrieve preview URL
-6. Persistent audio control in the reading interface (play/pause, volume, skip)
-7. Mood auto-suggestion from semantic map arc data
-8. Attribution display (CC license chip)
-9. Bundled fallback tracks for offline use
-
----
-
-## OPEN QUESTIONS (TO RESOLVE DURING BUILDING, NOT BEFORE)
-
-1. **Drawer navigation on tap:** When a highlight card is tapped and the reader
-   jumps to that location, does the drawer stay open or close?
-   Default implementation: stays open. Revisit based on feel during testing.
-
-2. **Lens color names:** Are "amber / sapphire / verdant / ember" the right names
-   in the UI, or should they be presented as purely visual swatches with no text labels?
-   Recommendation: swatches only in the color picker, color names only in the drawer
-   filter (for accessibility and clarity).
-
-3. **Note prompt timing:** After a highlight is created, how long does the "add note"
-   prompt linger before auto-dismissing? Recommendation: 4 seconds, then fades out.
-   The reader can also access "add note" from the drawer at any time.
-
-4. **Sound auto-mood-shift:** Should Sound Studio automatically switch mood categories
-   when the reader's position crosses into a new emotional section?
-   Recommendation: opt-in (a toggle in the Sound Studio settings section).
-   Default off — automatic shifts can be jarring.
-
-5. **Standalone note location:** When a standalone note (no highlight link) is created
-   at the reader's current position, does it appear in the Highlights sub-view too,
-   or only in Notes? Recommendation: Notes sub-view only, but it appears inline in
-   the reader as a small margin indicator (a dot or icon in the gutter).
+### Phase E — Sound Studio (Atmosphere Layer)
+1. Settings section + master toggle (default off).
+2. Freesound API key field (BYOK).
+3. Mood selector (6 categories) + volume control.
+4. Audio engine (Web Audio / HTML audio), crossfade, shuffle, skip.
+5. Freesound integration: search by mood + duration, retrieve and play preview URLs.
+6. Persistent reader audio control.
+7. Mood auto-suggestion from semantic arc data (manual override always available).
+8. Attribution chip; bundled offline fallback loops.
 
 ---
 
-## CONSTANTS TO ADD TO config.ts
+# RESOLVED DESIGN DECISIONS
 
-```typescript
+- **Main Drawer is buttons only.** A navigation hub, not a content surface. New Knowledge
+  Layer features each add one button + one destination.
+- **Glossary entry tap closes everything and returns to the book**, landing on the
+  passage with the note tray (if any).
+- **Passage Note Tray** surfaces highlight-attached notes from the bottom, one at a time,
+  with "1 of N" paging, never covering the passage.
+- **Notepad is a directory**, not a reader. It offers By Chapter (default) and By Time
+  views. Its back button returns to the Main Drawer.
+- **Sunburst is the note-reading screen**, identical from both origins; close behavior is
+  governed by an origin flag (tray → reader; notepad → notepad).
+- **Sound Studio lives in Settings, off by default.**
+
+# OPEN QUESTIONS (resolve during building, not before)
+
+1. **Lens labels:** swatches only in the picker; color names only where text is needed
+   (e.g., a future "by lens color" filter). Confirm naming amber/sapphire/verdant/ember
+   reads well in the UI or should be purely visual.
+2. **Note prompt linger:** how long the post-highlight "add note" prompt stays before
+   fading. Start at ~4s.
+3. **Sunburst gradient stops + max text width:** tune visually in isolation.
+4. **Sound auto-mood-shift:** opt-in toggle, default off (automatic shifts can jar).
+5. **Standalone note in-reader indicator:** whether a standalone note also shows as a
+   small gutter mark at its location in the reader (recommended: yes, a subtle dot).
+
+---
+
+# CONSTANTS TO ADD TO config.ts
+
+```
 // Highlighting
-NOTE_PROMPT_LINGER_MS: 4000,
 HIGHLIGHT_COLORS: ["amber", "sapphire", "verdant", "ember"] as const,
+NOTE_PROMPT_LINGER_MS: 4000,
+
+// Drawer + Knowledge Layer
+DRAWER_WIDTH_PX: 340,
+DRAWER_ANIMATION_MS: 280,
+PASSAGE_TRAY_ANIMATION_MS: 260,
+PASSAGE_LAND_VERTICAL_BIAS: 0.33,   // place passage ~1/3 down the reader on navigate
+
+// Sunburst
+SUNBURST_SOLID_RADIUS_PCT: 42,      // % of field that stays fully solid (text zone)
+SUNBURST_FADE_END_PCT: 100,         // where the field reaches full transparency
 
 // Sound Studio
 SOUND_DEFAULT_VOLUME: 0.4,
 SOUND_CROSSFADE_MS: 1500,
-SOUND_MIN_DURATION_SECONDS: 180,  // prefer tracks > 3 minutes
+SOUND_MIN_DURATION_SECONDS: 180,
 FREESOUND_BASE: "https://freesound.org/apiv2",
-
-// Drawer
-DRAWER_WIDTH_PX: 340,
-DRAWER_ANIMATION_MS: 280,
 ```
 
 ---
 
-*End of PLANiv — Reading Surface, Knowledge Layer, and Atmosphere Layer*
-*Reference this document during Phases A, B, C, and D.*
-*Do not summarize — read fully before building any section.*
+*End of PLANiv — Reading Surface, Knowledge Layer, and Atmosphere Layer.*
+*Reference this document fully during Phases A through E. Do not summarize before building.*
