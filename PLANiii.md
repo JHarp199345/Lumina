@@ -1,0 +1,1160 @@
+# Lumina — Plan III
+## The Visual Director: Symbolic Cinematic Companion
+
+---
+
+## North Star
+
+Lumina should feel like a sensitive visual intelligence reading alongside you — one that notices not just what happens, but what the moment means emotionally and symbolically. It chooses images with taste. It remembers what it has already shown. It knows when to be grand and when to be quiet. It paces itself against the emotional arc of the story rather than firing off dramatic images at every scene break.
+
+The feature is not "AI-generated images for books."
+
+The feature is:
+
+> A symbolic visual companion that moves through a book's emotional architecture, stages each image with intention, maintains visual continuity across the whole reading journey, and never lets the visual panel go dead or go boring.
+
+---
+
+## Why The Current Pipeline Falls Short
+
+The current pipeline is:
+
+```
+Book text
+→ semantic analysis (story shape + inflection points)
+→ scene identification (emotional vectors, symbolic motifs)
+→ image description (2-4 sentence brief written by Gemini)
+→ Imagen 3 or Flux generation
+→ displayed at reading position
+```
+
+This works, but it has no visual intelligence layer. The problems:
+
+**Literalism drift.** Without a director, Gemini defaults to illustrating the action: "a man runs toward an army," "two figures face each other in shadow," "a stormy battlefield at dusk." These are visually coherent but emotionally flat. They describe what happened, not what it means.
+
+**Tonal monotony.** Every image becomes maximally dramatic. Dark palette, lone figure, storm atmosphere, sweeping scale. After three images like that, the reader's eye glazes. A book like Red Rising has moments that deserve silence, intimacy, and restraint — not just spectacle.
+
+**Compositional repetition.** Wide shot. Lone figure against scale. Dramatic light. This pattern repeats across every book because nothing in the current pipeline tracks or penalizes repetition.
+
+**No strategic thinking.** The system currently cannot ask: is this moment better served by showing the object rather than the person? Would the aftermath of this betrayal be more powerful than the moment of betrayal? Should I use a bird's-eye view exactly once in this book to show fate? None of these decisions are made.
+
+**Undifferentiated moments.** A cost-of-triumph scene and a sacrifice scene can look completely identical with the current pipeline. The system knows their emotional valences but does not use that knowledge to choose different visual strategies.
+
+**No pacing.** The images should collectively tell a visual story about the book's arc — tightening and loosening emotional intensity, shifting composition and palette as the story changes. The current pipeline treats each image as independent.
+
+---
+
+## The Visual Director Layer
+
+The new module `src/pipeline/visualDirector.ts` sits between semantic analysis and image generation. Its job:
+
+1. Receive an `IdentifiedScene` with its emotional, symbolic, and structural metadata
+2. Receive the `SemanticMap` for broader arc context
+3. Receive recent `VisualDirectorBrief` objects for diversity checking
+4. Receive the selected `StyleSeed` for medium/palette anchoring
+5. Produce a structured `VisualDirectorBrief` — a complete, organized visual specification
+6. From that brief, construct the final image prompt
+
+The director does not pick what scene to illustrate. That is the job of semantic analysis. The director decides *how* to illustrate a scene that has already been selected.
+
+---
+
+## Full Type System
+
+### MomentFunction
+
+The emotional and narrative function of the moment in the larger story. Two scenes can have identical action but completely different functions — the director must know which it is.
+
+```ts
+export type MomentFunction =
+  // Threshold moments — something changes permanently
+  | "threshold"         // a character crosses a point of no return
+  | "transformation"    // identity or nature changes
+  | "loss_of_innocence" // the world can no longer be seen as it was
+
+  // Relational moments — promises and their consequences
+  | "promise_made"      // a commitment, oath, or declaration
+  | "promise_delivered" // the fulfillment of a commitment
+  | "promise_broken"    // betrayal of a commitment
+  | "betrayal"          // trust violated without prior promise
+
+  // Collision moments — forces meet
+  | "collision"         // physical, political, or ideological clash
+  | "sacrifice"         // voluntary loss for a greater purpose
+  | "cost_of_triumph"   // victory paid for at painful price
+
+  // Revelation moments — knowledge changes everything
+  | "revelation"        // a hidden truth surfaces
+  | "recognition"       // a character sees something or someone truly for the first time
+  | "moral_choice"      // a decision between competing values with no clean answer
+
+  // Psychological moments — interior experience
+  | "dread"             // slow-building fear of what is coming
+  | "temptation"        // desire pulling against principle
+  | "grief"             // loss internalized
+  | "isolation"         // aloneness that carries meaning
+
+  // Arc moments — large-scale narrative beats
+  | "gathering"         // forces assembling before a collision
+  | "aftermath"         // the state of things after a significant event
+  | "return"            // a character returns changed, or to a changed place
+  | "suspense"          // tension held before resolution
+  | "opening_world"     // first exposure to the emotional world of the book
+```
+
+Each moment function implies a set of visual strategies that tend to serve it well, and others that tend to underserve it. This mapping is part of the director's logic.
+
+---
+
+### VisualStrategy
+
+How the image represents the moment — the fundamental relationship between content and form.
+
+```ts
+export type VisualStrategy =
+  // Show the action with clarity
+  | "literal_iconic"          // clear, legible depiction of the moment's action or figure
+  | "ritualized_action"       // stylized or formal rendering of a significant act
+
+  // Shift from action to symbol
+  | "symbolic_abstraction"    // emotional content expressed through non-literal forms
+  | "object_centered"         // a charged object carries the weight of the scene
+  | "threshold_composition"   // a door, gate, line, or boundary as the subject
+
+  // Shift from action to atmosphere
+  | "emotional_landscape"     // the environment expresses the feeling rather than the event
+  | "environmental_pressure"  // the world bears down on figures or objects from all sides
+
+  // Shift from action to time
+  | "aftermath_tableau"       // the scene after the event: what was left behind
+  | "anticipation_frame"      // the last moment before: stillness before rupture
+
+  // Compositional strategies
+  | "scale_contrast"          // small against massive, individual against systemic
+  | "character_silhouette"    // figures reduced to shape and posture
+  | "negative_space"          // what is absent speaks as loudly as what is present
+  | "rare_aerial"             // bird's-eye geometry — reserved for fate, strategy, scale
+```
+
+**Strategy guidance by moment function:**
+
+| Moment Function | Preferred Strategies | Avoid |
+|---|---|---|
+| threshold | threshold_composition, character_silhouette | literal_iconic |
+| transformation | symbolic_abstraction, emotional_landscape | literal_iconic, ritualized_action |
+| loss_of_innocence | aftermath_tableau, negative_space | literal_iconic |
+| promise_made | object_centered, ritualized_action | emotional_landscape |
+| promise_delivered | object_centered, character_silhouette | literal_iconic |
+| betrayal | aftermath_tableau, negative_space, environmental_pressure | literal_iconic |
+| collision | scale_contrast, rare_aerial (once) | symbolic_abstraction |
+| sacrifice | scale_contrast, character_silhouette | literal_iconic, aftermath_tableau |
+| cost_of_triumph | aftermath_tableau, negative_space | literal_iconic |
+| revelation | threshold_composition, symbolic_abstraction | literal_iconic |
+| moral_choice | threshold_composition, character_silhouette | emotional_landscape |
+| grief | emotional_landscape, negative_space | literal_iconic, scale_contrast |
+| isolation | negative_space, emotional_landscape | scale_contrast |
+| dread | environmental_pressure, emotional_landscape | literal_iconic |
+| gathering | scale_contrast, rare_aerial (once), environmental_pressure | object_centered |
+| aftermath | aftermath_tableau, negative_space, emotional_landscape | literal_iconic |
+| opening_world | emotional_landscape, symbolic_abstraction | literal_iconic |
+
+These are tendencies, not rules. The director may override based on context, but must justify the override when the diversity checker asks.
+
+---
+
+### VisualPerspective
+
+Where the viewer stands in relation to the subject.
+
+```ts
+export type VisualPerspective =
+  | "intimate_close"          // within arm's reach — texture, detail, emotion on face or object
+  | "medium_human_scale"      // as if standing nearby — normal field of view
+  | "wide_establishing"       // distance shows context and environment
+  | "solitary_figure_against_scale"  // person small in large environment
+  | "low_angle"               // looking up — power, weight, looming
+  | "high_angle"              // looking down — vulnerability, map-view, fate
+  | "rare_aerial"             // directly overhead — geometry, scale, impersonality
+  | "object_perspective"      // camera positioned as if looking at or from an object
+  | "over_the_shoulder"       // attached to a character, facing their view
+  | "silhouette_from_behind"  // figure seen from behind, facing their world
+  | "environment_first"       // environment fills frame, figure is incidental
+  | "negative_space_dominant" // space is primary subject, presence is secondary
+```
+
+**Perspective rarity rules:**
+- `rare_aerial` — maximum once per book, ideally once per collection segment
+- `negative_space_dominant` — maximum twice per book
+- `intimate_close` — valuable for contrast; avoid using more than 30% of images
+
+**Perspective diversity tracking:**
+The director tracks recent perspective choices. If the last two images both used `solitary_figure_against_scale`, the director should actively prefer other options even if the scene might otherwise suggest that choice.
+
+---
+
+### SubjectFocus
+
+What the image is actually about — what the viewer's attention is directed toward.
+
+```ts
+export type SubjectFocus =
+  | "person"           // a human figure is the primary visual subject
+  | "object"           // a charged or symbolic object is the primary subject
+  | "place"            // a location carries the meaning
+  | "crowd_or_mass"    // collective force is the subject
+  | "threshold"        // a boundary, doorway, or crossing point
+  | "natural_force"    // weather, fire, water, earth
+  | "symbolic_motif"   // a recurring symbol from the book's visual grammar
+  | "aftermath"        // what was left behind after an event
+  | "absence"          // what is missing, implied, or destroyed
+```
+
+"Absence" deserves special attention. Some of the most powerful images in literary illustration show:
+- An empty chair where a character sat
+- A letter half-burned
+- A battle standard lying in mud after the battle is over
+- A door that has been broken inward
+- A gift that was never opened
+
+These images communicate grief, betrayal, cost, and loss more precisely than showing the moment of rupture itself.
+
+---
+
+### MotionLevel
+
+The energy and movement quality of the image.
+
+```ts
+export type MotionLevel =
+  | "completely_still"    // nothing moves; quiet contemplation
+  | "potential_energy"    // still but charged; the moment before motion
+  | "slow_movement"       // drift, descent, settling, dissolution
+  | "purposeful_motion"   // deliberate movement with clear direction
+  | "rushing"             // fast, driven, barely controlled
+  | "violent_collision"   // impact, explosion, breaking
+  | "settling_aftermath"  // motion decelerating; things landing in new positions
+  | "exhausted_stillness" // stillness that follows great effort or loss
+```
+
+Motion level should vary across the book's images to support pacing. A book should not have six consecutive `violent_collision` or `rushing` images any more than a film should have six consecutive action sequences. The director should check the recent motion level distribution before choosing.
+
+---
+
+### CameraDistance
+
+How much is in frame — the image's sense of scope.
+
+```ts
+export type CameraDistance =
+  | "extreme_close"      // texture, fragment, detail
+  | "close"              // face, hands, single object
+  | "medium"             // figure from waist up, or object in context
+  | "medium_wide"        // full figure in immediate environment
+  | "wide"               // figure in broader scene
+  | "extreme_wide"       // individual nearly lost in landscape or crowd
+```
+
+---
+
+### The Full VisualDirectorBrief
+
+```ts
+export interface VisualDirectorBrief {
+  // Identity
+  sceneId: string;
+  bookId: string;
+  generatedAt: string;
+
+  // Director decisions
+  momentFunction: MomentFunction;
+  visualStrategy: VisualStrategy;
+  perspective: VisualPerspective;
+  cameraDistance: CameraDistance;
+  subjectFocus: SubjectFocus;
+  motionLevel: MotionLevel;
+
+  // Emotional and symbolic content
+  emotionalTone: string[];          // 2-4 precise emotional descriptors
+  dominantEmotion: string;          // the single most important one
+  symbolicAnchors: string[];        // abstract symbols (light, dust, weight, fracture)
+  concreteAnchors: string[];        // physical objects and environments from the text
+  chapterContextWords: string[];    // key words from nearby text to inform atmosphere
+
+  // Visual parameters
+  composition: string;              // how the frame is organized (1-2 sentences)
+  palette: string[];                // 3-5 colour/tone descriptors
+  lighting: string;                 // lighting quality and direction
+  texture: string;                  // surface quality (rough, smooth, wet, cracked, worn)
+
+  // Constraints
+  restraintRules: string[];         // what to handle with restraint
+  avoidExplicitly: string[];        // what to explicitly exclude
+
+  // Diversity reasoning
+  diversityNotes: string;           // why this brief avoids recent repetition
+
+  // Output
+  finalPrompt: string;              // complete, ready-to-send image prompt
+  negativePrompt: string;           // complete negative prompt for this image
+}
+```
+
+---
+
+### DiversityMemory
+
+The data structure that tracks recent visual choices and drives the anti-repetition system.
+
+```ts
+export interface DiversityMemory {
+  bookId: string;
+
+  // Rolling window of recent choices (last N images)
+  recentMomentFunctions: MomentFunction[];
+  recentVisualStrategies: VisualStrategy[];
+  recentPerspectives: VisualPerspective[];
+  recentSubjectFoci: SubjectFocus[];
+  recentMotionLevels: MotionLevel[];
+  recentCameraDistances: CameraDistance[];
+  recentDominantEmotions: string[];
+  recentPaletteTerms: string[];
+
+  // One-per-book limits
+  aerialViewUsed: boolean;
+  aerialViewSceneId: string | null;
+
+  // Usage counts (full book)
+  strategyUsageCounts: Partial<Record<VisualStrategy, number>>;
+  perspectiveUsageCounts: Partial<Record<VisualPerspective, number>>;
+  subjectFocusUsageCounts: Partial<Record<SubjectFocus, number>>;
+  motionLevelUsageCounts: Partial<Record<MotionLevel, number>>;
+}
+```
+
+The rolling window should be the last 3-4 images. Beyond 4, the memory becomes less relevant — a viewer does not hold the sixth-ago image in mind when seeing the current one. But within 3, repetition is very noticeable.
+
+---
+
+## The Visual Director Module
+
+**`src/pipeline/visualDirector.ts`**
+
+### Public API
+
+```ts
+export async function createVisualDirectorBrief(params: {
+  scene: IdentifiedScene;
+  semanticMap: SemanticMap;
+  structure: BookStructure;
+  styleSeed: StyleSeed;
+  diversityMemory: DiversityMemory;
+  nearbyText: string;     // raw text from the surrounding chapters
+  apiKey: string;
+  onProgress?: (msg: string) => void;
+}): Promise<VisualDirectorBrief>
+
+export function buildDiversityMemory(
+  existingBriefs: VisualDirectorBrief[]
+): DiversityMemory
+
+export function updateDiversityMemory(
+  memory: DiversityMemory,
+  newBrief: VisualDirectorBrief
+): DiversityMemory
+
+export function detectRepetitionPressure(
+  memory: DiversityMemory
+): RepetitionPressure
+
+export function buildFinalImagePrompt(
+  brief: VisualDirectorBrief,
+  styleSeed: StyleSeed
+): string
+```
+
+---
+
+### RepetitionPressure
+
+Before asking Gemini to write the brief, we analyze the diversity memory and produce a `RepetitionPressure` structure. This feeds directly into the Gemini prompt as a constraint.
+
+```ts
+export interface RepetitionPressure {
+  overusedStrategies: VisualStrategy[];
+  overusedPerspectives: VisualPerspective[];
+  overusedSubjectFoci: SubjectFocus[];
+  overusedMotionLevels: MotionLevel[];
+  aerialViewBlocked: boolean;
+  tonePatternNote: string;      // e.g. "Recent images have all used dread/suspense. Vary."
+  diversityInstructions: string; // pre-formatted string to inject into Gemini prompt
+}
+```
+
+**Repetition pressure detection rules:**
+
+A strategy, perspective, or focus is "overused" if it appears in 2 of the last 3 images. The instructions generated from this become hard constraints in the Gemini prompt:
+
+```
+The recent images have used: lone figure, wide shot, dread/suspense.
+For this brief, DO NOT use:
+- solitary_figure_against_scale perspective
+- emotional_landscape strategy
+- dread or suspense as the dominant emotion
+Actively vary the composition, perspective, and emotional register.
+```
+
+---
+
+### Gemini Prompt Structure for Visual Director
+
+The Visual Director calls Gemini Flash with a carefully structured prompt. It should return JSON, not prose.
+
+**System context:**
+
+```
+You are Lumina's Visual Director. Your job is to create a precise, structured visual brief
+for a symbolic painting that will accompany a reader at a specific emotional moment in a book.
+
+You are NOT creating a literal illustration. You are choosing a visual strategy that best
+carries the emotional meaning of this moment.
+
+Guidelines:
+- Choose imagery that implies, suggests, and symbolizes rather than depicts literally.
+- Think about what should be shown vs. what should be implied.
+- Consider whether the aftermath, the object, or the environment serves better than the action.
+- Vary composition, perspective, and emotional register based on what has come before.
+- Output valid JSON matching the VisualDirectorBrief schema.
+```
+
+**Input to the model:**
+
+```
+BOOK: {title} by {author}
+OVERALL ARC: {arcShape}
+DOMINANT THEMES: {centralThemes}
+DOMINANT EMOTIONS: {dominantEmotions}
+
+THIS MOMENT:
+Chapter context: {nearbyTextExcerpt}
+Emotional vectors: {scene.emotionalVector}
+Symbolic motifs identified: {scene.symbolicMotifs}
+Atmospheric qualities: {scene.atmosphericQualities}
+Narrative weight: {scene.narrativeWeight}
+Arc position: chapter {approximateChapterIndex} of {totalChapters}
+
+RECENT IMAGE HISTORY (last 3):
+Brief 1: {strategy}, {perspective}, {dominantEmotion}, {subjectFocus}
+Brief 2: {strategy}, {perspective}, {dominantEmotion}, {subjectFocus}
+Brief 3: {strategy}, {perspective}, {dominantEmotion}, {subjectFocus}
+
+DIVERSITY CONSTRAINTS:
+{repetitionPressure.diversityInstructions}
+
+AERIAL VIEW AVAILABLE: {!memory.aerialViewUsed}
+(Note: aerial view may only be used once per book. Reserve it for a moment of fate, scale, or strategic significance.)
+
+STYLE SEED: {styleSeed.name}
+Medium/technique: {styleSeed.promptFragment}
+Palette foundation: {styleSeed.paletteKeywords}
+
+OUTPUT FORMAT:
+Return a valid JSON object matching this schema:
+{
+  "momentFunction": one of [threshold, transformation, loss_of_innocence, promise_made,
+    promise_delivered, betrayal, collision, sacrifice, cost_of_triumph, revelation,
+    recognition, moral_choice, dread, temptation, grief, isolation, gathering,
+    aftermath, return, suspense, opening_world],
+  "visualStrategy": one of [literal_iconic, ritualized_action, symbolic_abstraction,
+    object_centered, threshold_composition, emotional_landscape, environmental_pressure,
+    aftermath_tableau, anticipation_frame, scale_contrast, character_silhouette,
+    negative_space, rare_aerial],
+  "perspective": one of [intimate_close, medium_human_scale, wide_establishing,
+    solitary_figure_against_scale, low_angle, high_angle, rare_aerial,
+    object_perspective, over_the_shoulder, silhouette_from_behind,
+    environment_first, negative_space_dominant],
+  "cameraDistance": one of [extreme_close, close, medium, medium_wide, wide, extreme_wide],
+  "subjectFocus": one of [person, object, place, crowd_or_mass, threshold, natural_force,
+    symbolic_motif, aftermath, absence],
+  "motionLevel": one of [completely_still, potential_energy, slow_movement,
+    purposeful_motion, rushing, violent_collision, settling_aftermath, exhausted_stillness],
+  "emotionalTone": ["...", "...", "..."],
+  "dominantEmotion": "...",
+  "symbolicAnchors": ["...", "...", "..."],
+  "concreteAnchors": ["...", "...", "..."],
+  "composition": "...",
+  "palette": ["...", "...", "..."],
+  "lighting": "...",
+  "texture": "...",
+  "restraintRules": ["...", "..."],
+  "avoidExplicitly": ["...", "..."],
+  "diversityNotes": "...",
+  "finalPrompt": "...",
+  "negativePrompt": "..."
+}
+```
+
+---
+
+### Prompt Construction from Brief
+
+The `buildFinalImagePrompt(brief, styleSeed)` function assembles the final image prompt from the brief's structured fields. It does not rely on Gemini's `finalPrompt` field alone — it validates and supplements it.
+
+**Layer structure:**
+
+```
+[1] Core composition declaration
+    → brief.composition
+
+[2] Subject and focus statement
+    → "{brief.subjectFocus} carries the weight of the scene"
+    → Reference brief.concreteAnchors for specificity
+
+[3] Perspective and distance
+    → brief.perspective in natural language
+    → brief.cameraDistance
+
+[4] Motion and energy
+    → brief.motionLevel in natural language
+
+[5] Emotional atmosphere
+    → brief.dominantEmotion + brief.emotionalTone
+
+[6] Symbolic content
+    → brief.symbolicAnchors (abstract symbols)
+    → brief.concreteAnchors (physical objects)
+
+[7] Visual parameters
+    → Palette: brief.palette
+    → Lighting: brief.lighting
+    → Texture: brief.texture
+
+[8] Style seed injection
+    → styleSeed.promptFragment
+    → styleSeed.paletteKeywords
+
+[9] Quality and restraint
+    → "Fine art quality. Symbolic rather than literal."
+    → brief.restraintRules
+
+[10] Negative constraints
+    → brief.avoidExplicitly
+    → Standard: no faces, no readable text, no watermarks, not photorealistic
+```
+
+**Example assembled prompt:**
+
+```
+An aftermath tableau of uneasy victory, organized around the remains of a broken battle 
+standard in the foreground. The camera sits low and near to the ground, with the torn 
+golden thread catching cold dawn light while defeated shapes fade into blue-grey shadow 
+in the distance. The composition stays horizontal and still, with settling-aftermath 
+energy — things have stopped moving, but the silence is uneasy rather than peaceful. 
+
+Dominant emotions: grief and exhaustion, with the unsettled quality of a victory that 
+cost more than it was worth. Symbolic anchors: the gold thread half-buried in dust, 
+a guttered torch, the weight of abandoned tools. Concrete anchors: battlefield, 
+shattered standard, armor fragments, red earth.
+
+Palette: cold sky-blue shadow, muted iron grey, one ember-warm accent of faded gold. 
+Lighting: cold horizontal dawn light — hard shadows, little warmth. Texture: rough, 
+worn, scored, torn cloth and bent metal.
+
+Painterly execution with dry-brush techniques. Highly detailed in the foreground, 
+impressionistic in the distance. Fine art quality, symbolic rather than literal.
+
+No gore or injury. No readable text. No human faces. No clear character depiction. 
+No living figures in direct view. No photorealism. No digital art style.
+```
+
+---
+
+## Scene Selection Scoring
+
+The visual director also enriches the existing scene selection process. Currently, scenes are chosen based on inflection point significance. The new system adds a second-pass scoring layer.
+
+**`src/pipeline/sceneSelectorScoring.ts`**
+
+```ts
+export interface SceneScore {
+  sceneId: string;
+  
+  // Base scores (0.0 - 1.0)
+  emotionalSignificance: number;     // from narrative weight
+  visualLegibility: number;          // can this be expressed without literal depiction?
+  symbolicRichness: number;          // does the scene have strong symbolic anchors?
+  narrativeTurningPoint: number;     // does something change permanently?
+  objectPresence: number;            // is there a charged object that can carry the scene?
+  thresholdPresence: number;         // is there a physical or metaphorical threshold?
+  
+  // Context scores
+  pacingContribution: number;        // does this contribute visual pacing variety?
+  distanceFromLast: number;          // word distance from previous image (normalized)
+  diversityContribution: number;     // would this image add visual variety?
+  
+  // Penalties
+  dialoguePenalty: number;           // scenes that are mostly dialogue get penalized
+  characterLikenessPenalty: number;  // scenes requiring specific character depiction
+  similarToRecentPenalty: number;    // similarity to already-scheduled scenes
+  
+  // Composite
+  finalScore: number;
+  selectionRationale: string;
+}
+```
+
+**Scoring algorithm:**
+
+The final score is a weighted sum:
+
+```ts
+finalScore = (
+  emotionalSignificance * 0.25 +
+  symbolicRichness * 0.20 +
+  narrativeTurningPoint * 0.20 +
+  pacingContribution * 0.15 +
+  distanceFromLast * 0.10 +
+  visualLegibility * 0.10
+) - (
+  dialoguePenalty * 0.20 +
+  characterLikenessPenalty * 0.15 +
+  similarToRecentPenalty * 0.20
+)
+```
+
+High-scoring scenes (> 0.65) are strongly recommended. Scenes scoring below 0.40 should be dropped even if they were identified as inflection points, as their visual legibility is too low to justify an image.
+
+---
+
+## Opening Image Protocol
+
+The opening image is different from all other images. It is not tied to an inflection point. Its job is to establish the book's emotional world before the reader has read anything significant.
+
+**Opening image brief construction** differs:
+
+1. The moment function is always `opening_world`
+2. The visual strategy should lean toward `emotional_landscape` or `symbolic_abstraction`
+3. The subject focus should prefer `place`, `symbolic_motif`, or `natural_force` — NOT `person`
+4. The palette should reflect the book's dominant emotional tone from the arc analysis
+5. The image should contain NO spoilers — no battles, deaths, betrayals, or plot-specific objects if possible
+6. It should be the most ambient, atmospheric image in the book
+
+**For Red Rising specifically:**
+The arc is `rise-fall-rise`. The dominant world is Martian industrial underclass — red earth, low ceilings, deep shafts, ember warmth against pressure and darkness. The opening image should feel like:
+- The weight of the underground before the story breaks upward
+- Red dust, the smell of geothermal heat, the narrow shaft of a life not yet expanded
+- Not Darrow. Not gold. Not the society. Just the world as it presses down.
+
+**Opening image trigger:**
+- When a book is opened and `activeSemanticMap` exists but no images are cached: generate opening image immediately, before any other generation
+- When a new book is imported: after analysis completes, generate opening image before queuing others
+- The opening image displays from first page until the first scene-specific image is reached
+
+---
+
+## Pre-Generation Scheduling
+
+The revised scheduling algorithm:
+
+```
+Phase 1: Book opens
+├── Load semantic map and existing briefs from storage
+├── Load cached images
+├── Set current display image based on reading position
+└── If opening image missing → generate it (PRIORITY ZERO)
+
+Phase 2: Ongoing
+├── Every 2 seconds: update word position
+├── Check: is the NEXT scheduled image generated?
+│   ├── Yes → show "next scene forming" indicator under current image
+│   └── No → queue brief creation + generation for next scene
+├── When an image generates:
+│   ├── Save to storage
+│   ├── If reader has passed its scene position → display immediately
+│   └── Otherwise → hold in cache for when reader arrives
+└── When reader reaches scene position → smooth transition
+
+Phase 3: Visual panel states
+├── No book open → ambient layer (empty phase)
+├── Book open, no API key → ambient layer (needs_key phase) + settings CTA
+├── Book open, API key, no semantic map → ambient layer (needs_analysis phase) + analyze CTA
+├── Analysis running → ambient layer (analyzing phase) with live progress
+├── Analysis done, generating opening image → ambient layer (generating phase)
+├── Opening image done → display it + "next scene forming" if generating
+├── At a scene position, image ready → display scene image
+├── Between scenes, images generated → hold last image
+└── Image failed → ambient failure state + retry CTA
+```
+
+The visual panel should **never** be black and inactive while a book is open. Every state has a designed behavior.
+
+---
+
+## Visual Brief Storage
+
+**Schema addition:**
+
+The `IdentifiedScene` type gains an optional `directorBrief` field:
+
+```ts
+export interface IdentifiedScene {
+  // ... existing fields ...
+  directorBrief?: VisualDirectorBrief;
+}
+```
+
+When the visual director produces a brief, it is attached to the scene and saved with the semantic map. This means:
+
+1. Visual briefs persist with the semantic map
+2. Re-opening a book reloads briefs without re-running the director
+3. The diversity memory can be reconstructed from saved briefs
+4. Future UI (regeneration, "more symbolic," etc.) has the brief to work from
+5. Briefs are inspectable for debugging and quality improvement
+
+**If the semantic map changes** (reanalysis), briefs are cleared and regenerated with the new scenes.
+
+**If only images are regenerated** (user-requested), briefs are preserved and the existing brief's `finalPrompt` is used unless the user specifically requests a different strategy.
+
+---
+
+## Integration With Existing Pipeline
+
+### Changes to `src/pipeline/semanticAnalyzer.ts`
+
+Current pass structure:
+```
+Pass 1: analyzeStoryShape() → arc + inflection points
+Pass 2: identifyScenes() → scene anchors + emotional data
+Pass 3: generateImageDescriptions() → 2-4 sentence descriptions
+```
+
+New pass structure:
+```
+Pass 1: analyzeStoryShape() → arc + inflection points
+Pass 2: identifyScenes() → scene anchors + emotional data
+Pass 3: createVisualDirectorBriefs() → full structured briefs (replaces Pass 3)
+```
+
+Pass 3 is now handled by the visual director, not by a simple "generate description" call. The brief's `finalPrompt` field replaces `scene.imageDescription`.
+
+The `imageDescription` field on `IdentifiedScene` is kept for backward compatibility but is no longer the primary prompt source. The image generator uses `scene.directorBrief?.finalPrompt ?? scene.imageDescription` as the prompt.
+
+---
+
+### Changes to `src/pipeline/imageGenerator.ts`
+
+The prompt selection priority:
+
+```ts
+const prompt =
+  scene.directorBrief?.finalPrompt   // preferred: director's structured prompt
+  ?? buildImagePrompt(scene, styleSeed, priorPaletteContext)  // fallback: existing builder
+```
+
+The negative prompt:
+
+```ts
+const negativePrompt =
+  scene.directorBrief?.negativePrompt  // preferred: scene-specific negative
+  ?? NEGATIVE_PROMPT                   // fallback: standard negative
+```
+
+---
+
+### Changes to `src/hooks/useBookOrchestration.ts`
+
+The `_runAnalysis` function runs Pass 3 (visual director). After `analyzeBook()` returns the semantic map, run the director:
+
+```ts
+// After analyzeBook():
+const semanticMap = await analyzeBook(structure, googleKey, onProgress);
+
+// New: run visual director on all scenes
+const enrichedScenes = await createVisualDirectorBriefs({
+  scenes: semanticMap.scenes,
+  semanticMap,
+  structure,
+  styleSeed,
+  apiKey: googleKey,
+  onProgress: (msg) => setAnalysisProgress(msg),
+});
+
+const finalMap: SemanticMap = {
+  ...semanticMap,
+  scenes: enrichedScenes,
+};
+
+await storage.saveSemanticMap(finalMap);
+```
+
+---
+
+### New Progress Messages
+
+The analysis progress stream should be extended:
+
+```
+"Scoring emotional trajectory…"           ← Pass 1 (existing)
+"Identifying key moments…"                ← Pass 2 (existing)
+"Building visual interpretations…"        ← Pass 3 new label
+"Visual interpretation 1 of 8…"
+"Visual interpretation 2 of 8…"
+"Writing visual brief 3 of 8…"
+"Composing visual language for chapter 14…"
+"Visual direction complete — generating first scene…"
+```
+
+---
+
+## Diversity Memory Lifecycle
+
+**Construction:**
+When analysis completes for a book, `diversityMemory` is empty. It is built progressively as briefs are created.
+
+Within the director run for a single book, briefs are created sequentially (not in parallel), and each brief is fed back into the memory before the next brief is created. This ensures in-session diversity even during the first run.
+
+**Persistence:**
+The `DiversityMemory` is not stored separately. It is reconstructed from the saved briefs whenever needed:
+
+```ts
+const memory = buildDiversityMemory(semanticMap.scenes
+  .filter(s => s.directorBrief)
+  .map(s => s.directorBrief!));
+```
+
+**On regeneration:**
+If a user regenerates a single image, the diversity memory at that position in the sequence is reconstructed from the scenes that come before it. The regenerated brief must respect diversity pressure from its predecessors, even if they were generated earlier.
+
+---
+
+## Repetition Detection Algorithm
+
+**`detectRepetitionPressure(memory: DiversityMemory): RepetitionPressure`**
+
+```ts
+function detectRepetitionPressure(memory: DiversityMemory): RepetitionPressure {
+  const window = 3; // look at last 3 images
+
+  const overusedStrategies = findOverused(
+    memory.recentVisualStrategies.slice(-window),
+    window
+  );
+
+  const overusedPerspectives = findOverused(
+    memory.recentPerspectives.slice(-window),
+    window,
+    ['rare_aerial'] // perspectives that should be flagged if used at all recently
+  );
+
+  const overusedSubjectFoci = findOverused(
+    memory.recentSubjectFoci.slice(-window),
+    window
+  );
+
+  const overusedMotionLevels = findOverused(
+    memory.recentMotionLevels.slice(-window),
+    window
+  );
+
+  const aerialViewBlocked = memory.aerialViewUsed;
+
+  // Build natural language instructions
+  const instructions: string[] = [];
+
+  if (overusedStrategies.length > 0) {
+    instructions.push(
+      `Do not use these visual strategies (recently overused): ${overusedStrategies.join(', ')}`
+    );
+  }
+
+  if (overusedPerspectives.length > 0) {
+    instructions.push(
+      `Do not use these perspectives (recently overused): ${overusedPerspectives.join(', ')}`
+    );
+  }
+
+  if (aerialViewBlocked) {
+    instructions.push(
+      `Aerial view (rare_aerial) has already been used in this book. Do not use it again.`
+    );
+  }
+
+  if (overusedMotionLevels.length > 0) {
+    instructions.push(
+      `Vary the energy level. Recent images have used: ${overusedMotionLevels.join(', ')}. Choose a different motion level.`
+    );
+  }
+
+  // Tone pattern analysis
+  const recentTones = memory.recentDominantEmotions.slice(-3);
+  const tonePattern = detectToneCluster(recentTones);
+  if (tonePattern) {
+    instructions.push(
+      `Recent images have clustered around ${tonePattern}. Introduce contrast — choose a different emotional register.`
+    );
+  }
+
+  return {
+    overusedStrategies,
+    overusedPerspectives,
+    overusedSubjectFoci,
+    overusedMotionLevels,
+    aerialViewBlocked,
+    tonePatternNote: tonePattern ?? "",
+    diversityInstructions: instructions.join('\n'),
+  };
+}
+
+// A value is "overused" if it appears 2+ times in the window
+function findOverused<T>(
+  recent: T[],
+  threshold: number,
+  alwaysFlagIfPresent: T[] = []
+): T[] {
+  const counts = new Map<T, number>();
+  for (const v of recent) {
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  const overused: T[] = [];
+  for (const [value, count] of counts) {
+    if (count >= 2 || alwaysFlagIfPresent.includes(value)) {
+      overused.push(value);
+    }
+  }
+  return overused;
+}
+
+function detectToneCluster(tones: string[]): string | null {
+  const darkTones = ['dread', 'grief', 'despair', 'isolation', 'loss', 'fear', 'darkness'];
+  const triumphTones = ['triumph', 'victory', 'hope', 'elation', 'joy', 'resolution'];
+  const tensionTones = ['suspense', 'tension', 'anticipation', 'pressure', 'conflict'];
+
+  const darkCount = tones.filter(t => darkTones.some(d => t.includes(d))).length;
+  const triumphCount = tones.filter(t => triumphTones.some(d => t.includes(d))).length;
+  const tensionCount = tones.filter(t => tensionTones.some(d => t.includes(d))).length;
+
+  if (darkCount >= 2) return "darkness/grief/isolation";
+  if (triumphCount >= 2) return "triumph/victory/hope";
+  if (tensionCount >= 2) return "suspense/tension/pressure";
+  return null;
+}
+```
+
+---
+
+## Worked Example: Red Rising Army Scene
+
+**Input:**
+- Scene: Darrow runs alone toward the army of the opposing house
+- Moment function (from analysis): `sacrifice` or `threshold`
+- Nearby text keywords: charge, alone, faster, impossible, army, chosen
+- Arc position: early climax of `rise-fall-rise`
+
+**Diversity memory entering this brief:**
+- Last 3 images: wide establishing shots, dread/suspense tone, environmental_pressure strategy
+- Aerial view: not yet used
+
+**Repetition pressure output:**
+```
+Do not use environmental_pressure strategy (recently overused).
+Do not use wide_establishing perspective (recently overused).
+Vary the emotional register — recent images have clustered around dread/suspense.
+Introduce contrast — chose a different emotional register (resolve, sacrifice, cost).
+Aerial view is available but should be reserved for a more strategic moment.
+```
+
+**Director brief (generated by Gemini with the above constraints):**
+
+```json
+{
+  "momentFunction": "sacrifice",
+  "visualStrategy": "scale_contrast",
+  "perspective": "silhouette_from_behind",
+  "cameraDistance": "medium_wide",
+  "subjectFocus": "person",
+  "motionLevel": "purposeful_motion",
+  "emotionalTone": ["resolve", "cost", "impossible clarity"],
+  "dominantEmotion": "resolve",
+  "symbolicAnchors": ["single ember forward", "iron weight behind", "the gap between"],
+  "concreteAnchors": ["running figure", "mass of armored shapes", "dust", "field"],
+  "composition": "The figure occupies the left third of the frame, seen from behind at medium height. The army fills the right two-thirds as a dark mass rather than individual soldiers. The gap between them is the emotional subject.",
+  "palette": ["red-orange dust", "cold iron shadow", "faint amber backlight"],
+  "lighting": "Backlight from behind the army creates silhouette on the figure; dust diffuses both into near-equal haziness at the boundary.",
+  "texture": "rough, gritty, dry — dust-abraded surfaces",
+  "restraintRules": [
+    "No clear faces on either side",
+    "Army should not be readable as individuals",
+    "Do not show the collision — show the moment before"
+  ],
+  "avoidExplicitly": [
+    "literal battle action",
+    "gore",
+    "readable text or insignia",
+    "portraits or identifiable features"
+  ],
+  "diversityNotes": "Used scale_contrast and silhouette_from_behind to break the recent pattern of wide environmental shots. Shifted from dread to resolve.",
+  "finalPrompt": "A single figure breaks into motion from behind, seen at medium height, moving left to right across a field of red-orange dust toward a distant mass that reads more as dark iron shadow than individual soldiers. The army fills two-thirds of the frame but its details dissolve into cold haze; only the figure has motion, intention, and a thin amber backlight catching the dust around his shoulders. The gap between figure and mass is the emotional subject — the space between decision and consequence. Painterly, symbolic, gritty texture throughout, resolve rather than fear, no readable faces or text, not photorealistic.",
+  "negativePrompt": "photorealistic, photograph, comic book, anime, cartoon, manga, text, words, letters, watermarks, visible faces, portraits, gore, injury, detailed armor, individual soldiers, crowd detail, CGI, 3d render"
+}
+```
+
+**Alternative brief for the same scene with different director choice:**
+
+The director might alternatively classify this as `threshold` and use `object_centered`:
+
+```json
+{
+  "momentFunction": "threshold",
+  "visualStrategy": "object_centered",
+  "perspective": "intimate_close",
+  "cameraDistance": "close",
+  "subjectFocus": "object",
+  "motionLevel": "potential_energy",
+  "emotionalTone": ["decision crystallized", "weight of commitment", "cold clarity"],
+  "dominantEmotion": "commitment",
+  "symbolicAnchors": ["the edge of a threshold", "one step forward", "point of no return"],
+  "concreteAnchors": ["boot or foot at a line in the dust", "the line itself as a demarcation"],
+  "composition": "Extreme low angle, close to ground. A single boot or foot suspended at the edge of a shadow line in red dust. The army behind is out of focus, implied by dark mass. The decision is in the foot.",
+  "palette": ["warm red dust in foreground", "cold iron grey in background", "amber specular on the line"],
+  ...
+}
+```
+
+Both are valid. The diversity memory and the moment's position in the arc determine which strategy is preferred. If the previous image was already a figure-scale image, the object-centered approach brings welcome contrast.
+
+---
+
+## Future: Regeneration UI
+
+Once the Visual Director layer is built, user-directed regeneration becomes meaningful. Instead of "try again with the same prompt," the user can regenerate with a specific director instruction:
+
+**Regeneration options presented in the UI:**
+
+```
+Regenerate this image as:
+  → More symbolic          (forces symbolic_abstraction or object_centered)
+  → More intimate          (forces intimate_close or close camera distance)
+  → Wider / more epic      (forces wide_establishing or rare_aerial if available)
+  → Quieter                (forces completely_still or potential_energy motion level)
+  → Different emotional register (forces tone contrast from current brief)
+  → Focus on the object    (forces object_centered, subjectFocus: "object")
+  → Show the aftermath     (forces aftermath_tableau, subjectFocus: "aftermath")
+  → Regenerate differently (full re-brief with diversity pressure applied)
+```
+
+These are director-level instructions, not prompt-level edits. The user does not edit prompts; they redirect the director, and the director rewrites the prompt accordingly.
+
+Implementation: each regeneration option maps to a set of `DirectorConstraintOverrides` passed to `createVisualDirectorBrief()`, which uses them to constrain Gemini's output.
+
+---
+
+## Implementation Order
+
+### Step 1 — Types
+Create `src/pipeline/visualDirectorTypes.ts` with all types:
+`MomentFunction`, `VisualStrategy`, `VisualPerspective`, `SubjectFocus`, `MotionLevel`, `CameraDistance`, `VisualDirectorBrief`, `DiversityMemory`, `RepetitionPressure`
+
+Update `src/types/index.ts`:
+- Add `directorBrief?: VisualDirectorBrief` to `IdentifiedScene`
+
+### Step 2 — Visual Director Core
+Create `src/pipeline/visualDirector.ts`:
+- `createVisualDirectorBrief()`
+- `buildDiversityMemory()`
+- `updateDiversityMemory()`
+- `detectRepetitionPressure()`
+- `buildFinalImagePrompt()`
+- Gemini prompt templates and JSON parsing
+- Error handling with graceful fallback to existing description
+
+### Step 3 — Scene Scoring
+Create `src/pipeline/sceneSelectorScoring.ts`:
+- `scoreScene()` function
+- `selectFinalScenes()` override for existing scorer
+
+### Step 4 — Semantic Analyzer Integration
+Modify `src/pipeline/semanticAnalyzer.ts`:
+- Replace `generateImageDescriptions()` with `createVisualDirectorBriefs()`
+- Pass diversity memory through the scene sequence
+- Update progress messages
+- Fallback: if director fails for a scene, use existing description builder
+
+### Step 5 — Image Generator Integration
+Modify `src/pipeline/imageGenerator.ts`:
+- Use `scene.directorBrief?.finalPrompt` as primary prompt
+- Use `scene.directorBrief?.negativePrompt` as primary negative
+- Fallback to existing `buildImagePrompt()` if no brief
+
+### Step 6 — Storage
+Update `src/storage/StorageAdapter.ts`:
+- No changes needed (briefs stored inside SemanticMap.scenes)
+
+Update `src/storage/TauriStorageAdapter.ts` and `WebStorageAdapter.ts`:
+- No changes needed (existing `saveSemanticMap` saves scenes with briefs)
+
+### Step 7 — Orchestration
+Update `src/hooks/useBookOrchestration.ts`:
+- Run visual director after `analyzeBook()` returns
+- Pass director briefs to saving step
+- Add director-specific progress messages
+
+### Step 8 — Opening Image Protocol
+Update `src/hooks/useBookOrchestration.ts`:
+- Ensure opening image always generates first after analysis
+- Use `opening_world` moment function for scene 0
+
+Update `src/hooks/useEpubImport.ts` / `openBook`:
+- Ensure opening image displays immediately on re-open
+
+### Step 9 — Visual Panel States
+Update `src/components/visual/AmbientSceneLayer.tsx`:
+- Add `director_briefing` phase
+- Update phase messages to reflect new pipeline language
+
+### Step 10 — Diagnostics
+Add optional verbose logging throughout the director pipeline:
+```
+[Director] Scene 3/8: sacrifice at chapter 14
+[Director] Repetition pressure: avoid environmental_pressure, wide_establishing
+[Director] Brief: scale_contrast, silhouette_from_behind, resolve, purposeful_motion
+[Director] Prompt length: 847 chars
+[Director] Diversity: breaking recent pattern of dread/wide/environmental
+```
+
+---
+
+## File Summary
+
+| File | Status | Purpose |
+|---|---|---|
+| `src/pipeline/visualDirectorTypes.ts` | New | All Visual Director type definitions |
+| `src/pipeline/visualDirector.ts` | New | Core director logic and Gemini integration |
+| `src/pipeline/sceneSelectorScoring.ts` | New | Scene selection scoring system |
+| `src/pipeline/semanticAnalyzer.ts` | Modify | Replace Pass 3 with visual director |
+| `src/pipeline/imageGenerator.ts` | Modify | Use director brief as primary prompt source |
+| `src/hooks/useBookOrchestration.ts` | Modify | Run director, wire opening image protocol |
+| `src/types/index.ts` | Modify | Add `directorBrief` to `IdentifiedScene` |
+| `src/components/visual/AmbientSceneLayer.tsx` | Modify | New phase states |
+
+---
+
+## The Goal Restated
+
+Every image Lumina generates should be able to answer three questions:
+
+```
+1. Why this moment?
+   → Because it is emotionally significant in this specific way.
+
+2. Why this visual strategy?
+   → Because this strategy serves this type of moment, and the recent
+     images have not used it, so it adds visual variety.
+
+3. Why this composition, palette, and perspective?
+   → Because these choices carry the specific emotional tone of this
+     moment, anchor to its symbolic content, and maintain the visual
+     grammar of this book's style seed.
+```
+
+If any of those three questions cannot be answered by the brief, the brief is incomplete and should be regenerated.
+
+The brief is not a means to an end. The brief is the intelligence of the system, made visible. When the system is working well, reading a book's sequence of briefs should feel like reading a thoughtful director's notes — a complete account of why this visual story was told the way it was told.
