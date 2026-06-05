@@ -179,6 +179,18 @@ Preview the web build:
 npm run web:preview
 ```
 
+## GitHub Pages
+
+The repository includes a GitHub Actions workflow for GitHub Pages.
+
+The Pages build is configured for the project URL:
+
+```text
+https://jharp199345.github.io/Lumina/
+```
+
+In GitHub, set Pages to deploy from **GitHub Actions**. After that, pushes to `main` build and publish the web/PWA version automatically.
+
 ## Android / Tablet Notes
 
 The current practical tablet path is the web/PWA version.

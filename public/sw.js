@@ -10,6 +10,8 @@
  */
 
 const CACHE_VERSION = "lumina-v1";
+const SCOPE_PATH = new URL(self.registration.scope).pathname;
+const scoped = (path) => `${SCOPE_PATH}${path}`.replace(/\/{2,}/g, "/");
 
 // ─── Install ─────────────────────────────────────────────────────────────────
 // Pre-cache the app shell (the HTML entry point). Everything else caches
@@ -19,7 +21,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE_VERSION)
-      .then((cache) => cache.addAll(["/", "/manifest.webmanifest", "/icons/icon.svg"]))
+      .then((cache) => cache.addAll([SCOPE_PATH, scoped("manifest.webmanifest"), scoped("icons/icon.svg")]))
       .then(() => self.skipWaiting())
   );
 });
@@ -57,7 +59,7 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE_VERSION).then((cache) => cache.put(request, clone));
           return response;
         })
-        .catch(() => caches.match("/"))
+        .catch(() => caches.match(SCOPE_PATH))
     );
     return;
   }

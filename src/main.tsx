@@ -86,7 +86,7 @@ if (!isTauri && import.meta.env.DEV && "serviceWorker" in navigator) {
 if (!isTauri && import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("/sw.js")
+      .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
       .then((reg) => {
         console.info("[SW] Registered:", reg.scope);
       })

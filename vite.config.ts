@@ -7,10 +7,13 @@ import path from "path";
 const host = process.env.TAURI_DEV_HOST;
 // @ts-expect-error process is a nodejs global
 const isTauriDev = !!process.env.TAURI_DEV_HOST || !!process.env.TAURI_ENV_TARGET_TRIPLE;
+// @ts-expect-error process is a nodejs global
+const isGitHubPages = process.env.GITHUB_PAGES === "true";
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+  base: isGitHubPages ? "/Lumina/" : "/",
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
