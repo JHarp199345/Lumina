@@ -52,10 +52,11 @@ The new module `src/pipeline/visualDirector.ts` sits between semantic analysis a
 2. Receive the `SemanticMap` for broader arc context
 3. Receive recent `VisualDirectorBrief` objects for diversity checking
 4. Receive the selected `StyleSeed` for medium/palette anchoring
-5. Produce a structured `VisualDirectorBrief` — a complete, organized visual specification
-6. From that brief, construct the final image prompt
+5. Receive the reader's `visualInterpretationLevel` (0–100) — the spectrum from pure creative interpretation to close scene depiction
+6. Produce a structured `VisualDirectorBrief` — a complete, organized visual specification
+7. From that brief, construct the final image prompt
 
-The director does not pick what scene to illustrate. That is the job of semantic analysis. The director decides *how* to illustrate a scene that has already been selected.
+The director does not pick what scene to illustrate. That is the job of semantic analysis. The director decides *how* to illustrate a scene that has already been selected — and how literally or interpretively to render it.
 
 ---
 
@@ -159,6 +160,33 @@ export type VisualStrategy =
 | opening_world | emotional_landscape, symbolic_abstraction | literal_iconic |
 
 These are tendencies, not rules. The director may override based on context, but must justify the override when the diversity checker asks.
+
+**Strategy availability by interpretation level:**
+
+The strategy guidance table above represents behavior at the midpoint (~50). The reader's `visualInterpretationLevel` setting gates which strategies the director is allowed to choose.
+
+| Level range | Available strategies | Character/scene presence |
+|---|---|---|
+| 0–20 | symbolic_abstraction, emotional_landscape, negative_space | No figures. Pure mood, form, color, symbol. |
+| 20–40 | + object_centered, aftermath_tableau, threshold_composition, environmental_pressure | Objects and environment only. Figures at most as distant blur. |
+| 40–60 *(default)* | + anticipation_frame, character_silhouette, scale_contrast | Figures as silhouette or gestural form. Scene implied, not depicted. |
+| 60–80 | + ritualized_action, literal_iconic (reduced intensity) | Figures readable by posture and action. Scene depicted but stylized. |
+| 80–100 | All strategies including full literal_iconic | Scene depicted as closely as the style seed medium allows. Figures, action, setting all clear. |
+
+Strategies are still ranked by moment function within the available set — the interpretation level determines *which strategies are reachable*, not which one wins.
+
+**Negative prompt relaxation by level:**
+
+The negative prompt tightens and loosens in sync with the level:
+
+| Level range | Negative prompt additions |
+|---|---|
+| 0–40 | "no figures, no human forms, no scene action, no identifiable setting elements" |
+| 40–60 | "no clear faces, no identifiable portraits, figures only as silhouette or gesture" |
+| 60–80 | "no photorealistic faces, no identifiable character portraits" |
+| 80–100 | "no photorealism" — the minimum floor, always kept regardless of level |
+
+Even at 100, Lumina never produces photorealistic portraits. The style seed always mediates. "100 = illustrative" means *within the watercolor / dark ink / golden manuscript register the reader chose* — Gustave Doré, not a photograph. Faces remain gestural, figures readable by form and action rather than specific likeness.
 
 ---
 
@@ -265,6 +293,10 @@ export interface VisualDirectorBrief {
   bookId: string;
   generatedAt: string;
 
+  // Reader preference at time of generation (0 = interpretive, 100 = illustrative)
+  // Stored so regeneration knows what level produced this brief.
+  interpretationLevel: number;
+
   // Director decisions
   momentFunction: MomentFunction;
   visualStrategy: VisualStrategy;
@@ -335,6 +367,97 @@ The rolling window should be the last 3-4 images. Beyond 4, the memory becomes l
 
 ---
 
+## Reader Interpretation Level
+
+### What It Is
+
+`visualInterpretationLevel` is a global reader preference stored in `settingsStore` alongside `fontSize` and `theme`. It controls where on the spectrum from creative interpretation to close scene depiction Lumina's images land.
+
+It is **not** per-book. It is **not** tied to genre or story type. It is purely: what quality of image does *this reader* find most compelling?
+
+Some readers want pure mood — they want Lumina to evoke the feeling of a moment through colour, light, and symbol, letting their imagination supply the rest. Other readers want to see the scene — they want a visual record of what happened, filtered through the style seed's artistic medium. Both are valid. The slider lets the reader find their own balance.
+
+### Setting Type
+
+```ts
+// In src/types/index.ts — add to UserSettings:
+export interface UserSettings {
+  // ... existing fields ...
+
+  /**
+   * Visual interpretation level: 0 = fully interpretive/symbolic,
+   * 100 = close scene depiction. Default 50.
+   *
+   * Controls which visual strategies the director may choose and how
+   * literally the final image prompt describes the scene.
+   * Stored globally — applies to all books.
+   */
+  visualInterpretationLevel: number;
+}
+```
+
+### Settings Store
+
+```ts
+// In src/store/settingsStore.ts — add to defaults:
+visualInterpretationLevel: 50,
+
+// Add action:
+setVisualInterpretationLevel: (level: number) =>
+  set({ visualInterpretationLevel: Math.max(0, Math.min(100, level)) }),
+```
+
+Default is **50** — the creative sweet spot where the director has full access to the middle-range strategies, figures appear as silhouette and gesture, and scene content is implied through composition and atmosphere rather than depicted literally. This is where "beneficial hallucination" produces the most consistently interesting images regardless of what the source material looks like.
+
+### Semantic Anchors
+
+| Value | Label | What images look like |
+|---|---|---|
+| 0 | Pure interpretation | No figures, no action, no recognizable setting. Colour, form, texture, and abstract symbol only. The emotional world of the moment as pure painting. |
+| 25 | Atmospheric | Objects, environments, and thresholds carry the scene. Figures implied by their absence or reduced to trace. |
+| 50 *(default)* | Balanced | Figures present as silhouette and gesture. Scene implied through composition and symbol. The moment's emotional meaning is the subject. |
+| 75 | Illustrative | Figures and action readable. Scene depicted but filtered through the style seed medium. |
+| 100 | Scene depiction | As close to the actual scene as the style seed allows. Action, figures, and setting all legible. Always mediated by the artistic medium — never photorealistic. |
+
+### UI: The Slider
+
+Located in the Settings Panel, under a "Visual Style" section:
+
+```
+Visual Style
+
+Interpretive ●──────────────────○ Illustrative
+             0        50        100
+
+Interpretive: pure mood, symbol, atmosphere
+Illustrative: scene depiction through your chosen art style
+
+Currently: Balanced  (or "Interpretive" / "Illustrative" / "Scene Depiction" depending on range)
+```
+
+The slider snaps to clean increments (0, 10, 20… or freeform). No decimal precision needed.
+
+The label updates dynamically based on value:
+- 0–20: "Interpretive"
+- 20–45: "Atmospheric"
+- 45–55: "Balanced"
+- 55–75: "Illustrative"
+- 75–100: "Scene Depiction"
+
+A brief one-line description under the slider explains what images will look like at the current setting. This helps readers understand what they're choosing without needing to think in percentages.
+
+### Interaction With Briefs
+
+The `interpretationLevel` is recorded in every `VisualDirectorBrief`. This matters for:
+
+1. **Regeneration context** — if a user regenerates an image, the system knows what level produced the original brief and can regenerate at the same level or a different one if the user requests it.
+
+2. **If the reader changes the level** — existing images are not automatically regenerated (they were generated at a specific level and that is valid). The new level applies to the next image generation. If the reader wants all images at the new level, they use "Regenerate all images" from settings.
+
+3. **Opening image** — always generated at the reader's current level, but with the constraint that `opening_world` moment function leans toward the atmospheric regardless of level (no spoilers, even at 100).
+
+---
+
 ## The Visual Director Module
 
 **`src/pipeline/visualDirector.ts`**
@@ -348,7 +471,8 @@ export async function createVisualDirectorBrief(params: {
   structure: BookStructure;
   styleSeed: StyleSeed;
   diversityMemory: DiversityMemory;
-  nearbyText: string;     // raw text from the surrounding chapters
+  nearbyText: string;           // raw text from the surrounding chapters
+  interpretationLevel: number;  // 0–100 from settingsStore.visualInterpretationLevel
   apiKey: string;
   onProgress?: (msg: string) => void;
 }): Promise<VisualDirectorBrief>
@@ -413,15 +537,15 @@ The Visual Director calls Gemini Flash with a carefully structured prompt. It sh
 
 ```
 You are Lumina's Visual Director. Your job is to create a precise, structured visual brief
-for a symbolic painting that will accompany a reader at a specific emotional moment in a book.
+for a painting that will accompany a reader at a specific emotional moment in a book.
 
-You are NOT creating a literal illustration. You are choosing a visual strategy that best
-carries the emotional meaning of this moment.
+The reader has set an interpretation level that tells you how literally or interpretively
+to render this scene. You must respect this setting — it is the reader's preference,
+not a suggestion.
 
 Guidelines:
-- Choose imagery that implies, suggests, and symbolizes rather than depicts literally.
-- Think about what should be shown vs. what should be implied.
-- Consider whether the aftermath, the object, or the environment serves better than the action.
+- Choose a visual strategy appropriate for both the moment function AND the interpretation level.
+- Think about what should be shown vs. what should be implied, filtered through the level.
 - Vary composition, perspective, and emotional register based on what has come before.
 - Output valid JSON matching the VisualDirectorBrief schema.
 ```
@@ -452,6 +576,29 @@ DIVERSITY CONSTRAINTS:
 
 AERIAL VIEW AVAILABLE: {!memory.aerialViewUsed}
 (Note: aerial view may only be used once per book. Reserve it for a moment of fate, scale, or strategic significance.)
+
+READER INTERPRETATION LEVEL: {interpretationLevel}/100
+{interpretationLevelInstruction}
+
+(The interpretationLevelInstruction is generated by the code before sending to Gemini.
+ It translates the numeric value into plain English constraints. Examples:
+
+ Level 10:
+ "The reader prefers pure creative interpretation. No figures, no scene action, no literal
+ depiction. Use only symbolic_abstraction or emotional_landscape strategies. Communicate the
+ emotional world of this moment through colour, texture, and abstract form. No human forms,
+ no recognizable scene elements."
+
+ Level 50:
+ "The reader prefers a balanced interpretation. Figures may appear as silhouette or gestural
+ form. The scene should be implied rather than depicted. Choose from the full strategy palette
+ except literal_iconic. Faces must remain abstracted."
+
+ Level 90:
+ "The reader prefers close scene depiction. Illustrate the actual scene action as clearly as
+ the style seed's artistic medium allows. Figures, action, and setting should all be
+ legible and readable. Faces remain gestural rather than portrait-like. The style seed
+ medium always mediates — this is illustration, not photography.")
 
 STYLE SEED: {styleSeed.name}
 Medium/technique: {styleSeed.promptFragment}
@@ -532,13 +679,19 @@ The `buildFinalImagePrompt(brief, styleSeed)` function assembles the final image
     → styleSeed.promptFragment
     → styleSeed.paletteKeywords
 
-[9] Quality and restraint
-    → "Fine art quality. Symbolic rather than literal."
+[9] Quality, restraint, and interpretation register
+    → Fine art quality declaration
+    → Interpretation register from level:
+      - 0–40: "Symbolic rather than literal. No figures or scene action."
+      - 40–60: "Impressionistic. Scene implied through form and atmosphere."
+      - 60–80: "Illustrative. Scene and figures rendered through the style seed medium."
+      - 80–100: "Scene depiction. Illustrate the action as closely as the medium allows."
     → brief.restraintRules
 
 [10] Negative constraints
-    → brief.avoidExplicitly
-    → Standard: no faces, no readable text, no watermarks, not photorealistic
+    → brief.avoidExplicitly (scene-specific)
+    → Level-gated figure/action restrictions (from the table in Strategy Availability)
+    → Floor: not photorealistic, no watermarks, no readable text (always present)
 ```
 
 **Example assembled prompt:**
@@ -769,11 +922,15 @@ The `_runAnalysis` function runs Pass 3 (visual director). After `analyzeBook()`
 const semanticMap = await analyzeBook(structure, googleKey, onProgress);
 
 // New: run visual director on all scenes
+// Pull interpretation level from settings at the time of analysis
+const { visualInterpretationLevel } = useSettingsStore.getState();
+
 const enrichedScenes = await createVisualDirectorBriefs({
   scenes: semanticMap.scenes,
   semanticMap,
   structure,
   styleSeed,
+  interpretationLevel: visualInterpretationLevel,
   apiKey: googleKey,
   onProgress: (msg) => setAnalysisProgress(msg),
 });
@@ -1021,6 +1178,48 @@ The director might alternatively classify this as `threshold` and use `object_ce
 
 Both are valid. The diversity memory and the moment's position in the arc determine which strategy is preferred. If the previous image was already a figure-scale image, the object-centered approach brings welcome contrast.
 
+**Same scene at interpretation level 15 (pure interpretation):**
+
+```json
+{
+  "momentFunction": "threshold",
+  "visualStrategy": "symbolic_abstraction",
+  "perspective": "environment_first",
+  "cameraDistance": "extreme_wide",
+  "subjectFocus": "natural_force",
+  "motionLevel": "potential_energy",
+  "emotionalTone": ["impossible weight", "compressed fire", "the held breath before everything changes"],
+  "dominantEmotion": "resolve before rupture",
+  "symbolicAnchors": ["a single ember in darkness", "iron pressing down", "the hairline crack before breaking"],
+  "concreteAnchors": ["red dust", "vast shadow", "one point of amber warmth"],
+  "composition": "A field of iron shadow occupies almost the entire frame. At the lower-left edge, a single point of warm amber light — small, still, barely there — faces an undifferentiated mass of cold. No figures. No action. The image is the gap between.",
+  "finalPrompt": "An abstract composition in iron shadow and ember warmth. A vast cold darkness occupies almost all of the frame; a single point of amber light persists at one edge, neither advancing nor retreating — only being. The space between them is the subject. No figures, no scene, no action. Pure emotional weight rendered in tone and field. Painterly, atmospheric, non-representational.",
+  "negativePrompt": "photorealistic, any human figure, scene action, identifiable setting, literal depiction, comic book, manga, CGI, digital art, 3d render, text, watermarks"
+}
+```
+
+**Same scene at interpretation level 90 (scene depiction):**
+
+```json
+{
+  "momentFunction": "sacrifice",
+  "visualStrategy": "literal_iconic",
+  "perspective": "low_angle",
+  "cameraDistance": "medium_wide",
+  "subjectFocus": "person",
+  "motionLevel": "rushing",
+  "emotionalTone": ["reckless courage", "the body ahead of the mind", "no going back"],
+  "dominantEmotion": "committed motion",
+  "symbolicAnchors": ["dust rising at the heels", "the distance shrinking"],
+  "concreteAnchors": ["armored figure mid-stride", "opposing army wall", "red earth field"],
+  "composition": "Low-angle view slightly behind and below the charging figure. His full form is visible — armor, stride, intention. The opposing army is a wall of shapes ahead, compressed by distance into something massive and indistinct. The low angle amplifies both his motion and the scale of what he runs toward.",
+  "finalPrompt": "Low-angle view of an armored figure mid-stride across red earth, seen from slightly behind and below. His posture and motion are clear and intentional — running into something impossible. The opposing army ahead compresses into a dark mass at middle distance. Red dust rises at his heels. The image is scene depiction filtered through painterly technique — figures and action readable, faces gestural rather than portrait-like, rendered in the style of detailed fantasy illustration with atmospheric depth.",
+  "negativePrompt": "photorealistic, portrait photography, identifiable faces, gore, readable text, watermarks, CGI, 3d render, digital illustration style"
+}
+```
+
+The diversity memory, moment function, and pacing logic work identically at all three levels. Only the strategy palette and prompt register change.
+
 ---
 
 ## Future: Regeneration UI
@@ -1031,6 +1230,8 @@ Once the Visual Director layer is built, user-directed regeneration becomes mean
 
 ```
 Regenerate this image as:
+  → More interpretive      (drops interpretation level by 25 for this image only)
+  → More illustrative      (raises interpretation level by 25 for this image only)
   → More symbolic          (forces symbolic_abstraction or object_centered)
   → More intimate          (forces intimate_close or close camera distance)
   → Wider / more epic      (forces wide_establishing or rare_aerial if available)
@@ -1041,6 +1242,8 @@ Regenerate this image as:
   → Regenerate differently (full re-brief with diversity pressure applied)
 ```
 
+"More interpretive" and "More illustrative" are single-image overrides — they do not change the global `visualInterpretationLevel` setting. They let the reader fine-tune one specific image without shifting the entire book's visual register.
+
 These are director-level instructions, not prompt-level edits. The user does not edit prompts; they redirect the director, and the director rewrites the prompt accordingly.
 
 Implementation: each regeneration option maps to a set of `DirectorConstraintOverrides` passed to `createVisualDirectorBrief()`, which uses them to constrain Gemini's output.
@@ -1049,12 +1252,17 @@ Implementation: each regeneration option maps to a set of `DirectorConstraintOve
 
 ## Implementation Order
 
-### Step 1 — Types
+### Step 1 — Types and Settings
 Create `src/pipeline/visualDirectorTypes.ts` with all types:
 `MomentFunction`, `VisualStrategy`, `VisualPerspective`, `SubjectFocus`, `MotionLevel`, `CameraDistance`, `VisualDirectorBrief`, `DiversityMemory`, `RepetitionPressure`
 
 Update `src/types/index.ts`:
 - Add `directorBrief?: VisualDirectorBrief` to `IdentifiedScene`
+- Add `visualInterpretationLevel: number` to `UserSettings`
+
+Update `src/store/settingsStore.ts`:
+- Add `visualInterpretationLevel: 50` to defaults
+- Add `setVisualInterpretationLevel: (level: number) => void` action
 
 ### Step 2 — Visual Director Core
 Create `src/pipeline/visualDirector.ts`:
@@ -1110,7 +1318,16 @@ Update `src/components/visual/AmbientSceneLayer.tsx`:
 - Add `director_briefing` phase
 - Update phase messages to reflect new pipeline language
 
-### Step 10 — Diagnostics
+### Step 10 — Settings Slider UI
+Update `src/components/common/SettingsPanel.tsx`:
+- Add "Visual Style" section with interpretation level slider
+- Slider: 0–100 range, labeled "Interpretive ←→ Illustrative"
+- Dynamic label: "Interpretive" / "Atmospheric" / "Balanced" / "Illustrative" / "Scene Depiction"
+- One-line description under slider explaining what images look like at current value
+- On change: call `setVisualInterpretationLevel(value)` — updates immediately
+- Note: changing the level does not regenerate existing images; applies to next generation
+
+### Step 12 — Diagnostics
 Add optional verbose logging throughout the director pipeline:
 ```
 [Director] Scene 3/8: sacrifice at chapter 14
@@ -1131,28 +1348,37 @@ Add optional verbose logging throughout the director pipeline:
 | `src/pipeline/sceneSelectorScoring.ts` | New | Scene selection scoring system |
 | `src/pipeline/semanticAnalyzer.ts` | Modify | Replace Pass 3 with visual director |
 | `src/pipeline/imageGenerator.ts` | Modify | Use director brief as primary prompt source |
-| `src/hooks/useBookOrchestration.ts` | Modify | Run director, wire opening image protocol |
-| `src/types/index.ts` | Modify | Add `directorBrief` to `IdentifiedScene` |
+| `src/hooks/useBookOrchestration.ts` | Modify | Run director, pass interpretation level, wire opening image protocol |
+| `src/types/index.ts` | Modify | Add `directorBrief` to `IdentifiedScene`, add `visualInterpretationLevel` to `UserSettings` |
+| `src/store/settingsStore.ts` | Modify | Add `visualInterpretationLevel` default (50) and action |
+| `src/components/common/SettingsPanel.tsx` | Modify | Add Visual Style slider (Interpretive ↔ Illustrative) |
 | `src/components/visual/AmbientSceneLayer.tsx` | Modify | New phase states |
 
 ---
 
 ## The Goal Restated
 
-Every image Lumina generates should be able to answer three questions:
+Every image Lumina generates should be able to answer four questions:
 
 ```
 1. Why this moment?
    → Because it is emotionally significant in this specific way.
 
 2. Why this visual strategy?
-   → Because this strategy serves this type of moment, and the recent
-     images have not used it, so it adds visual variety.
+   → Because this strategy serves this type of moment, is available
+     at the reader's interpretation level, and the recent images have
+     not used it — so it adds visual variety.
 
 3. Why this composition, palette, and perspective?
    → Because these choices carry the specific emotional tone of this
      moment, anchor to its symbolic content, and maintain the visual
      grammar of this book's style seed.
+
+4. Why this degree of literal or interpretive rendering?
+   → Because the reader prefers it. The image should feel exactly as
+     close to or as far from the scene as the reader finds most compelling.
+     The intelligence of the system — moment function, diversity, pacing —
+     operates at every level of the spectrum.
 ```
 
 If any of those three questions cannot be answered by the brief, the brief is incomplete and should be regenerated.
