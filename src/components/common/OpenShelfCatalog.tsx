@@ -150,7 +150,12 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
   }, [loadMore, nextUrl]);
 
   const visibleBooks = useMemo(() => {
-    const copy = [...books];
+    // Dedup by id — Gutendex can return the same work across pages/feeds, and
+    // the initial load doesn't dedup like loadMore does. This guarantees unique
+    // React keys regardless of which load path produced the list.
+    const byId = new Map<number, GutendexBook>();
+    for (const book of books) if (!byId.has(book.id)) byId.set(book.id, book);
+    const copy = [...byId.values()];
     if (sort === "title-asc") {
       copy.sort((a, b) => a.title.localeCompare(b.title));
     }

@@ -13,7 +13,7 @@ interface LibraryPanelProps {
 
 export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
   const { library, removeBook, activeBook } = useBookStore();
-  const { openBook, unmountActiveBook } = useEpubImport();
+  const { openBook, unmountActiveBook, importEpubFile } = useEpubImport();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [openProgress, setOpenProgress] = useState("");
   const [view, setView] = useState<"library" | "open-shelf">("library");
@@ -203,6 +203,24 @@ export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
               className="rounded-lg border border-hair px-3 py-2 text-xs text-ink-faint transition hover:border-hair hover:text-ink-soft"
             >
               Close current book
+            </button>
+          )}
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const { buildSampleEpubFile } = await import("@/utils/sampleBook");
+                  const file = await buildSampleEpubFile();
+                  await importEpubFile(file);
+                  onClose();
+                } catch (err) {
+                  console.error("[Library] Load sample failed:", err);
+                }
+              }}
+              className="rounded-lg border border-hair px-3 py-2 text-xs text-ink-faint transition hover:border-hair hover:text-ink-soft"
+            >
+              Load sample
             </button>
           )}
           <button
