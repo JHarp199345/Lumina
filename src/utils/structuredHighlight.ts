@@ -8,6 +8,8 @@
  * text nodes and wraps each intersecting segment in a <mark>.
  */
 
+import { lensClassName } from "@/store/lensStore";
+
 const HL_ATTR = "data-lumina-hl";
 
 export interface SelectionOffsets {
@@ -129,8 +131,8 @@ function cssEscape(value: string): string {
 }
 
 export const HIGHLIGHT_LENS_CLASS: Record<string, string> = {
-  yellow: "highlight-yellow",
-  blue: "highlight-blue",
-  green: "highlight-green",
-  red: "highlight-red",
+  yellow: lensClassName("yellow"),
+  blue: lensClassName("blue"),
+  green: lensClassName("green"),
+  red: lensClassName("red"),
 };

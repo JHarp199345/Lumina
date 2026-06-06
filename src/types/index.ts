@@ -452,7 +452,24 @@ export interface CachedImage {
 
 // ─── Annotations ─────────────────────────────────────────────────────────────
 
-export type HighlightColor = "yellow" | "blue" | "green" | "red";
+export type HighlightColor = string;
+
+export type LensCornerStyle = "sharp" | "soft" | "round";
+export type LensTexture = "clean" | "glass" | "marker" | "neon";
+export type LensEdgeStyle = "none" | "border" | "underline" | "left";
+export type LensTextEmphasis = "normal" | "bold" | "bright" | "lift";
+
+export interface HighlightLens {
+  id: HighlightColor;
+  name: string;
+  color: string;
+  opacity: number; // 0-100
+  cornerStyle: LensCornerStyle;
+  glow: number; // 0-100
+  edgeStyle: LensEdgeStyle;
+  texture: LensTexture;
+  textEmphasis: LensTextEmphasis;
+}
 
 export interface Highlight {
   id: string;

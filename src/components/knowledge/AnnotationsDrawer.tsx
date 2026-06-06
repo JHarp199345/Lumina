@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   Plus,
   StickyNote,
+  WandSparkles,
 } from "lucide-react";
 import { useDrawerStore } from "@/store/drawerStore";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -31,6 +32,7 @@ import {
   type ChapterGroup,
 } from "@/utils/annotationGrouping";
 import type { Highlight, Note } from "@/types";
+import LensStudio from "@/components/knowledge/LensStudio";
 
 const LENS_EDGE: Record<string, string> = {
   yellow: "border-l-[#d8b24e]",
@@ -70,6 +72,9 @@ export default function AnnotationsDrawer() {
             )}
             {view === "notepad" && (
               <NotepadView onBack={() => setView("menu")} onClose={close} />
+            )}
+            {view === "lens-studio" && (
+              <LensStudioView onBack={() => setView("menu")} onClose={close} />
             )}
           </motion.aside>
         </>
@@ -121,7 +126,7 @@ function MenuView({
   onPick,
   onClose,
 }: {
-  onPick: (v: "glossary" | "notepad") => void;
+  onPick: (v: "glossary" | "notepad" | "lens-studio") => void;
   onClose: () => void;
 }) {
   const { activeBook } = useBookStore();
@@ -147,6 +152,13 @@ function MenuView({
           count={noteCount}
           onClick={() => onPick("notepad")}
         />
+        <HubButton
+          icon={<WandSparkles size={18} />}
+          label="Lens Studio"
+          sub="Design your highlight palette"
+          count={0}
+          onClick={() => onPick("lens-studio")}
+        />
       </div>
       <div className="mt-auto px-4 py-4">
         <p className="text-[11px] leading-relaxed text-ink-faint">
@@ -154,6 +166,15 @@ function MenuView({
           the thoughts a passage inspires.
         </p>
       </div>
+    </>
+  );
+}
+
+function LensStudioView({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+  return (
+    <>
+      <DrawerHeader title="Lens Studio" onBack={onBack} onClose={onClose} />
+      <LensStudio />
     </>
   );
 }

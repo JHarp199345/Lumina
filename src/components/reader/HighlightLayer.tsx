@@ -11,16 +11,8 @@ import { createVisualDirectorBrief } from "@/pipeline/visualDirector";
 import { buildVisualStoryboard } from "@/pipeline/visualStoryboard";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { storage } from "@/storage";
+import { lensClassName, lensSwatchStyle, useLensStore } from "@/store/lensStore";
 import type { HighlightColor, IdentifiedScene } from "@/types";
-
-// The four lenses. Internal color keys stay yellow/blue/green/red for persistence
-// compatibility; the visible identity is the lens name and the glass swatch.
-const HIGHLIGHT_COLORS: { color: HighlightColor; label: string; swatch: string }[] = [
-  { color: "yellow", label: "Amber lens", swatch: "from-[#fff0b8]/95 to-[#d8b24e]/75 shadow-[0_0_16px_rgba(214,185,95,0.42)]" },
-  { color: "blue", label: "Sapphire lens", swatch: "from-[#bfe6ff]/90 to-[#418fcb]/70 shadow-[0_0_16px_rgba(96,165,250,0.38)]" },
-  { color: "green", label: "Verdant lens", swatch: "from-[#c4f3d4]/88 to-[#46a877]/66 shadow-[0_0_16px_rgba(74,200,128,0.34)]" },
-  { color: "red", label: "Ember lens", swatch: "from-[#ffc7b0]/88 to-[#d56a52]/66 shadow-[0_0_16px_rgba(229,120,90,0.36)]" },
-];
 
 interface SelectionMenu {
   x: number;
@@ -38,6 +30,8 @@ export default function HighlightLayer() {
   const { currentChapterIndex, wordPosition } = useReaderStore();
   const { addToCache, setCurrentImage, setCurrentThemes, setIsGenerating } = useImageStore();
   const { visualInterpretationLevel } = useSettingsStore();
+  const lenses = useLensStore((s) => s.lenses);
+  const visibleLensIds = useLensStore((s) => s.visibleLensIds);
 
   const handleMouseUp = useCallback(
     (e: MouseEvent) => {
@@ -260,12 +254,13 @@ export default function HighlightLayer() {
               transform: "translate(-50%, -100%)",
             }}
           >
-            {HIGHLIGHT_COLORS.map(({ color, label, swatch }) => (
+            {visibleLensIds.map((color) => (
               <button
                 key={color}
                 onClick={() => handleHighlight(color)}
-                title={label}
-                className={`h-6 w-6 rounded-full border border-white/20 bg-gradient-to-br ${swatch} transition-transform hover:scale-110`}
+                title={lenses[color]?.name ?? "Lens"}
+                style={lenses[color] ? lensSwatchStyle(lenses[color]) : undefined}
+                className="h-6 w-6 border border-white/20 transition-transform hover:scale-110"
               />
             ))}
             {activeSemanticMap && activeStyleSeed && (
@@ -398,16 +393,9 @@ function extractSelectionKeywords(text: string): string[] {
 // ─── DOM Highlight Application ────────────────────────────────────────────────
 
 function applyHighlightToRange(range: Range, color: HighlightColor, id: string) {
-  const colorClassMap: Record<HighlightColor, string> = {
-    yellow: "highlight-yellow",
-    blue: "highlight-blue",
-    green: "highlight-green",
-    red: "highlight-red",
-  };
-
   try {
     const mark = document.createElement("mark");
-    mark.className = colorClassMap[color];
+    mark.className = lensClassName(color);
     mark.dataset.highlightId = id;
     mark.style.cursor = "pointer";
     range.surroundContents(mark);
@@ -416,7 +404,7 @@ function applyHighlightToRange(range: Range, color: HighlightColor, id: string) 
     try {
       const fragment = range.extractContents();
       const mark = document.createElement("mark");
-      mark.className = colorClassMap[color];
+      mark.className = lensClassName(color);
       mark.dataset.highlightId = id;
       mark.style.cursor = "pointer";
       mark.appendChild(fragment);

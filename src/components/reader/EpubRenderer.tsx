@@ -18,6 +18,7 @@ import { useSelectionStore } from "@/store/selectionStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { storage } from "@/storage";
 import { toAssetUrl } from "@/utils/tauriBridge";
+import { epubLensClassName, lensSvgFill, lensThemeProperties, useLensStore } from "@/store/lensStore";
 import type { Highlight, HighlightColor } from "@/types";
 
 interface EpubRendererProps {
@@ -29,25 +30,6 @@ interface EpubRendererProps {
   onInitialDisplayComplete?: () => void;
   onTocReady?: (toc: NavItem[]) => void;
 }
-
-const HIGHLIGHT_CLASS: Record<string, string> = {
-  yellow: "lumina-hl-yellow",
-  blue:   "lumina-hl-blue",
-  green:  "lumina-hl-green",
-  red:    "lumina-hl-red",
-};
-
-// SVG fill styles for restored highlights. EPUB.js draws restored highlights as an
-// SVG <rect> overlay, where CSS `background` does NOT apply — only SVG paint
-// attributes (fill / fill-opacity / stroke) do. Passing these as the `styles`
-// argument to annotations.highlight() makes restored highlights read as the same
-// glassy lens tint as freshly-created (mark-wrapped) ones.
-const LENS_FILL: Record<string, Record<string, string>> = {
-  yellow: { fill: "#e9c766", "fill-opacity": "0.30", stroke: "rgba(201,168,76,0.45)", "stroke-width": "0.6", "mix-blend-mode": "multiply" },
-  blue:   { fill: "#7bb6e6", "fill-opacity": "0.28", stroke: "rgba(96,165,250,0.42)", "stroke-width": "0.6", "mix-blend-mode": "multiply" },
-  green:  { fill: "#7fc9a2", "fill-opacity": "0.26", stroke: "rgba(74,200,128,0.40)", "stroke-width": "0.6", "mix-blend-mode": "multiply" },
-  red:    { fill: "#e29a82", "fill-opacity": "0.28", stroke: "rgba(229,120,90,0.42)",  "stroke-width": "0.6", "mix-blend-mode": "multiply" },
-};
 
 // Reader text palette per theme. The EPUB renders inside an iframe, so its
 // colors are injected as styles (not Tailwind classes) and must be chosen here.
@@ -114,6 +96,7 @@ export default function EpubRenderer({
   const { getHighlightsForBook, addHighlight, removeHighlight, updateHighlightColor } =
     useAnnotationStore();
   const { fontSize, lineHeight, theme } = useSettingsStore();
+  const lenses = useLensStore((s) => s.lenses);
   // Resolve the active reader palette (re-resolves whenever the theme setting changes).
   const resolvedReaderTheme = theme === "system" ? useSettingsStore.getState().resolvedTheme() : theme;
   const palette = resolvedReaderTheme === "light"
@@ -166,46 +149,16 @@ export default function EpubRenderer({
           "color": `${palette.link} !important`,
           "text-decoration": "none",
         },
-        ".lumina-hl-yellow": {
-          "background": "linear-gradient(180deg, rgba(255,246,178,0.34), rgba(218,174,52,0.23)), radial-gradient(ellipse at 50% 70%, rgba(255,231,112,0.22), transparent 70%)",
-          "border-radius": "0.42em",
-          "box-shadow": "0 0 0 1px rgba(201,168,76,0.16), 0 0 14px rgba(214,185,95,0.18), inset 0 1px 0 rgba(255,255,255,0.28)",
-          "box-decoration-break": "clone",
-          "-webkit-box-decoration-break": "clone",
-          "padding": "0.02em 0.12em",
-          "text-shadow": "0 0 0.01px currentColor",
-        },
-        ".lumina-hl-blue": {
-          "background": "linear-gradient(180deg, rgba(169,224,255,0.30), rgba(70,156,211,0.22)), radial-gradient(ellipse at 50% 70%, rgba(125,211,252,0.20), transparent 70%)",
-          "border-radius": "0.42em",
-          "box-shadow": "0 0 0 1px rgba(96,165,250,0.15), 0 0 14px rgba(96,165,250,0.16), inset 0 1px 0 rgba(255,255,255,0.24)",
-          "box-decoration-break": "clone",
-          "-webkit-box-decoration-break": "clone",
-          "padding": "0.02em 0.12em",
-          "text-shadow": "0 0 0.01px currentColor",
-        },
-        ".lumina-hl-green": {
-          "background": "linear-gradient(180deg, rgba(187,247,208,0.28), rgba(74,178,121,0.20)), radial-gradient(ellipse at 50% 70%, rgba(134,239,172,0.18), transparent 70%)",
-          "border-radius": "0.42em",
-          "box-shadow": "0 0 0 1px rgba(74,222,128,0.13), 0 0 14px rgba(74,222,128,0.13), inset 0 1px 0 rgba(255,255,255,0.22)",
-          "box-decoration-break": "clone",
-          "-webkit-box-decoration-break": "clone",
-          "padding": "0.02em 0.12em",
-          "text-shadow": "0 0 0.01px currentColor",
-        },
-        ".lumina-hl-red": {
-          "background": "linear-gradient(180deg, rgba(255,190,203,0.28), rgba(221,96,116,0.20)), radial-gradient(ellipse at 50% 70%, rgba(251,113,133,0.18), transparent 70%)",
-          "border-radius": "0.42em",
-          "box-shadow": "0 0 0 1px rgba(244,114,182,0.14), 0 0 14px rgba(244,114,182,0.13), inset 0 1px 0 rgba(255,255,255,0.22)",
-          "box-decoration-break": "clone",
-          "-webkit-box-decoration-break": "clone",
-          "padding": "0.02em 0.12em",
-          "text-shadow": "0 0 0.01px currentColor",
-        },
+        ...Object.fromEntries(
+          Object.entries(lenses).map(([id, lens]) => [
+            `.${epubLensClassName(id)}`,
+            lensThemeProperties(lens),
+          ])
+        ),
         ".lumina-search":    { "background": "rgba(201,168,76,0.4)",  "border-radius": "2px", "outline": "1px solid rgba(201,168,76,0.6)" },
       });
     },
-    [fontSize, lineHeight, palette]
+    [fontSize, lineHeight, palette, lenses]
   );
 
   // ── Re-apply persisted highlights ─────────────────────────────────────────
@@ -221,11 +174,11 @@ export default function EpubRenderer({
         h.cfiRange,
         { id: h.id },
         undefined,
-        HIGHLIGHT_CLASS[h.color] ?? "lumina-hl-yellow",
-        LENS_FILL[h.color] ?? LENS_FILL.yellow
+        epubLensClassName(h.color),
+        lensSvgFill(lenses[h.color as HighlightColor] ?? lenses.yellow)
       );
     } catch { /* CFI may not be on the visible section */ }
-  }, []);
+  }, [lenses]);
 
   const applyHighlights = useCallback(() => {
     for (const h of getHighlightsForBook(bookId)) applyOneHighlight(h);

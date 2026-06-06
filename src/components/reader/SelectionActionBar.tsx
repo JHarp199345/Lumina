@@ -16,14 +16,8 @@ import { useSelectionStore } from "@/store/selectionStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useBookStore } from "@/store/bookStore";
 import { useDrawerStore } from "@/store/drawerStore";
+import { lensSwatchStyle, useLensStore } from "@/store/lensStore";
 import type { HighlightColor, Note } from "@/types";
-
-const LENSES: { color: HighlightColor; label: string; dot: string }[] = [
-  { color: "yellow", label: "Amber", dot: "bg-gradient-to-br from-[#fff0b8] to-[#d8b24e]" },
-  { color: "blue", label: "Sapphire", dot: "bg-gradient-to-br from-[#bfe6ff] to-[#418fcb]" },
-  { color: "green", label: "Verdant", dot: "bg-gradient-to-br from-[#c4f3d4] to-[#46a877]" },
-  { color: "red", label: "Ember", dot: "bg-gradient-to-br from-[#ffc7b0] to-[#d56a52]" },
-];
 
 const AUTO_DISMISS_MS = 5500;
 
@@ -38,6 +32,8 @@ export default function SelectionActionBar() {
   const { addNote } = useAnnotationStore();
   const { activeBook } = useBookStore();
   const { openSunburst } = useDrawerStore();
+  const lenses = useLensStore((s) => s.lenses);
+  const visibleLensIds = useLensStore((s) => s.visibleLensIds);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isActive = Boolean(activeHighlightId);
@@ -112,13 +108,14 @@ export default function SelectionActionBar() {
 
             {/* Lens choices — create (pending) or recolour (active) */}
             <div className="flex items-center gap-1 px-0.5">
-              {LENSES.map(({ color, label, dot }) => (
+              {visibleLensIds.map((color) => (
                 <button
                   key={color}
                   onClick={() => (isActive ? recolour(color) : highlightAs(color))}
-                  title={label}
-                  aria-label={label}
-                  className={`h-7 w-7 rounded-full ring-1 transition-transform hover:scale-110 active:scale-95 ${dot} ${
+                  title={lenses[color]?.name ?? "Lens"}
+                  aria-label={lenses[color]?.name ?? "Lens"}
+                  style={lenses[color] ? lensSwatchStyle(lenses[color]) : undefined}
+                  className={`h-7 w-7 ring-1 transition-transform hover:scale-110 active:scale-95 ${
                     isActive && activeColor === color ? "ring-2 ring-white/70" : "ring-white/25"
                   }`}
                 />

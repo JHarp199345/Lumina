@@ -20,6 +20,7 @@ import {
   recolorOffsetHighlight,
   HIGHLIGHT_LENS_CLASS,
 } from "@/utils/structuredHighlight";
+import { lensClassName } from "@/store/lensStore";
 import type { Highlight, HighlightColor } from "@/types";
 
 interface Args {
@@ -85,7 +86,7 @@ export function useStructuredHighlights({ containerRef, bookId, locator }: Args)
         container,
         h.startOffset,
         h.endOffset,
-        HIGHLIGHT_LENS_CLASS[h.color] ?? "highlight-yellow",
+        HIGHLIGHT_LENS_CLASS[h.color] ?? lensClassName(h.color),
         h.id
       );
     }
@@ -128,7 +129,7 @@ export function useStructuredHighlights({ containerRef, bookId, locator }: Args)
         container,
         anchor.start,
         anchor.end,
-        HIGHLIGHT_LENS_CLASS[color] ?? "highlight-yellow",
+        HIGHLIGHT_LENS_CLASS[color] ?? lensClassName(color),
         highlight.id
       );
       // Clear the browser selection so the lens shows, not the selection band.
@@ -139,7 +140,7 @@ export function useStructuredHighlights({ containerRef, bookId, locator }: Args)
 
     win.luminaSetHighlightColor = (id: string, color: HighlightColor) => {
       updateHighlightColor(id, color);
-      if (container) recolorOffsetHighlight(container, id, HIGHLIGHT_LENS_CLASS[color] ?? "highlight-yellow");
+      if (container) recolorOffsetHighlight(container, id, HIGHLIGHT_LENS_CLASS[color] ?? lensClassName(color));
     };
 
     win.luminaRemoveHighlight = (id: string) => {

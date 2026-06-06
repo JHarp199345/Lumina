@@ -15,6 +15,7 @@ import SideRail from "@/components/layout/SideRail";
 import PanelContainer from "@/components/layout/PanelContainer";
 import TabletPanelContainer from "@/components/layout/TabletPanelContainer";
 import HighlightLayer from "@/components/reader/HighlightLayer";
+import LensStyleBridge from "@/components/reader/LensStyleBridge";
 import SelectionActionBar from "@/components/reader/SelectionActionBar";
 import AnnotationsDrawer from "@/components/knowledge/AnnotationsDrawer";
 import SunburstNote from "@/components/knowledge/SunburstNote";
@@ -315,6 +316,7 @@ function App() {
       </div>
 
       <HighlightLayer />
+      <LensStyleBridge />
       <SelectionActionBar />
       <AnnotationsDrawer />
       <SunburstNote />
