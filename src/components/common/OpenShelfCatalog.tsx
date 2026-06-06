@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, BookOpen, Download, Search, SlidersHorizontal } from "lucide-react";
 import { useEpubImport } from "@/hooks/useEpubImport";
 
@@ -12,7 +12,7 @@ interface GutendexBook {
   formats: Record<string, string>;
 }
 
-type SortMode = "popular" | "title" | "year";
+type SortMode = "popular" | "title-asc" | "title-desc" | "year-asc" | "year-desc";
 
 interface OpenShelfCatalogProps {
   onBack: () => void;
@@ -32,33 +32,66 @@ const GENRES = [
   "History",
 ];
 
+interface CatalogPage {
+  count: number;
+  next: string | null;
+  results: GutendexBook[];
+}
+
+interface CatalogCacheEntry {
+  books: GutendexBook[];
+  nextUrl: string | null;
+  count: number;
+}
+
+const catalogCache = new Map<string, CatalogCacheEntry>();
+
 export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogProps) {
   const { importEpubFile } = useEpubImport();
   const [query, setQuery] = useState("");
   const [genre, setGenre] = useState("");
   const [sort, setSort] = useState<SortMode>("popular");
   const [books, setBooks] = useState<GutendexBook[]>([]);
+  const [nextUrl, setNextUrl] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [status, setStatus] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const requestKey = useMemo(() => `${query.trim().toLowerCase()}|${genre}|${sort}`, [query, genre, sort]);
 
   useEffect(() => {
     const controller = new AbortController();
     const run = async () => {
+      const cached = catalogCache.get(requestKey);
+      if (cached) {
+        setBooks(cached.books);
+        setNextUrl(cached.nextUrl);
+        setTotalCount(cached.count);
+        return;
+      }
+
       setIsLoading(true);
       setStatus("");
+      setBooks([]);
+      setNextUrl(null);
+      setTotalCount(0);
       try {
-        const params = new URLSearchParams();
-        params.set("mime_type", "application/epub+zip");
-        if (query.trim()) params.set("search", query.trim());
-        if (genre) params.set("topic", genre);
-        params.set("sort", sort === "popular" ? "popular" : "ascending");
-        const response = await fetch(`https://gutendex.com/books?${params.toString()}`, {
+        const response = await fetch(buildCatalogUrl(query, genre, sort), {
           signal: controller.signal,
         });
         if (!response.ok) throw new Error(`Catalog returned ${response.status}`);
-        const data = await response.json() as { results?: GutendexBook[] };
-        setBooks((data.results ?? []).slice(0, 30));
+        const data = await response.json() as CatalogPage;
+        const results = data.results ?? [];
+        setBooks(results);
+        setNextUrl(data.next ?? null);
+        setTotalCount(data.count ?? results.length);
+        catalogCache.set(requestKey, {
+          books: results,
+          nextUrl: data.next ?? null,
+          count: data.count ?? results.length,
+        });
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           setStatus(`Catalog failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -72,15 +105,63 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query, genre, sort]);
+  }, [query, genre, sort, requestKey]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextUrl || isLoading || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const response = await fetch(nextUrl);
+      if (!response.ok) throw new Error(`Catalog returned ${response.status}`);
+      const data = await response.json() as CatalogPage;
+      const incoming = data.results ?? [];
+      setBooks((current) => {
+        const seen = new Set(current.map((book) => book.id));
+        const merged = [...current, ...incoming.filter((book) => !seen.has(book.id))];
+        catalogCache.set(requestKey, {
+          books: merged,
+          nextUrl: data.next ?? null,
+          count: data.count ?? totalCount,
+        });
+        return merged;
+      });
+      setNextUrl(data.next ?? null);
+      setTotalCount(data.count ?? totalCount);
+    } catch (err) {
+      setStatus(`More books failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [isLoading, isLoadingMore, nextUrl, requestKey, totalCount]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !nextUrl) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void loadMore();
+        }
+      },
+      { rootMargin: "320px 0px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMore, nextUrl]);
 
   const visibleBooks = useMemo(() => {
     const copy = [...books];
-    if (sort === "title") {
+    if (sort === "title-asc") {
       copy.sort((a, b) => a.title.localeCompare(b.title));
     }
-    if (sort === "year") {
+    if (sort === "title-desc") {
+      copy.sort((a, b) => b.title.localeCompare(a.title));
+    }
+    if (sort === "year-asc") {
       copy.sort((a, b) => publicationYear(a) - publicationYear(b));
+    }
+    if (sort === "year-desc") {
+      copy.sort((a, b) => publicationYear(b) - publicationYear(a));
     }
     return copy;
   }, [books, sort]);
@@ -121,7 +202,11 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
           </button>
           <div>
             <p className="text-sm font-medium text-ink/80">Open Shelf</p>
-            <p className="text-xs text-ink-faint">Public-domain books ready to import.</p>
+            <p className="text-xs text-ink-faint">
+              {totalCount
+                ? `${books.length.toLocaleString()} of ${totalCount.toLocaleString()} loaded`
+                : "Public-domain books ready to import."}
+            </p>
           </div>
         </div>
 
@@ -163,8 +248,10 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
               className="rounded-lg border border-hair bg-black/20 px-3 py-2 text-xs text-ink-soft focus:outline-none"
             >
               <option value="popular">Popular</option>
-              <option value="title">Alphabetical</option>
-              <option value="year">Publication year</option>
+              <option value="title-asc">Alphabetical A-Z</option>
+              <option value="title-desc">Alphabetical Z-A</option>
+              <option value="year-asc">Earliest era first</option>
+              <option value="year-desc">Latest era first</option>
             </select>
           </div>
         )}
@@ -208,11 +295,37 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
                 </button>
               </div>
             ))}
+            <div ref={sentinelRef} />
+            {nextUrl && (
+              <button
+                onClick={() => void loadMore()}
+                disabled={isLoadingMore}
+                className="mt-3 w-full rounded-lg border border-hair bg-ink/[0.04] px-3 py-2 text-xs text-ink-soft transition-colors hover:bg-ink/[0.07] disabled:opacity-45"
+              >
+                {isLoadingMore ? "Loading more…" : "Load more books"}
+              </button>
+            )}
+            {!nextUrl && visibleBooks.length > 0 && (
+              <p className="px-2 py-3 text-center text-[11px] text-ink-faint">
+                End of this shelf.
+              </p>
+            )}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function buildCatalogUrl(query: string, genre: string, sort: SortMode): string {
+  const params = new URLSearchParams();
+  params.set("mime_type", "application/epub+zip");
+  if (query.trim()) params.set("search", query.trim());
+  if (genre) params.set("topic", genre);
+  // Gutendex supports popularity and stable ascending order. Title/year sorting
+  // is applied to loaded pages client-side so the first screen still arrives fast.
+  params.set("sort", sort === "popular" ? "popular" : "ascending");
+  return `https://gutendex.com/books?${params.toString()}`;
 }
 
 function pickEpubUrl(book: GutendexBook): string | null {
