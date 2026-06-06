@@ -3,16 +3,35 @@ import { storage } from "@/storage";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useUiStore } from "@/store/uiStore";
 import { parseChapterDisplay } from "@/utils/titleUtils";
 import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
 
 const DEFAULT_WORDS_PER_PAGE = 220;
+
+interface PageSegment {
+  text: string;
+  startOffset: number;
+  endOffset: number;
+}
 
 function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
 function splitIntoPages(text: string, chapterTitle = "", wordsPerPage = DEFAULT_WORDS_PER_PAGE): string[] {
+  return splitIntoPageSegments(text, chapterTitle, wordsPerPage).map((page) => page.text);
+}
+
+function renderedTextLength(pageText: string): number {
+  return pageText.split(/\n{2,}/).join("").length;
+}
+
+function splitIntoPageSegments(
+  text: string,
+  chapterTitle = "",
+  wordsPerPage = DEFAULT_WORDS_PER_PAGE
+): PageSegment[] {
   const wpp = Math.max(60, Math.round(wordsPerPage));
   const display = parseChapterDisplay(chapterTitle);
   const cleanedText = removeLeadingDuplicateHeading(text, [
@@ -25,27 +44,36 @@ function splitIntoPages(text: string, chapterTitle = "", wordsPerPage = DEFAULT_
     .map((p) => p.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
-  const pages: string[] = [];
+  const pages: PageSegment[] = [];
   let current: string[] = [];
   let words = 0;
+  let renderedOffset = 0;
+
+  const pushPage = (parts: string[]) => {
+    const pageText = parts.join("\n\n");
+    const startOffset = renderedOffset;
+    const endOffset = startOffset + renderedTextLength(pageText);
+    pages.push({ text: pageText, startOffset, endOffset });
+    renderedOffset = endOffset;
+  };
 
   for (const paragraph of paragraphs) {
     const paragraphWords = paragraph.split(/\s+/).filter(Boolean);
     if (paragraphWords.length > wpp) {
       if (current.length > 0) {
-        pages.push(current.join("\n\n"));
+        pushPage(current);
         current = [];
         words = 0;
       }
       for (let i = 0; i < paragraphWords.length; i += wpp) {
-        pages.push(paragraphWords.slice(i, i + wpp).join(" "));
+        pushPage([paragraphWords.slice(i, i + wpp).join(" ")]);
       }
       continue;
     }
 
     const count = paragraphWords.length;
     if (current.length > 0 && words + count > wpp) {
-      pages.push(current.join("\n\n"));
+      pushPage(current);
       current = [];
       words = 0;
     }
@@ -53,26 +81,35 @@ function splitIntoPages(text: string, chapterTitle = "", wordsPerPage = DEFAULT_
     words += count;
   }
 
-  if (current.length > 0) pages.push(current.join("\n\n"));
-  return pages.length > 0 ? pages : [cleanedText.trim()];
+  if (current.length > 0) pushPage(current);
+  if (pages.length > 0) return pages;
+  const fallback = cleanedText.trim();
+  return [{ text: fallback, startOffset: 0, endOffset: renderedTextLength(fallback) }];
 }
 
+// The chapter heading already renders in ChapterHeader, so drop a duplicate of
+// it from the top of the body (the chapter's own <h1>, surfaced now that text
+// extraction preserves blocks). Removes the whole leading block when it matches
+// the chapter title/parts or reads as a generic "Chapter N[: subtitle]" line.
 function removeLeadingDuplicateHeading(text: string, candidates: string[]): string {
-  let cleaned = text.trimStart();
-  for (const candidate of candidates) {
-    const heading = candidate.replace(/\s+/g, " ").trim();
-    if (!heading || !isGenericChapterHeading(heading)) continue;
-    const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`^${escaped}(?=\\s|[.:;,—–-]|$)`, "iu");
-    cleaned = cleaned.replace(pattern, "").trimStart();
-  }
-  return cleaned;
-}
+  const trimmed = text.trimStart();
+  const sepIdx = trimmed.search(/\n{2,}/);
+  const firstBlock = (sepIdx === -1 ? trimmed : trimmed.slice(0, sepIdx)).replace(/\s+/g, " ").trim();
+  if (!firstBlock || firstBlock.length > 90) return trimmed; // real prose, leave it
 
-function isGenericChapterHeading(title: string): boolean {
-  return /^chapter\s+([0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\.?$/iu.test(
-    title.trim()
-  );
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase().replace(/[:.—–-]+\s*$/u, "");
+  const fb = norm(firstBlock);
+
+  const matchesTitle = candidates.some((c) => {
+    const cc = norm(c);
+    return cc.length >= 3 && (fb === cc || fb.startsWith(cc) || cc.startsWith(fb));
+  });
+  const isGenericChapterLine = /^chapter\s+([0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/iu.test(firstBlock);
+
+  if (matchesTitle || isGenericChapterLine) {
+    return sepIdx === -1 ? "" : trimmed.slice(sepIdx).trimStart();
+  }
+  return trimmed;
 }
 
 function parseLuminaCfi(cfi: string | undefined): { chapterIndex: number; pageIndex: number } | null {
@@ -82,6 +119,13 @@ function parseLuminaCfi(cfi: string | undefined): { chapterIndex: number; pageIn
     chapterIndex: Number(match[1]),
     pageIndex: Number(match[2]),
   };
+}
+
+function pageIndexForChapterOffset(pages: PageSegment[] | undefined, offset: number): number {
+  if (!pages || pages.length === 0) return 0;
+  const safeOffset = Math.max(0, offset);
+  const index = pages.findIndex((page) => safeOffset >= page.startOffset && safeOffset < page.endOffset);
+  return index >= 0 ? index : pages.length - 1;
 }
 
 export default function StructuredTextRenderer({
@@ -100,6 +144,7 @@ export default function StructuredTextRenderer({
     setWordPosition,
   } = useReaderStore();
   const { fontSize, lineHeight } = useSettingsStore();
+  const isFocused = useUiStore((s) => s.focusMode === "reader");
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Word offset within the current chapter, preserved across re-pagination so
@@ -132,12 +177,16 @@ export default function StructuredTextRenderer({
     return () => ro.disconnect();
   }, [fontSize, lineHeight, currentChapterIndex]);
 
-  const chapterPages = useMemo(
+  const chapterPageSegments = useMemo(
     () =>
       activeStructure?.chapters.map((chapter) =>
-        splitIntoPages(chapter.rawText || "", chapter.title, wordsPerPage)
+        splitIntoPageSegments(chapter.rawText || "", chapter.title, wordsPerPage)
       ) ?? [],
     [activeStructure, wordsPerPage]
+  );
+  const chapterPages = useMemo(
+    () => chapterPageSegments.map((pages) => pages.map((page) => page.text)),
+    [chapterPageSegments]
   );
 
   const initialLocation = useMemo(() => {
@@ -306,6 +355,13 @@ export default function StructuredTextRenderer({
         goTo(Number(loc[1]), Number(loc[2]));
         return;
       }
+      const charLoc = target.match(/^lumina:\/\/chapter\/(-?\d+)\/char\/(\d+)$/);
+      if (charLoc) {
+        const chapterIndex = Number(charLoc[1]);
+        const page = pageIndexForChapterOffset(chapterPageSegments[chapterIndex], Number(charLoc[2]));
+        goTo(chapterIndex, page);
+        return;
+      }
       const index = activeStructure?.chapters.findIndex(
         (chapter) =>
           chapter.id === target ||
@@ -338,7 +394,7 @@ export default function StructuredTextRenderer({
       delete win.luminaNavigate;
       delete win.luminaNavigateToScene;
     };
-  }, [activeStructure, chapterPages, goTo, nextPage, prevPage]);
+  }, [activeStructure, chapterPages, chapterPageSegments, goTo, nextPage, prevPage]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -352,10 +408,14 @@ export default function StructuredTextRenderer({
   // Page locator for highlight anchoring (null on the cover).
   const highlightLocator =
     currentChapterIndex < 0 ? null : `lumina://chapter/${currentChapterIndex}/page/${pageIndex}`;
+  const currentPageSegment =
+    currentChapterIndex < 0 ? null : chapterPageSegments[currentChapterIndex]?.[pageIndex] ?? null;
   useStructuredHighlights({
     containerRef: contentRef,
     bookId: activeBook?.id,
     locator: highlightLocator,
+    chapterIndex: currentChapterIndex < 0 ? null : currentChapterIndex,
+    pageStartOffset: currentPageSegment?.startOffset ?? 0,
   });
 
   if (!activeBook || !activeStructure) return null;

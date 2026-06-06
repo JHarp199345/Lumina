@@ -5,7 +5,7 @@
  * normal top-document selections. This hook:
  *   - detects a selection inside the page container and surfaces the action bar
  *   - on a lens tap (luminaCreateHighlight) creates + persists + paints a highlight
- *     anchored by character offsets into the page text
+ *     anchored by character offsets into the chapter text
  *   - re-applies, recolours, and removes highlights via the same window API the
  *     EpubRenderer exposes, so the SelectionActionBar is renderer-agnostic
  */
@@ -27,9 +27,17 @@ interface Args {
   containerRef: React.RefObject<HTMLElement | null>;
   bookId: string | undefined;
   locator: string | null; // lumina://chapter/{ch}/page/{pg}, or null on cover
+  chapterIndex: number | null;
+  pageStartOffset: number;
 }
 
-export function useStructuredHighlights({ containerRef, bookId, locator }: Args) {
+export function useStructuredHighlights({
+  containerRef,
+  bookId,
+  locator,
+  chapterIndex,
+  pageStartOffset,
+}: Args) {
   const { addHighlight, removeHighlight, updateHighlightColor, getHighlightsForBook } =
     useAnnotationStore();
 
@@ -76,21 +84,44 @@ export function useStructuredHighlights({ containerRef, bookId, locator }: Args)
   // ── Re-apply persisted highlights for the current page ──────────────────────
   const reapply = useCallback(() => {
     const container = containerRef.current;
-    if (!container || !bookId || !locator) return;
-    const forPage = getHighlightsForBook(bookId).filter((h) => h.locator === locator);
+    if (!container || !bookId || !locator || chapterIndex == null) return;
+    const pageLength = container.textContent?.length ?? 0;
+    const pageEndOffset = pageStartOffset + pageLength;
+    const forPage = getHighlightsForBook(bookId).filter((h) => {
+      if (
+        h.chapterIndex != null &&
+        h.chapterStartOffset != null &&
+        h.chapterEndOffset != null
+      ) {
+        return (
+          h.chapterIndex === chapterIndex &&
+          h.chapterEndOffset > pageStartOffset &&
+          h.chapterStartOffset < pageEndOffset
+        );
+      }
+      return h.locator === locator;
+    });
     // Clear any existing marks first (idempotent), then paint fresh.
     forPage.forEach((h) => removeOffsetHighlight(container, h.id));
     for (const h of forPage) {
-      if (h.startOffset == null || h.endOffset == null) continue;
+      const start =
+        h.chapterStartOffset != null
+          ? Math.max(0, h.chapterStartOffset - pageStartOffset)
+          : h.startOffset;
+      const end =
+        h.chapterEndOffset != null
+          ? Math.min(pageLength, h.chapterEndOffset - pageStartOffset)
+          : h.endOffset;
+      if (start == null || end == null || end <= start) continue;
       applyOffsetHighlight(
         container,
-        h.startOffset,
-        h.endOffset,
+        start,
+        end,
         HIGHLIGHT_LENS_CLASS[h.color] ?? lensClassName(h.color),
         h.id
       );
     }
-  }, [containerRef, bookId, locator, getHighlightsForBook]);
+  }, [containerRef, bookId, locator, chapterIndex, pageStartOffset, getHighlightsForBook]);
 
   // Re-apply after each page render (rAF lets React commit first).
   useEffect(() => {
@@ -100,7 +131,7 @@ export function useStructuredHighlights({ containerRef, bookId, locator }: Args)
 
   // ── Window API (shared with EpubRenderer) ───────────────────────────────────
   useEffect(() => {
-    if (!bookId || !locator) return;
+    if (!bookId || !locator || chapterIndex == null) return;
     const container = containerRef.current;
 
     type Win = Window & {
@@ -116,13 +147,16 @@ export function useStructuredHighlights({ containerRef, bookId, locator }: Args)
       const highlight: Highlight = {
         id: `h_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         bookId,
-        cfiRange: "",
+        cfiRange: `lumina://chapter/${chapterIndex}/char/${pageStartOffset + anchor.start}`,
         color,
         selectedText: anchor.text,
         createdAt: new Date().toISOString(),
         locator,
         startOffset: anchor.start,
         endOffset: anchor.end,
+        chapterIndex,
+        chapterStartOffset: pageStartOffset + anchor.start,
+        chapterEndOffset: pageStartOffset + anchor.end,
       };
       addHighlight(highlight);
       applyOffsetHighlight(
@@ -169,5 +203,14 @@ export function useStructuredHighlights({ containerRef, bookId, locator }: Args)
       delete win.luminaSetHighlightColor;
       delete win.luminaRemoveHighlight;
     };
-  }, [containerRef, bookId, locator, addHighlight, removeHighlight, updateHighlightColor]);
+  }, [
+    containerRef,
+    bookId,
+    locator,
+    chapterIndex,
+    pageStartOffset,
+    addHighlight,
+    removeHighlight,
+    updateHighlightColor,
+  ]);
 }

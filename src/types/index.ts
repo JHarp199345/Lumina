@@ -484,6 +484,11 @@ export interface Highlight {
   locator?: string;          // lumina://chapter/{ch}/page/{pg}
   startOffset?: number;      // char offset into the page's textContent
   endOffset?: number;
+  // Stable structured-reader anchor. Unlike page offsets, these survive
+  // re-pagination between browser/PWA/device builds.
+  chapterIndex?: number;
+  chapterStartOffset?: number;
+  chapterEndOffset?: number;
 }
 
 export interface Note {
