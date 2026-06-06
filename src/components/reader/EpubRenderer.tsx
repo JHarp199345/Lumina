@@ -173,7 +173,9 @@ export default function EpubRenderer({
       r.annotations.highlight(
         h.cfiRange,
         { id: h.id },
-        undefined,
+        () => {
+          useSelectionStore.getState().setActive(h.id, h.color as HighlightColor);
+        },
         epubLensClassName(h.color),
         lensSvgFill(lenses[h.color as HighlightColor] ?? lenses.yellow)
       );

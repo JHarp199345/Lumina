@@ -223,6 +223,29 @@ export default function LensStudio() {
             />
           </label>
 
+          <div className="space-y-2 rounded-lg border border-hair bg-ink/[0.025] px-3 py-2">
+            <label className="flex items-center justify-between gap-3">
+              <span className="text-xs text-ink-soft">Custom text color</span>
+              <input
+                type="checkbox"
+                checked={lens.textColorEnabled}
+                onChange={(e) => updateLens(selectedId, { textColorEnabled: e.target.checked })}
+                className="accent-lumina-gold"
+              />
+            </label>
+            {lens.textColorEnabled && (
+              <label className="flex items-center justify-between gap-3">
+                <span className="text-xs text-ink-faint">Text color</span>
+                <input
+                  type="color"
+                  value={lens.textColor}
+                  onChange={(e) => updateLens(selectedId, { textColor: e.target.value })}
+                  className="h-8 w-12 rounded border border-hair bg-transparent"
+                />
+              </label>
+            )}
+          </div>
+
           <Slider
             label="Opacity"
             value={lens.opacity}

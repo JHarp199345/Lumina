@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Sparkles, Settings, Sun, Moon, Monitor, Columns3, FolderOpen } from "lucide-react";
+import { Sparkles, Settings, Sun, Moon, Monitor, Columns3, FolderOpen, Search } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useBookStore } from "@/store/bookStore";
 import type { LayoutPreset, Theme } from "@/types";
 import SettingsPanel from "@/components/common/SettingsPanel";
+import SearchBar from "@/components/reader/SearchBar";
 
 const LAYOUT_LABELS: Record<LayoutPreset, string> = {
   classic: "Classic",
@@ -26,6 +27,7 @@ export default function TopNav({ onImport, isTablet }: TopNavProps) {
   const { activeBook } = useBookStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   const themeIcon =
     theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
@@ -62,6 +64,17 @@ export default function TopNav({ onImport, isTablet }: TopNavProps) {
         >
           <FolderOpen size={13} />
           <span>Open Book</span>
+        </button>
+
+        <button
+          onClick={() => setShowSearch((v) => !v)}
+          className={`flex items-center justify-center rounded-lg border border-hair bg-ink/[0.05] text-ink-faint transition-colors hover:border-hair hover:bg-ink/[0.07] hover:text-ink/80 ${
+            isTablet ? "min-h-[44px] min-w-[44px]" : "h-9 w-9"
+          } ${showSearch ? "border-lumina-gold/35 bg-lumina-gold/10 text-lumina-gold" : ""}`}
+          title="Search"
+          aria-label="Search"
+        >
+          <Search size={14} />
         </button>
 
         {/* Active book title */}
@@ -134,6 +147,16 @@ export default function TopNav({ onImport, isTablet }: TopNavProps) {
       </header>
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      <AnimateSearch visible={showSearch} onClose={() => setShowSearch(false)} />
     </>
+  );
+}
+
+function AnimateSearch({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  if (!visible) return null;
+  return (
+    <div className="fixed left-1/2 top-16 z-[58] w-[min(520px,calc(100vw-1.5rem))] -translate-x-1/2">
+      <SearchBar onClose={onClose} />
+    </div>
   );
 }

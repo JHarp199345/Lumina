@@ -464,6 +464,8 @@ export interface HighlightLens {
   name: string;
   color: string;
   opacity: number; // 0-100
+  textColorEnabled: boolean;
+  textColor: string;
   cornerStyle: LensCornerStyle;
   glow: number; // 0-100
   edgeStyle: LensEdgeStyle;

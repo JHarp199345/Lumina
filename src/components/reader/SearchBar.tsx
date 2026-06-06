@@ -4,14 +4,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useBookStore } from "@/store/bookStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useImageStore } from "@/store/imageStore";
+import { useEpubImport } from "@/hooks/useEpubImport";
 import type { Book, BookStructure, CachedImage, Highlight, Note, SemanticMap } from "@/types";
 
 interface SearchResult {
   target: string;
   excerpt: string;
-  source: "book" | "highlight" | "note" | "visual";
+  source: "library" | "book" | "highlight" | "note" | "visual";
   label: string;
   wordOffset?: number;
+  book?: Book;
 }
 
 interface SearchBarProps {
@@ -19,13 +21,15 @@ interface SearchBarProps {
 }
 
 export default function SearchBar({ onClose }: SearchBarProps) {
-  const { activeBook, activeStructure, activeSemanticMap } = useBookStore();
+  const { library, activeBook, activeStructure, activeSemanticMap } = useBookStore();
   const { getHighlightsForBook, getNotesForBook } = useAnnotationStore();
   const imageCache = useImageStore((s) => s.imageCache);
+  const { openBook } = useEpubImport();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
+  const [status, setStatus] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleSearch = useCallback(async (q: string) => {
@@ -38,6 +42,7 @@ export default function SearchBar({ onClose }: SearchBarProps) {
     try {
       const found = await searchBookArtifacts({
         query: q,
+        library,
         activeBook,
         activeStructure,
         semanticMap: activeSemanticMap,
@@ -49,15 +54,22 @@ export default function SearchBar({ onClose }: SearchBarProps) {
       });
       setResults(found);
       setCurrentIndex(0);
-      if (found.length > 0) navigateToResult(found[0]);
     } catch (err) {
       console.warn("[Search] Failed:", err);
     } finally {
       setIsSearching(false);
     }
-  }, [activeBook, activeStructure, activeSemanticMap, getHighlightsForBook, getNotesForBook, imageCache]);
+  }, [library, activeBook, activeStructure, activeSemanticMap, getHighlightsForBook, getNotesForBook, imageCache]);
 
-  const navigateToResult = useCallback((result: SearchResult) => {
+  const navigateToResult = useCallback(async (result: SearchResult) => {
+    if (result.source === "library" && result.book) {
+      setStatus(`Opening ${result.book.title}…`);
+      await openBook(result.book, setStatus);
+      setStatus("");
+      onClose();
+      return;
+    }
+
     const win = window as Window & {
       luminaNavigate?:         (target: string) => void;
       luminaNavigateToScene?:  (target: string, wordOffset?: number) => void;
@@ -76,20 +88,20 @@ export default function SearchBar({ onClose }: SearchBarProps) {
         setTimeout(() => win.luminaMarkSearchResult!(result.target), 350);
       }
     }
-  }, []);
+  }, [onClose, openBook]);
 
   const goNext = useCallback(() => {
     if (results.length === 0) return;
     const next = (currentIndex + 1) % results.length;
     setCurrentIndex(next);
-    navigateToResult(results[next]);
+    void navigateToResult(results[next]);
   }, [currentIndex, results, navigateToResult]);
 
   const goPrev = useCallback(() => {
     if (results.length === 0) return;
     const prev = (currentIndex - 1 + results.length) % results.length;
     setCurrentIndex(prev);
-    navigateToResult(results[prev]);
+    void navigateToResult(results[prev]);
   }, [currentIndex, results, navigateToResult]);
 
   return (
@@ -97,7 +109,7 @@ export default function SearchBar({ onClose }: SearchBarProps) {
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="flex flex-col gap-2 p-3 border-b border-hair bg-surface-dark"
+      className="flex max-h-[min(520px,calc(100dvh-5rem))] flex-col gap-2 overflow-hidden rounded-xl border border-hair bg-surface-dark p-3 shadow-2xl shadow-black/40"
     >
       {/* Search input */}
       <div className="flex items-center gap-2 bg-black/30 border border-hair rounded-lg px-3 py-2">
@@ -111,10 +123,10 @@ export default function SearchBar({ onClose }: SearchBarProps) {
             handleSearch(e.target.value);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") goNext();
+            if (e.key === "Enter" && results[currentIndex]) void navigateToResult(results[currentIndex]);
             if (e.key === "Escape") onClose();
           }}
-          placeholder="Search book, notes, highlights…"
+          placeholder="Search library, book, notes…"
           className="flex-1 bg-transparent text-xs text-ink-soft placeholder:text-ink-faint focus:outline-none"
         />
         {query && (
@@ -126,6 +138,12 @@ export default function SearchBar({ onClose }: SearchBarProps) {
           </button>
         )}
       </div>
+
+      {status && (
+        <p className="rounded-lg border border-hair bg-black/20 px-3 py-2 text-xs text-ink-soft">
+          {status}
+        </p>
+      )}
 
       {/* Results navigation */}
       {results.length > 0 && (
@@ -150,15 +168,28 @@ export default function SearchBar({ onClose }: SearchBarProps) {
         </div>
       )}
 
-      {/* Current result excerpt */}
-      {results[currentIndex] && (
-        <div className="space-y-0.5 px-1">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-lumina-gold/65">
-            {results[currentIndex].label}
-          </p>
-          <p className="line-clamp-2 text-xs italic text-ink-faint">
-            "…{results[currentIndex].excerpt}…"
-          </p>
+      {results.length > 0 && (
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+          <div className="space-y-1">
+            {results.map((result, index) => (
+              <button
+                key={`${result.source}-${result.target}-${index}`}
+                onClick={() => void navigateToResult(result)}
+                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                  index === currentIndex
+                    ? "border-lumina-gold/35 bg-lumina-gold/10"
+                    : "border-hair bg-ink/[0.03] hover:bg-ink/[0.06]"
+                }`}
+              >
+                <span className="block text-[10px] uppercase tracking-[0.16em] text-lumina-gold/65">
+                  {result.label}
+                </span>
+                <span className="mt-0.5 line-clamp-2 block text-xs leading-relaxed text-ink-soft">
+                  {result.source === "library" ? result.excerpt : `…${result.excerpt}…`}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -173,6 +204,7 @@ export default function SearchBar({ onClose }: SearchBarProps) {
 
 type ArtifactSearchArgs = {
   query: string;
+  library: Book[];
   activeBook: Book | null;
   activeStructure: BookStructure | null;
   semanticMap: SemanticMap | null;
@@ -183,6 +215,7 @@ type ArtifactSearchArgs = {
 
 async function searchBookArtifacts({
   query,
+  library,
   activeStructure,
   semanticMap,
   highlights,
@@ -192,6 +225,18 @@ async function searchBookArtifacts({
   const q = query.trim();
   const lower = q.toLowerCase();
   const results: SearchResult[] = [];
+
+  for (const book of library) {
+    const haystack = `${book.title} ${book.author}`.toLowerCase();
+    if (!haystack.includes(lower)) continue;
+    results.push({
+      target: book.id,
+      excerpt: `${book.title}${book.author ? ` · ${book.author}` : ""}`,
+      source: "library",
+      label: "Library book",
+      book,
+    });
+  }
 
   if (activeStructure?.chapters.length) {
     for (const chapter of activeStructure.chapters) {

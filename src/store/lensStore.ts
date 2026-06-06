@@ -19,6 +19,8 @@ export const DEFAULT_LENSES: Record<string, HighlightLens> = {
     name: "Amber Glass",
     color: "#d8b24e",
     opacity: 32,
+    textColorEnabled: false,
+    textColor: "#dcefff",
     cornerStyle: "round",
     glow: 34,
     edgeStyle: "border",
@@ -30,6 +32,8 @@ export const DEFAULT_LENSES: Record<string, HighlightLens> = {
     name: "Sapphire Drift",
     color: "#418fcb",
     opacity: 30,
+    textColorEnabled: false,
+    textColor: "#dcefff",
     cornerStyle: "round",
     glow: 30,
     edgeStyle: "border",
@@ -41,6 +45,8 @@ export const DEFAULT_LENSES: Record<string, HighlightLens> = {
     name: "Verdant Field",
     color: "#46a877",
     opacity: 28,
+    textColorEnabled: false,
+    textColor: "#dcefff",
     cornerStyle: "round",
     glow: 24,
     edgeStyle: "border",
@@ -52,6 +58,8 @@ export const DEFAULT_LENSES: Record<string, HighlightLens> = {
     name: "Ember Veil",
     color: "#d56a52",
     opacity: 28,
+    textColorEnabled: false,
+    textColor: "#dcefff",
     cornerStyle: "round",
     glow: 28,
     edgeStyle: "border",
@@ -180,6 +188,8 @@ function normalizeLens(lens: HighlightLens): HighlightLens {
     ...lens,
     name: lens.name.trim() || DEFAULT_LENSES[lens.id]?.name || "Custom Lens",
     color: /^#[0-9a-f]{6}$/i.test(lens.color) ? lens.color : DEFAULT_LENSES[lens.id]?.color ?? DEFAULT_LENSES.yellow.color,
+    textColorEnabled: Boolean(lens.textColorEnabled),
+    textColor: /^#[0-9a-f]{6}$/i.test(lens.textColor) ? lens.textColor : "#dcefff",
     opacity: clamp(lens.opacity, 0, 100),
     glow: clamp(lens.glow, 0, 100),
     cornerStyle: oneOf<LensCornerStyle>(lens.cornerStyle, ["sharp", "soft", "round"], "round"),
@@ -331,6 +341,10 @@ export function lensTextShadow(lens: HighlightLens): string {
   return "0 0 0.01px currentColor";
 }
 
+export function lensTextColor(lens: HighlightLens): string {
+  return lens.textColorEnabled ? lens.textColor : "inherit";
+}
+
 export function lensFontWeight(lens: HighlightLens): string {
   return lens.textEmphasis === "bold" ? "600" : "inherit";
 }
@@ -351,6 +365,7 @@ export function lensCss(lens: HighlightLens): string {
     box-shadow: ${shadow};
     font-weight: ${lensFontWeight(lens)};
     text-shadow: ${lensTextShadow(lens)};
+    color: ${lensTextColor(lens)} !important;
   `;
 }
 
@@ -367,6 +382,7 @@ export function lensThemeProperties(lens: HighlightLens): Record<string, string>
     "padding": "0.02em 0.12em",
     "text-shadow": lensTextShadow(lens),
     "font-weight": lensFontWeight(lens),
+    "color": `${lensTextColor(lens)} !important`,
   };
 }
 
@@ -400,6 +416,7 @@ export function lensPreviewStyle(lens: HighlightLens): CSSProperties {
         : lensBoxShadow(lens),
     fontWeight: lensFontWeight(lens),
     textShadow: lensTextShadow(lens),
+    color: lensTextColor(lens),
   };
 }
 

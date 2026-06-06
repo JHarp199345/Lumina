@@ -148,7 +148,23 @@ export function useStructuredHighlights({ containerRef, bookId, locator }: Args)
       removeHighlight(id);
     };
 
+    const onHighlightClick = (event: MouseEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest<HTMLElement>("mark[data-lumina-hl]")
+        : null;
+      const id = target?.getAttribute("data-lumina-hl");
+      if (!id) return;
+      const highlight = getHighlightsForBook(bookId).find((h) => h.id === id);
+      if (!highlight) return;
+      event.preventDefault();
+      event.stopPropagation();
+      useSelectionStore.getState().setActive(highlight.id, highlight.color);
+    };
+
+    container?.addEventListener("click", onHighlightClick);
+
     return () => {
+      container?.removeEventListener("click", onHighlightClick);
       delete win.luminaCreateHighlight;
       delete win.luminaSetHighlightColor;
       delete win.luminaRemoveHighlight;
