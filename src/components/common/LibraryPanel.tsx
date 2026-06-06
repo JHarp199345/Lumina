@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, FolderOpen, Plus, Trash2, X } from "lucide-react";
+import { BookOpen, FolderOpen, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useBookStore } from "@/store/bookStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { storage } from "@/storage";
+import OpenShelfCatalog from "@/components/common/OpenShelfCatalog";
 
 interface LibraryPanelProps {
   onClose: () => void;
@@ -15,6 +16,7 @@ export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
   const { openBook, unmountActiveBook } = useEpubImport();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [openProgress, setOpenProgress] = useState("");
+  const [view, setView] = useState<"library" | "open-shelf">("library");
 
   const handleOpen = async (book: (typeof library)[0]) => {
     setOpenProgress("Preparing reader…");
@@ -53,6 +55,13 @@ export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
         className="fixed left-20 top-6 z-50 flex max-h-[calc(100dvh-3rem)] w-[min(520px,calc(100vw-6rem))] flex-col overflow-hidden rounded-xl border border-hair bg-panel shadow-2xl shadow-black/40"
         onClick={(event) => event.stopPropagation()}
       >
+        {view === "open-shelf" ? (
+          <OpenShelfCatalog
+            onBack={() => setView("library")}
+            onClose={onClose}
+          />
+        ) : (
+          <>
         <div className="flex items-center justify-between border-b border-hair px-5 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-hair bg-ink/[0.05] text-ink-soft">
@@ -82,6 +91,23 @@ export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
               <p className="break-words text-xs text-ink-soft">{openProgress}</p>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={() => setView("open-shelf")}
+            className="mb-3 flex w-full items-center gap-3 rounded-lg border border-lumina-gold/25 bg-lumina-gold/8 p-3 text-left transition-colors hover:bg-lumina-gold/12"
+          >
+            <div className="flex h-12 w-10 flex-shrink-0 items-center justify-center rounded-md border border-lumina-gold/30 bg-black/15 text-lumina-gold">
+              <Sparkles size={17} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-lumina-gold/90">Open Shelf</p>
+              <p className="mt-0.5 text-xs text-ink-faint">
+                Browse free public-domain books and import them into Lumina.
+              </p>
+            </div>
+            <FolderOpen size={15} className="text-lumina-gold/75" />
+          </button>
 
           {library.length === 0 ? (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-hair bg-black/10 px-6 text-center">
@@ -191,6 +217,8 @@ export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
             Import EPUB
           </button>
         </div>
+        </>
+        )}
       </motion.div>
     </AnimatePresence>
   );
