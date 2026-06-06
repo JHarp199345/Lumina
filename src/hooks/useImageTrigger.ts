@@ -42,10 +42,15 @@ export function useImageTrigger() {
   const priorPromptRef = useRef<string>("");
   const generatedCountRef = useRef(0);
   const activeSegmentSceneIdRef = useRef<string | null>(null);
+  const transitionTimerRef = useRef<number | null>(null);
   const DISPLAY_SWITCH_HYSTERESIS_WORDS = 140;
 
   useEffect(() => {
     activeSegmentSceneIdRef.current = null;
+    if (transitionTimerRef.current != null) {
+      window.clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
   }, [activeBook?.id]);
 
   // Calculate word position of each scene using real anchor data
@@ -64,6 +69,11 @@ export function useImageTrigger() {
     const scenes = [...activeSemanticMap.scenes].sort(
       (a, b) => getSceneWordPosition(a) - getSceneWordPosition(b)
     );
+    const storeCurrentImage = useImageStore.getState().currentImage;
+
+    if (!activeSegmentSceneIdRef.current && storeCurrentImage?.sceneId) {
+      activeSegmentSceneIdRef.current = storeCurrentImage.sceneId;
+    }
 
     // ── Display pass: always show the most recently passed scene's image ──────
     // Find the cached scene whose word position is <= current position and
@@ -106,6 +116,12 @@ export function useImageTrigger() {
       const cached = imageCache[bestDisplayScene.id];
       const current = useImageStore.getState().currentImage;
       if (current?.sceneId !== bestDisplayScene.id) {
+        diagnosticInfo("image.display.switch", "Switching visual segment", {
+          fromSceneId: current?.sceneId ?? null,
+          toSceneId: bestDisplayScene.id,
+          wordPosition,
+          sceneWordPosition: getSceneWordPosition(bestDisplayScene),
+        });
         activeSegmentSceneIdRef.current = bestDisplayScene.id;
         transitionToImage(cached);
       } else {
@@ -275,11 +291,20 @@ export function useImageTrigger() {
   // Image transition
   const transitionToImage = useCallback(
     (image: CachedImage) => {
+      const current = useImageStore.getState().currentImage;
+      if (current?.sceneId === image.sceneId && current.filePath === image.filePath) return;
+
+      if (transitionTimerRef.current != null) {
+        window.clearTimeout(transitionTimerRef.current);
+        transitionTimerRef.current = null;
+      }
+
       setIsTransitioning(true);
-      setTimeout(() => {
+      transitionTimerRef.current = window.setTimeout(() => {
         setCurrentImage(image);
         setCurrentThemes(image.emotionalThemes);
         setIsTransitioning(false);
+        transitionTimerRef.current = null;
       }, LUMINA_CONFIG.IMAGE_TRANSITION_DURATION_MS / 2);
     },
     [setCurrentImage, setCurrentThemes, setIsTransitioning]
