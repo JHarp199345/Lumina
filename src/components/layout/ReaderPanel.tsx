@@ -1,7 +1,8 @@
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useSettingsStore } from "@/store/settingsStore";
-import { BookOpen, ChevronLeft, ChevronRight, FolderOpen } from "lucide-react";
+import { useUiStore } from "@/store/uiStore";
+import { BookOpen, ChevronLeft, ChevronRight, FolderOpen, Maximize2, Minimize2 } from "lucide-react";
 import EpubRenderer from "@/components/reader/EpubRenderer";
 import StructuredTextRenderer from "@/components/reader/StructuredTextRenderer";
 import ChapterHeader from "@/components/reader/ChapterHeader";
@@ -67,10 +68,30 @@ export default function ReaderPanel({ onImport }: ReaderPanelProps) {
           <div className="flex items-center gap-2">
             <PageTurnControls />
             <FontSizeControl />
+            <FocusToggle />
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+// Expand the reader to fill the whole reading area (and back). The focus state
+// is read live so the icon flips between the two layouts.
+function FocusToggle() {
+  const focusMode = useUiStore((s) => s.focusMode);
+  const toggleFocus = useUiStore((s) => s.toggleFocus);
+  const isFocused = focusMode === "reader";
+
+  return (
+    <button
+      onClick={() => toggleFocus("reader")}
+      className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-faint hover:text-ink-soft active:text-ink transition-colors border-l border-hair pl-2"
+      title={isFocused ? "Exit focus reading (Esc)" : "Focus reading"}
+      aria-label={isFocused ? "Exit focus reading" : "Focus reading"}
+    >
+      {isFocused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+    </button>
   );
 }
 

@@ -10,11 +10,13 @@
  * full remaining width.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import type { Layout } from "react-resizable-panels";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useReaderStore } from "@/store/readerStore";
+import { useUiStore } from "@/store/uiStore";
 import DesktopRail from "./DesktopRail";
 import TocDrawer from "./TocDrawer";
 import VisualPanel from "./VisualPanel";
@@ -29,6 +31,7 @@ export default function DesktopLayout({ onImport, onLibraryOpen }: DesktopLayout
   const [tocOpen, setTocOpen] = useState(false);
   const { percentComplete } = useReaderStore();
   const { panelLayout, setPanelLayout } = useSettingsStore();
+  const { focusMode, clearFocus } = useUiStore();
 
   const handleLayoutChanged = useCallback(
     (layout: Layout) => {
@@ -40,6 +43,43 @@ export default function DesktopLayout({ onImport, onLibraryOpen }: DesktopLayout
     },
     [panelLayout, setPanelLayout]
   );
+
+  // Esc exits focus mode.
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clearFocus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusMode, clearFocus]);
+
+  // ── Focus mode: a single panel fills the whole reading area ────────────────
+  if (focusMode) {
+    return (
+      <div className="flex-1 flex overflow-hidden relative">
+        <DesktopRail
+          tocOpen={tocOpen}
+          onTocToggle={() => setTocOpen((v) => !v)}
+          onLibraryOpen={onLibraryOpen ?? (() => {})}
+          percentComplete={percentComplete}
+        />
+        <TocDrawer open={tocOpen} onClose={() => setTocOpen(false)} side="left" />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={focusMode}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            className="flex-1 flex flex-col overflow-hidden"
+          >
+            {focusMode === "reader" ? <ReaderPanel onImport={onImport} /> : <VisualPanel />}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex overflow-hidden relative">

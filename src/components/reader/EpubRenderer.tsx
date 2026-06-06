@@ -522,9 +522,18 @@ export default function EpubRenderer({
     const nav = await book.loaded.navigation;
     if (onTocReady && nav?.toc) onTocReady(nav.toc);
 
-    // Display initial location exactly once
-    if (initialCfi && initialCfi.startsWith("epubcfi(")) {
-      await rendition.display(initialCfi);
+    // Display initial location exactly once. Fall back to the live reading
+    // position in the store so a remount (e.g. toggling focus mode) restores
+    // where the reader was rather than the first page.
+    const storeCfi = useReaderStore.getState().currentCfi;
+    const restoreCfi =
+      initialCfi && initialCfi.startsWith("epubcfi(")
+        ? initialCfi
+        : storeCfi && storeCfi.startsWith("epubcfi(")
+          ? storeCfi
+          : null;
+    if (restoreCfi) {
+      await rendition.display(restoreCfi);
     } else {
       await rendition.display();
     }

@@ -6,9 +6,14 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { parseChapterDisplay } from "@/utils/titleUtils";
 import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
 
-const WORDS_PER_PAGE = 220;
+const DEFAULT_WORDS_PER_PAGE = 220;
 
-function splitIntoPages(text: string, chapterTitle = ""): string[] {
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function splitIntoPages(text: string, chapterTitle = "", wordsPerPage = DEFAULT_WORDS_PER_PAGE): string[] {
+  const wpp = Math.max(60, Math.round(wordsPerPage));
   const display = parseChapterDisplay(chapterTitle);
   const cleanedText = removeLeadingDuplicateHeading(text, [
     chapterTitle,
@@ -26,20 +31,20 @@ function splitIntoPages(text: string, chapterTitle = ""): string[] {
 
   for (const paragraph of paragraphs) {
     const paragraphWords = paragraph.split(/\s+/).filter(Boolean);
-    if (paragraphWords.length > WORDS_PER_PAGE) {
+    if (paragraphWords.length > wpp) {
       if (current.length > 0) {
         pages.push(current.join("\n\n"));
         current = [];
         words = 0;
       }
-      for (let i = 0; i < paragraphWords.length; i += WORDS_PER_PAGE) {
-        pages.push(paragraphWords.slice(i, i + WORDS_PER_PAGE).join(" "));
+      for (let i = 0; i < paragraphWords.length; i += wpp) {
+        pages.push(paragraphWords.slice(i, i + wpp).join(" "));
       }
       continue;
     }
 
     const count = paragraphWords.length;
-    if (current.length > 0 && words + count > WORDS_PER_PAGE) {
+    if (current.length > 0 && words + count > wpp) {
       pages.push(current.join("\n\n"));
       current = [];
       words = 0;
@@ -97,22 +102,74 @@ export default function StructuredTextRenderer({
   const { fontSize, lineHeight } = useSettingsStore();
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // Word offset within the current chapter, preserved across re-pagination so
+  // the reader stays on the same text when the page size changes.
+  const chapterWordOffsetRef = useRef(0);
+
+  // Words per page, derived from the measured content area. A wider/taller page
+  // (e.g. focus mode) gets more text so it fills comfortably.
+  const [wordsPerPage, setWordsPerPage] = useState(DEFAULT_WORDS_PER_PAGE);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w < 60 || h < 60) return;
+      const lineH = fontSize * lineHeight;
+      const linesPerPage = Math.max(4, Math.floor(h / lineH));
+      const charsPerLine = Math.max(24, Math.floor(w / (fontSize * 0.5)));
+      // ~6 characters per word (including the trailing space).
+      const approxWords = Math.round((linesPerPage * charsPerLine) / 6);
+      // Fill ~90% of the page so it reads full but never overflows.
+      const target = Math.max(90, Math.min(700, Math.round(approxWords * 0.9)));
+      setWordsPerPage((prev) => (Math.abs(prev - target) >= 12 ? target : prev));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fontSize, lineHeight, currentChapterIndex]);
 
   const chapterPages = useMemo(
     () =>
       activeStructure?.chapters.map((chapter) =>
-        splitIntoPages(chapter.rawText || "", chapter.title)
+        splitIntoPages(chapter.rawText || "", chapter.title, wordsPerPage)
       ) ?? [],
-    [activeStructure]
+    [activeStructure, wordsPerPage]
   );
 
   const initialLocation = useMemo(() => {
     const fromCfi = parseLuminaCfi(initialCfi);
     if (fromCfi) return fromCfi;
+    // Fall back to the live reading position so a remount (e.g. toggling focus
+    // mode) restores where the reader was, not the start of the book.
+    const fromStore = parseLuminaCfi(useReaderStore.getState().currentCfi);
+    if (fromStore) return fromStore;
     return { chapterIndex: activeBook?.coverImage ? -1 : 0, pageIndex: 0 };
   }, [activeBook?.coverImage, initialCfi]);
 
   const [pageIndex, setPageIndex] = useState(initialLocation.pageIndex);
+
+  // Keep the same text on screen when pagination changes (page size / resize).
+  useEffect(() => {
+    if (currentChapterIndex < 0) return;
+    const pages = chapterPages[currentChapterIndex];
+    if (!pages || pages.length === 0) return;
+    let acc = 0;
+    let target = pages.length - 1;
+    for (let i = 0; i < pages.length; i++) {
+      const wc = wordCount(pages[i]);
+      if (chapterWordOffsetRef.current < acc + wc) {
+        target = i;
+        break;
+      }
+      acc += wc;
+    }
+    setPageIndex((prev) => (prev === target ? prev : target));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chapterPages, currentChapterIndex]);
 
   const saveLocation = useCallback(
     (chapterIndex: number, nextPageIndex: number) => {
@@ -181,8 +238,16 @@ export default function StructuredTextRenderer({
         0,
         Math.min(activeStructure.chapters.length - 1, chapterIndex)
       );
-      const pagesInChapter = Math.max(1, chapterPages[safeChapterIndex]?.length ?? 1);
+      const pages = chapterPages[safeChapterIndex];
+      const pagesInChapter = Math.max(1, pages?.length ?? 1);
       const safePageIndex = Math.max(0, Math.min(pagesInChapter - 1, nextPageIndex));
+
+      // Record the word offset at the start of this page so re-pagination can
+      // return the reader to the same text.
+      let offset = 0;
+      if (pages) for (let i = 0; i < safePageIndex && i < pages.length; i++) offset += wordCount(pages[i]);
+      chapterWordOffsetRef.current = offset;
+
       setPageIndex(safePageIndex);
       saveLocation(safeChapterIndex, safePageIndex);
     },

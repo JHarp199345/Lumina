@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion";
-import { Sparkles, RefreshCw, Loader, MapPin, X } from "lucide-react";
+import { Sparkles, RefreshCw, Loader, MapPin, X, LayoutGrid } from "lucide-react";
 import { useImageStore } from "@/store/imageStore";
 import { useBookStore } from "@/store/bookStore";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -14,6 +14,7 @@ import { LUMINA_CONFIG } from "@/config";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useLongPress } from "@/hooks/useLongPress";
 import AmbientSceneLayer, { type AmbientPhase } from "@/components/visual/AmbientSceneLayer";
+import GalleryFocalView from "@/components/visual/GalleryFocalView";
 import type { CachedImage, SemanticMap, VisualBeat } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -80,6 +81,7 @@ export default function VisualPanel() {
   const { regenerateAllImages } = useBookOrchestration();
   const [showRegenerate, setShowRegenerate] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
+  const [showFocal, setShowFocal] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
 
@@ -100,11 +102,26 @@ export default function VisualPanel() {
     if (!isTablet && currentImage) setShowRegenerate(true);
   }, [isTablet, currentImage]);
 
+  // Clicking the image opens the gallery focal view (the art experience).
   const handleImageClick = useCallback((e: React.MouseEvent) => {
     if (!currentImage) return;
     e.stopPropagation();
-    setShowGallery(true);
+    setShowFocal(true);
   }, [currentImage]);
+
+  // Jump the reader to a scene's passage (used by the gallery's "Visit passage").
+  const goToScene = useCallback((sceneId: string) => {
+    const scene = activeSemanticMap?.scenes.find((s) => s.id === sceneId);
+    if (!scene) return;
+    const win = window as Window & {
+      luminaNavigateToScene?: (target: string, wordOffset?: number) => void;
+      luminaNavigate?: (target: string) => void;
+    };
+    const target = scene.anchor?.href || scene.chapterId;
+    if (win.luminaNavigateToScene) win.luminaNavigateToScene(target, scene.anchor?.wordOffset ?? 0);
+    else win.luminaNavigate?.(target);
+    setShowFocal(false);
+  }, [activeSemanticMap]);
 
   // Tablet: long-press opens the regenerate menu.
   const longPress = useLongPress(
@@ -174,6 +191,17 @@ export default function VisualPanel() {
         <span className="text-xs font-semibold tracking-widest text-ink-faint uppercase">
           Visual Interpretation
         </span>
+        <div className="flex-1" />
+        {activeBook && activeSemanticMap && (
+          <button
+            onClick={() => setShowGallery(true)}
+            className="flex items-center justify-center min-w-[28px] min-h-[28px] rounded text-ink-faint hover:text-ink-soft transition-colors"
+            title="Visual story & controls"
+            aria-label="Open visual story"
+          >
+            <LayoutGrid size={14} />
+          </button>
+        )}
       </div>
 
       {/* Image Area */}
@@ -339,6 +367,19 @@ export default function VisualPanel() {
             onAnalyze={() => setAnalysisRequested(true)}
             onRegenerateAll={regenerateAllImages}
             onClose={() => setShowGallery(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Gallery focal view — the "piece on the wall" experience */}
+      <AnimatePresence>
+        {showFocal && (
+          <GalleryFocalView
+            activeSemanticMap={activeSemanticMap}
+            imageCache={imageCache}
+            startSceneId={currentImage?.sceneId}
+            onVisitPassage={goToScene}
+            onClose={() => setShowFocal(false)}
           />
         )}
       </AnimatePresence>
