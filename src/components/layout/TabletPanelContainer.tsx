@@ -12,9 +12,11 @@
  *   Visual  flex-[2]  →  ~40 %
  */
 
+import { useEffect } from "react";
 import ReaderPanel from "./ReaderPanel";
 import VisualPanel from "./VisualPanel";
 import TocDrawer from "./TocDrawer";
+import { useUiStore } from "@/store/uiStore";
 
 interface Props {
   isPortrait: boolean;
@@ -24,6 +26,30 @@ interface Props {
 }
 
 export default function TabletPanelContainer({ isPortrait, tocOpen, onTocClose, onImport }: Props) {
+  const { focusMode, clearFocus } = useUiStore();
+
+  // Esc / back exits focus mode.
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clearFocus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusMode, clearFocus]);
+
+  // Focus mode: one panel fills the whole reading area.
+  if (focusMode) {
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        <div className="flex-1 overflow-hidden min-h-0">
+          {focusMode === "reader" ? <ReaderPanel onImport={onImport} /> : <VisualPanel />}
+        </div>
+        <TocDrawer open={tocOpen} onClose={onTocClose} side={isPortrait ? "left" : "right"} />
+      </div>
+    );
+  }
+
   if (isPortrait) {
     return <PortraitLayout tocOpen={tocOpen} onTocClose={onTocClose} onImport={onImport} />;
   }

@@ -109,8 +109,8 @@ export default function VisualPanel() {
     setShowFocal(true);
   }, [currentImage]);
 
-  // Jump the reader to a scene's passage (used by the gallery's "Visit passage").
-  const goToScene = useCallback((sceneId: string) => {
+  // Navigate the reader to a scene's passage (behind whatever is open).
+  const navigateToScene = useCallback((sceneId: string) => {
     const scene = activeSemanticMap?.scenes.find((s) => s.id === sceneId);
     if (!scene) return;
     const win = window as Window & {
@@ -120,8 +120,32 @@ export default function VisualPanel() {
     const target = scene.anchor?.href || scene.chapterId;
     if (win.luminaNavigateToScene) win.luminaNavigateToScene(target, scene.anchor?.wordOffset ?? 0);
     else win.luminaNavigate?.(target);
-    setShowFocal(false);
   }, [activeSemanticMap]);
+
+  // Hero "Visit passage": go read it (close the gallery).
+  const visitPassage = useCallback((sceneId: string) => {
+    navigateToScene(sceneId);
+    setShowFocal(false);
+  }, [navigateToScene]);
+
+  // Generate one planned scene's image (from the gallery placeholders).
+  const generateForScene = useCallback(async (sceneId: string) => {
+    if (!activeBook || !activeSemanticMap || !activeStyleSeed) return;
+    const scene = activeSemanticMap.scenes.find((s) => s.id === sceneId);
+    if (!scene) return;
+    const googleKey = await storage.loadApiKey("lumina_google_ai_key");
+    const falKey = await storage.loadApiKey("lumina_fal_key");
+    const styleSeed = getStyleSeedById(activeStyleSeed);
+    if (!googleKey || !styleSeed) return;
+    await generateImage({
+      scene,
+      styleSeed,
+      bookId: activeBook.id,
+      googleApiKey: googleKey,
+      falApiKey: falKey ?? undefined,
+      onComplete: async (img) => { addToCache(img); },
+    });
+  }, [activeBook, activeSemanticMap, activeStyleSeed, addToCache]);
 
   // Tablet: long-press opens the regenerate menu.
   const longPress = useLongPress(
@@ -378,7 +402,9 @@ export default function VisualPanel() {
             activeSemanticMap={activeSemanticMap}
             imageCache={imageCache}
             startSceneId={currentImage?.sceneId}
-            onVisitPassage={goToScene}
+            onVisitPassage={visitPassage}
+            onNavigateBehind={navigateToScene}
+            onGenerateScene={generateForScene}
             onClose={() => setShowFocal(false)}
           />
         )}
