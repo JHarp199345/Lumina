@@ -66,7 +66,7 @@
         } catch (error) {
           console.warn("[Lumina Recovery] Could not fully clear cache:", error);
         } finally {
-          window.location.replace("/Lumina/");
+          window.location.replace(new URL("./", window.location.href).toString());
         }
       }
 

@@ -9,7 +9,7 @@
  * Books and generated images are stored in IndexedDB by the app — NOT here.
  */
 
-const CACHE_VERSION = "lumina-v1";
+const CACHE_VERSION = "lumina-v2";
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
 const scoped = (path) => `${SCOPE_PATH}${path}`.replace(/\/{2,}/g, "/");
 
@@ -48,6 +48,12 @@ self.addEventListener("fetch", (event) => {
 
   // Only handle same-origin requests
   if (url.origin !== self.location.origin) return;
+
+  // The recovery page should never be trapped behind a stale cached copy.
+  if (url.pathname.endsWith("/clear-sw.html")) {
+    event.respondWith(fetch(request).catch(() => caches.match(request)));
+    return;
+  }
 
   // Navigation requests (HTML pages): network-first so updates land immediately,
   // falling back to cached index.html for offline use.
