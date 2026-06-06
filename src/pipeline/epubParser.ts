@@ -791,11 +791,39 @@ function parseXml(content: string): Document {
 
 function extractText(html: string): string {
   const doc = parseXml(html);
-  // Remove script and style elements
+  // Remove non-content elements
   doc.querySelectorAll("script, style").forEach((el) => el.remove());
-  return (doc.body?.textContent || doc.documentElement?.textContent || "")
-    .replace(/\s+/g, " ")
-    .trim();
+
+  // Preserve explicit line breaks as newlines before we read text.
+  doc.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+
+  // Extract text per block-level element so paragraph boundaries survive.
+  // These elements rarely nest one another, so textContent won't double-count.
+  const blocks = Array.from(
+    doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, blockquote, li, pre")
+  );
+
+  let paragraphs: string[] = blocks
+    .map((el) => collapseInlineWhitespace(el.textContent || ""))
+    .filter(Boolean);
+
+  // Fallback for chapters that use bare <div>s or raw text with no block tags:
+  // split the body text on its own newlines and treat each line as a paragraph.
+  if (paragraphs.length === 0) {
+    const body = doc.body?.textContent || doc.documentElement?.textContent || "";
+    paragraphs = body
+      .split(/\n+/)
+      .map((line) => collapseInlineWhitespace(line))
+      .filter(Boolean);
+  }
+
+  return paragraphs.join("\n\n");
+}
+
+// Collapse runs of spaces/tabs/newlines inside a single paragraph to one space,
+// without touching the paragraph-separating newlines we add between blocks.
+function collapseInlineWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function getTextContent(doc: Document, selector: string): string {

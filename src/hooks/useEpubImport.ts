@@ -6,7 +6,7 @@ import { useAnnotationStore } from "@/store/annotationStore";
 import { useImageStore } from "@/store/imageStore";
 import { useReaderStore } from "@/store/readerStore";
 import { storage } from "@/storage";
-import type { Book, CachedImage } from "@/types";
+import type { Book, BookStructure, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 
@@ -18,6 +18,15 @@ function describeError(err: unknown): string {
   } catch {
     return "Unknown error";
   }
+}
+
+// A structure parsed before paragraph-preserving extraction has rawText with no
+// paragraph breaks at all. A real multi-paragraph book always has some "\n\n";
+// if a substantial book has none, the stored structure is stale → re-parse.
+function structureLacksParagraphs(structure: Pick<BookStructure, "chapters" | "totalWords">): boolean {
+  if (structure.totalWords < 400) return false; // too small to judge; leave as-is
+  const hasAnyParagraphBreak = structure.chapters.some((ch) => (ch.rawText ?? "").includes("\n\n"));
+  return !hasAnyParagraphBreak;
 }
 
 export function useEpubImport() {
@@ -171,11 +180,13 @@ export function useEpubImport() {
       const progress = await storage.loadProgress(book.id);
       const savedCfi = progress?.currentCfi ?? null;
 
-      // 2. Load the stable imported structure. Re-parse only as a fallback.
+      // 2. Load the stable imported structure. Re-parse when missing, or when
+      //    the stored structure predates paragraph-preserving extraction (its
+      //    rawText was flattened into one block) so older books self-heal.
       let structure = await storage.loadBookStructure(book.id);
       try {
-        if (!structure) {
-          onProgress?.("Reading saved EPUB file…");
+        if (!structure || structureLacksParagraphs(structure)) {
+          onProgress?.(structure ? "Re-reading EPUB for paragraph structure…" : "Reading saved EPUB file…");
           const bytes = await storage.getEpubBytes(book);
           onProgress?.("Parsing saved EPUB structure…");
           const parsed = await parseEpub(bytes, onProgress);
