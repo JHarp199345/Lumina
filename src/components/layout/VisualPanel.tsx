@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion";
-import { Sparkles, RefreshCw, Loader, MapPin, X, LayoutGrid } from "lucide-react";
+import { Sparkles, RefreshCw, Loader, MapPin, X, LayoutGrid, CornerUpLeft } from "lucide-react";
 import { useImageStore } from "@/store/imageStore";
 import { useBookStore } from "@/store/bookStore";
+import { useReaderStore } from "@/store/readerStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { getStyleSeedById } from "@/data/styleSeeds";
@@ -77,6 +78,7 @@ export default function VisualPanel() {
     setAnalysisRequested,
   } = useBookStore();
   const { imageGenerationEnabled, apiKeyConfigured } = useSettingsStore();
+  const currentCfi = useReaderStore((s) => s.currentCfi);
   const { isTablet } = useDeviceLayout();
   const { regenerateAllImages } = useBookOrchestration();
   const [showRegenerate, setShowRegenerate] = useState(false);
@@ -84,6 +86,7 @@ export default function VisualPanel() {
   const [showFocal, setShowFocal] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
+  const [returnCfi, setReturnCfi] = useState<string | null>(null);
 
   const currentScene = currentImage
     ? activeSemanticMap?.scenes.find((scene) => scene.id === currentImage.sceneId)
@@ -109,6 +112,10 @@ export default function VisualPanel() {
     setShowFocal(true);
   }, [currentImage]);
 
+  const rememberReadingSpot = useCallback(() => {
+    if (currentCfi) setReturnCfi(currentCfi);
+  }, [currentCfi]);
+
   // Navigate the reader to a scene's passage (behind whatever is open).
   const navigateToScene = useCallback((sceneId: string) => {
     const scene = activeSemanticMap?.scenes.find((s) => s.id === sceneId);
@@ -124,9 +131,17 @@ export default function VisualPanel() {
 
   // Hero "Visit passage": go read it (close the gallery).
   const visitPassage = useCallback((sceneId: string) => {
+    rememberReadingSpot();
     navigateToScene(sceneId);
     setShowFocal(false);
-  }, [navigateToScene]);
+  }, [navigateToScene, rememberReadingSpot]);
+
+  const returnToReadingSpot = useCallback(() => {
+    if (!returnCfi) return;
+    const win = window as Window & { luminaNavigate?: (target: string) => void };
+    win.luminaNavigate?.(returnCfi);
+    setReturnCfi(null);
+  }, [returnCfi]);
 
   // Generate one planned scene's image (from the gallery placeholders).
   const generateForScene = useCallback(async (sceneId: string) => {
@@ -194,6 +209,7 @@ export default function VisualPanel() {
 
   const handleGoToScene = useCallback(() => {
     if (!currentScene) return;
+    rememberReadingSpot();
     const win = window as Window & {
       luminaNavigateToScene?: (target: string, wordOffset?: number) => void;
       luminaNavigate?: (target: string) => void;
@@ -205,7 +221,7 @@ export default function VisualPanel() {
       win.luminaNavigate?.(target);
     }
     setShowRegenerate(false);
-  }, [currentScene]);
+  }, [currentScene, rememberReadingSpot]);
 
   return (
     <div className="flex flex-col h-full bg-surface-darker">
@@ -302,6 +318,20 @@ export default function VisualPanel() {
             aria-label="Image actions"
           >
             <RefreshCw size={15} className="text-ink-soft" />
+          </button>
+        )}
+
+        {returnCfi && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              returnToReadingSpot();
+            }}
+            className="absolute left-3 top-3 z-10 inline-flex min-h-10 items-center gap-2 rounded-full border border-lumina-gold/30 bg-scrim/70 px-3 text-[11px] uppercase tracking-[0.12em] text-lumina-gold/85 shadow-lg backdrop-blur-sm transition-colors hover:border-lumina-gold/50 hover:text-lumina-gold"
+            aria-label="Return to previous reading spot"
+          >
+            <CornerUpLeft size={13} />
+            Return
           </button>
         )}
 
@@ -403,7 +433,6 @@ export default function VisualPanel() {
             imageCache={imageCache}
             startSceneId={currentImage?.sceneId}
             onVisitPassage={visitPassage}
-            onNavigateBehind={navigateToScene}
             onGenerateScene={generateForScene}
             onClose={() => setShowFocal(false)}
           />

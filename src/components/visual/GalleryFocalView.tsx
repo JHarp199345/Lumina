@@ -7,9 +7,8 @@
  * filmstrip along the bottom to pan through every planned moment.
  *
  * Filmstrip behaviour per item:
- *   - has image            → view it on the wall (inert; no regeneration)
- *   - planned, not at it    → navigate the reader to that passage (behind us)
- *   - planned, already at it → generate the image for that passage
+ *   - has image → view it on the wall without moving the reader
+ *   - planned   → generate that planned image without moving the reader
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -17,8 +16,6 @@ import { motion } from "framer-motion";
 import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader } from "lucide-react";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
-import { useReaderStore } from "@/store/readerStore";
-import { useBookStore } from "@/store/bookStore";
 import type { CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
 function displaySrc(src: string): string {
@@ -43,8 +40,6 @@ interface GalleryFocalViewProps {
   startSceneId?: string;
   /** Navigate the reader to a passage and CLOSE the gallery (go read it). */
   onVisitPassage: (sceneId: string) => void;
-  /** Navigate the reader to a passage but KEEP the gallery open (behind us). */
-  onNavigateBehind: (sceneId: string) => void;
   /** Generate the image for a planned scene. */
   onGenerateScene: (sceneId: string) => Promise<void>;
   onClose: () => void;
@@ -55,13 +50,9 @@ export default function GalleryFocalView({
   imageCache,
   startSceneId,
   onVisitPassage,
-  onNavigateBehind,
   onGenerateScene,
   onClose,
 }: GalleryFocalViewProps) {
-  const currentChapterIndex = useReaderStore((s) => s.currentChapterIndex);
-  const activeStructure = useBookStore((s) => s.activeStructure);
-
   // Every planned moment, in reading order — generated and not-yet-generated.
   const items: GalleryItem[] = useMemo(() => {
     const scenes = activeSemanticMap?.scenes ?? [];
@@ -80,12 +71,6 @@ export default function GalleryFocalView({
 
   const clamp = (i: number) => Math.max(0, Math.min(items.length - 1, i));
 
-  const isAtPassage = (scene: IdentifiedScene): boolean => {
-    if (!activeStructure) return false;
-    const idx = activeStructure.chapters.findIndex((c) => c.id === scene.chapterId);
-    return idx >= 0 && idx === currentChapterIndex;
-  };
-
   const runGenerate = async (sceneId: string) => {
     if (generatingId) return;
     setGeneratingId(sceneId);
@@ -96,15 +81,13 @@ export default function GalleryFocalView({
     }
   };
 
-  // The contextual action for an item: view → navigate → generate.
   const activateItem = (i: number) => {
     const it = items[i];
     if (!it) return;
     setIndex(i);
     if (it.image) return; // generated: view only, inert
     if (generatingId) return;
-    if (!isAtPassage(it.scene)) onNavigateBehind(it.scene.id);
-    else void runGenerate(it.scene.id);
+    void runGenerate(it.scene.id);
   };
 
   useEffect(() => {
@@ -131,7 +114,6 @@ export default function GalleryFocalView({
     "";
   const beatLabel = current.beat?.beatType?.replace(/_/g, " ") ?? "scene";
   const currentGenerating = generatingId === current.scene.id;
-  const currentAtPassage = isAtPassage(current.scene);
 
   return (
     <motion.div
@@ -212,7 +194,7 @@ export default function GalleryFocalView({
                         onClick={() => activateItem(index)}
                         className="rounded-full border border-white/15 px-4 py-2 text-[11px] uppercase tracking-[0.16em] text-white/55 transition-colors hover:border-lumina-gold/45 hover:text-lumina-gold/85"
                       >
-                        {currentAtPassage ? "Generate image here" : "Go to this passage"}
+                        Generate image
                       </button>
                     </>
                   )}
@@ -255,7 +237,7 @@ export default function GalleryFocalView({
                     : "opacity-50 ring-1 ring-white/10 hover:opacity-85"
                 }`}
                 aria-label={it.image ? `View image ${i + 1}` : `Planned moment ${i + 1}`}
-                title={it.image ? undefined : isAtPassage(it.scene) ? "Generate image here" : "Go to this passage"}
+                title={it.image ? undefined : "Generate image"}
               >
                 {it.image ? (
                   <img src={displaySrc(it.image.filePath)} alt="" className="h-full w-full object-cover" draggable={false} />

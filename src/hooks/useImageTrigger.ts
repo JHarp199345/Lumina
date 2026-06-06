@@ -41,6 +41,12 @@ export function useImageTrigger() {
   const isGeneratingRef = useRef(false);
   const priorPromptRef = useRef<string>("");
   const generatedCountRef = useRef(0);
+  const activeSegmentSceneIdRef = useRef<string | null>(null);
+  const DISPLAY_SWITCH_HYSTERESIS_WORDS = 140;
+
+  useEffect(() => {
+    activeSegmentSceneIdRef.current = null;
+  }, [activeBook?.id]);
 
   // Calculate word position of each scene using real anchor data
   const getSceneWordPosition = useCallback(
@@ -55,22 +61,44 @@ export function useImageTrigger() {
   const checkProximity = useCallback(() => {
     if (!activeSemanticMap || !imageGenerationEnabled || !activeBook) return;
 
-    const scenes = activeSemanticMap.scenes;
+    const scenes = [...activeSemanticMap.scenes].sort(
+      (a, b) => getSceneWordPosition(a) - getSceneWordPosition(b)
+    );
 
     // ── Display pass: always show the most recently passed scene's image ──────
     // Find the cached scene whose word position is <= current position and
     // closest to it. This means the correct image persists across the full
     // span between scenes — no empty gaps.
-    let bestDisplayScene: IdentifiedScene | null = null;
-    let bestDist = Infinity;
+    const currentSegmentScene = activeSegmentSceneIdRef.current
+      ? scenes.find((scene) => scene.id === activeSegmentSceneIdRef.current)
+      : null;
+    const currentSegmentIndex = currentSegmentScene
+      ? scenes.findIndex((scene) => scene.id === currentSegmentScene.id)
+      : -1;
+    const currentSegmentStart = currentSegmentScene
+      ? getSceneWordPosition(currentSegmentScene)
+      : -Infinity;
+    const nextSegmentStart = currentSegmentIndex >= 0 && scenes[currentSegmentIndex + 1]
+      ? getSceneWordPosition(scenes[currentSegmentIndex + 1])
+      : Infinity;
 
-    for (const scene of scenes) {
-      if (!imageCache[scene.id]) continue;
-      const scenePos = getSceneWordPosition(scene);
-      const dist = wordPosition - scenePos; // positive = reader has passed this scene
-      if (dist >= 0 && dist < bestDist) {
-        bestDist = dist;
-        bestDisplayScene = scene;
+    let bestDisplayScene: IdentifiedScene | null = null;
+    const shouldKeepCurrent =
+      currentSegmentScene &&
+      imageCache[currentSegmentScene.id] &&
+      wordPosition >= currentSegmentStart - DISPLAY_SWITCH_HYSTERESIS_WORDS &&
+      wordPosition < nextSegmentStart + DISPLAY_SWITCH_HYSTERESIS_WORDS;
+
+    if (shouldKeepCurrent) {
+      bestDisplayScene = currentSegmentScene;
+    } else {
+      for (const scene of scenes) {
+        if (!imageCache[scene.id]) continue;
+        const scenePos = getSceneWordPosition(scene);
+        const activationPos = scenePos + (activeSegmentSceneIdRef.current ? DISPLAY_SWITCH_HYSTERESIS_WORDS : 0);
+        if (wordPosition >= activationPos) {
+          bestDisplayScene = scene;
+        }
       }
     }
 
@@ -78,7 +106,10 @@ export function useImageTrigger() {
       const cached = imageCache[bestDisplayScene.id];
       const current = useImageStore.getState().currentImage;
       if (current?.sceneId !== bestDisplayScene.id) {
+        activeSegmentSceneIdRef.current = bestDisplayScene.id;
         transitionToImage(cached);
+      } else {
+        activeSegmentSceneIdRef.current = bestDisplayScene.id;
       }
     }
 
@@ -141,8 +172,10 @@ export function useImageTrigger() {
     );
     if (existingPersistedImage) {
       addToCache(existingPersistedImage);
-      const scenePos = getSceneWordPosition(scene);
-      if (!useImageStore.getState().currentImage || wordPosition >= scenePos) {
+      const activeSegmentSceneId = activeSegmentSceneIdRef.current;
+      const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
+      if (!hasCurrentImage || activeSegmentSceneId === scene.id) {
+        activeSegmentSceneIdRef.current = scene.id;
         transitionToImage(existingPersistedImage);
       }
       updateQueueItemStatus(next.sceneId, "complete");
@@ -194,10 +227,10 @@ export function useImageTrigger() {
             [img.descriptionUsed]
           );
 
-          // Display immediately if reader is at/past this scene
-          const scenePos = getSceneWordPosition(scene);
+          // Display only if this generated image belongs to the current visual segment.
           const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-          if (!hasCurrentImage || wordPosition >= scenePos) {
+          if (!hasCurrentImage || activeSegmentSceneIdRef.current === scene.id) {
+            activeSegmentSceneIdRef.current = scene.id;
             transitionToImage(img);
           }
         },
@@ -205,8 +238,8 @@ export function useImageTrigger() {
 
       addToCache(cachedImage);
       const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-      const scenePos = getSceneWordPosition(scene);
-      if (!hasCurrentImage || wordPosition >= scenePos) {
+      if (!hasCurrentImage || activeSegmentSceneIdRef.current === scene.id) {
+        activeSegmentSceneIdRef.current = scene.id;
         transitionToImage(cachedImage);
       }
       console.info("[ImageTrigger] Generated image committed:", cachedImage.sceneId);
