@@ -21,6 +21,7 @@ import {
   Plus,
   StickyNote,
   WandSparkles,
+  Brain,
 } from "lucide-react";
 import { useDrawerStore } from "@/store/drawerStore";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -33,6 +34,7 @@ import {
 } from "@/utils/annotationGrouping";
 import type { Highlight, Note } from "@/types";
 import LensStudio from "@/components/knowledge/LensStudio";
+import StudyGuide from "@/components/knowledge/StudyGuide";
 
 const LENS_EDGE: Record<string, string> = {
   yellow: "border-l-[#d8b24e]",
@@ -75,6 +77,9 @@ export default function AnnotationsDrawer() {
             )}
             {view === "lens-studio" && (
               <LensStudioView onBack={() => setView("menu")} onClose={close} />
+            )}
+            {view === "study-guide" && (
+              <StudyGuideView onBack={() => setView("menu")} onClose={close} />
             )}
           </motion.aside>
         </>
@@ -126,7 +131,7 @@ function MenuView({
   onPick,
   onClose,
 }: {
-  onPick: (v: "glossary" | "notepad" | "lens-studio") => void;
+  onPick: (v: "glossary" | "notepad" | "lens-studio" | "study-guide") => void;
   onClose: () => void;
 }) {
   const { activeBook } = useBookStore();
@@ -159,6 +164,13 @@ function MenuView({
           count={0}
           onClick={() => onPick("lens-studio")}
         />
+        <HubButton
+          icon={<Brain size={18} />}
+          label="Study Guide"
+          sub="Segments, quizzes, and review"
+          count={0}
+          onClick={() => onPick("study-guide")}
+        />
       </div>
       <div className="mt-auto px-4 py-4">
         <p className="text-[11px] leading-relaxed text-ink-faint">
@@ -175,6 +187,15 @@ function LensStudioView({ onBack, onClose }: { onBack: () => void; onClose: () =
     <>
       <DrawerHeader title="Lens Studio" onBack={onBack} onClose={onClose} />
       <LensStudio />
+    </>
+  );
+}
+
+function StudyGuideView({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+  return (
+    <>
+      <DrawerHeader title="Study Guide" onBack={onBack} onClose={onClose} />
+      <StudyGuide />
     </>
   );
 }
