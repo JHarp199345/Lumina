@@ -214,7 +214,6 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quiz_attempts WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
-  await db.execute(`DELETE FROM study_badges WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
 }
@@ -641,7 +640,6 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
     [`DELETE FROM study_guides WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_quizzes WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_quiz_attempts WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM study_badges WHERE book_id = $1`, [bookId]],
     [`DELETE FROM image_cache WHERE book_id = $1`, [bookId]],
     [`DELETE FROM book_settings WHERE book_id = $1`, [bookId]],
   ] as [string, unknown[]][];
