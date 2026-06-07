@@ -23,6 +23,7 @@ import SeedPicker from "@/components/visual/SeedPicker";
 import OnboardingModal from "@/components/common/OnboardingModal";
 import SettingsPanel from "@/components/common/SettingsPanel";
 import LibraryPanel from "@/components/common/LibraryPanel";
+import VisualDebugOverlay from "@/components/debug/VisualDebugOverlay";
 import type { StyleSeedId, BookStructure } from "@/types";
 
 function App() {
@@ -64,6 +65,9 @@ function App() {
   const [importProgress, setImportProgress] = useState("");
   const [importDetails, setImportDetails] = useState<string[]>([]);
   const [importFailed, setImportFailed] = useState(false);
+  const visualDebugEnabled =
+    new URLSearchParams(window.location.search).get("debug") === "visuals" ||
+    window.localStorage.getItem("lumina.debug.visuals") === "1";
 
   // TOC open/closed state for tablet layouts.
   // In landscape the rail starts open; in portrait the drawer starts closed.
@@ -394,6 +398,7 @@ function App() {
           onImport={handleImport}
         />
       )}
+      {visualDebugEnabled && <VisualDebugOverlay />}
     </div>
   );
 }

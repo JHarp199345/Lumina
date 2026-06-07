@@ -42,6 +42,10 @@ function readEntries(): DiagnosticEntry[] {
   }
 }
 
+export function getDiagnosticEntries(): DiagnosticEntry[] {
+  return readEntries();
+}
+
 function writeEntries(entries: DiagnosticEntry[]): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(-MAX_ENTRIES)));
