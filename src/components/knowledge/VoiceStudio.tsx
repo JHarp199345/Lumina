@@ -4,6 +4,7 @@ import {
   BookOpen,
   CheckCircle2,
   Headphones,
+  Key,
   Pause,
   Play,
   RefreshCw,
@@ -15,6 +16,7 @@ import { useBookStore } from "@/store/bookStore";
 import { useDrawerStore } from "@/store/drawerStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useStudyStore } from "@/store/studyStore";
+import { useApiKeys } from "@/hooks/useApiKeys";
 import { storage } from "@/storage";
 import {
   AUDIO_STYLE_PRESETS,
@@ -56,6 +58,7 @@ export default function VoiceStudio() {
   const { guide } = useStudyStore();
   const wordPosition = useReaderStore((s) => s.wordPosition);
   const setDrawerView = useDrawerStore((s) => s.setView);
+  const { saveElevenLabsKey } = useApiKeys();
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const {
@@ -97,6 +100,26 @@ export default function VoiceStudio() {
   });
   const [voiceQuery, setVoiceQuery] = useState("");
   const [isLoadingVoices, setIsLoadingVoices] = useState(false);
+  const [hasVoiceKey, setHasVoiceKey] = useState(false);
+  const [showKeyPrompt, setShowKeyPrompt] = useState(false);
+  const [voiceKeyInput, setVoiceKeyInput] = useState("");
+  const [voiceKeyError, setVoiceKeyError] = useState<string | null>(null);
+  const [isSavingVoiceKey, setIsSavingVoiceKey] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    storage.loadApiKey(ELEVENLABS_KEY_NAME).then((key) => {
+      if (cancelled) return;
+      const exists = Boolean(key);
+      setHasVoiceKey(exists);
+      setShowKeyPrompt(!exists);
+    }).catch(() => {
+      if (!cancelled) setShowKeyPrompt(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,7 +184,8 @@ export default function VoiceStudio() {
   const refreshVoices = async () => {
     const apiKey = await storage.loadApiKey(ELEVENLABS_KEY_NAME);
     if (!apiKey) {
-      setError("Add an ElevenLabs key in Settings to load voices.");
+      setShowKeyPrompt(true);
+      setError("Add an ElevenLabs key to load voices.");
       return;
     }
     setError(null);
@@ -188,7 +212,8 @@ export default function VoiceStudio() {
     }
     const apiKey = await storage.loadApiKey(ELEVENLABS_KEY_NAME);
     if (!apiKey) {
-      setError("Add an ElevenLabs key in Settings to generate narration.");
+      setShowKeyPrompt(true);
+      setError("Add an ElevenLabs key to generate narration.");
       return;
     }
     setError(null);
@@ -278,6 +303,28 @@ export default function VoiceStudio() {
     setIsPlaying(true);
   };
 
+  const saveInlineVoiceKey = async () => {
+    if (!voiceKeyInput.trim()) return;
+    setVoiceKeyError(null);
+    setIsSavingVoiceKey(true);
+    try {
+      await saveElevenLabsKey(voiceKeyInput.trim());
+      const loaded = loadCachedElevenLabsVoices();
+      if (loaded.length > 0) {
+        setVoices(loaded);
+        setVoice(loaded[0].id);
+      }
+      setHasVoiceKey(true);
+      setShowKeyPrompt(false);
+      setVoiceKeyInput("");
+      setError(null);
+    } catch (err) {
+      setVoiceKeyError(err instanceof Error ? err.message : "Could not validate ElevenLabs key.");
+    } finally {
+      setIsSavingVoiceKey(false);
+    }
+  };
+
   if (!activeBook) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
@@ -338,6 +385,56 @@ export default function VoiceStudio() {
       </div>
 
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 scrollbar-thin">
+        {showKeyPrompt && (
+          <div className="rounded-xl border border-lumina-gold/28 bg-lumina-gold/[0.055] p-3">
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <Key size={14} className="mt-0.5 shrink-0 text-lumina-gold/75" />
+                <div>
+                  <p className="text-xs font-medium text-ink/85">Connect ElevenLabs</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+                    Voice Studio needs an ElevenLabs key for voices, narration, and read-along timing.
+                  </p>
+                </div>
+              </div>
+              {hasVoiceKey && (
+                <button
+                  onClick={() => setShowKeyPrompt(false)}
+                  className="text-[11px] text-ink-faint hover:text-ink-soft"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+            <input
+              type="password"
+              value={voiceKeyInput}
+              onChange={(event) => {
+                setVoiceKeyInput(event.target.value);
+                setVoiceKeyError(null);
+              }}
+              placeholder="Paste ElevenLabs API key"
+              className="w-full rounded-lg border border-hair bg-surface-dark px-3 py-2 text-xs text-ink-soft placeholder:text-ink-faint focus:outline-none"
+            />
+            {voiceKeyError && <p className="mt-2 text-[11px] text-rose-400/80">{voiceKeyError}</p>}
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={saveInlineVoiceKey}
+                disabled={!voiceKeyInput.trim() || isSavingVoiceKey}
+                className="flex-1 rounded-lg border border-lumina-gold/35 bg-lumina-gold/12 px-3 py-2 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/16 disabled:opacity-40"
+              >
+                {isSavingVoiceKey ? "Validating..." : "Save & Load Voices"}
+              </button>
+              <button
+                onClick={() => setShowKeyPrompt(false)}
+                className="rounded-lg border border-hair px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft"
+              >
+                Preview Studio
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
           <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Segment</p>
           <select
