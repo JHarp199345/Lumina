@@ -20,6 +20,9 @@ import {
   Circle,
   Wand2,
   ListChecks,
+  Map,
+  Layers3,
+  ChevronLeft,
   X,
   Lock,
   Trophy,
@@ -33,6 +36,7 @@ import {
   STUDY_GUIDE_PROGRESS_STEPS,
 } from "@/pipeline/studySegmenter";
 import { refineStudyGuide } from "@/pipeline/studyRefiner";
+import { generateFlashcards } from "@/pipeline/studyFlashcards";
 import { generateChapterQuiz, generateSegmentQuiz, generateWholeBookQuiz } from "@/pipeline/studyQuizzer";
 import {
   groupSegmentsByChapter,
@@ -42,9 +46,11 @@ import {
   type StudyChapterGroup,
 } from "@/utils/studyProgress";
 import type { BookStructure, StudyBadgeAward, StudyGuide, StudyQuiz, StudyQuizAttempt, StudySegment } from "@/types";
+import type { StudyFlashcard } from "@/types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type QuizMode = "segment" | "chapter" | "book";
+type StudyView = "home" | "map" | "quizzes" | "flashcards" | "badges";
 
 export default function StudyGuide() {
   const { activeBook, activeStructure } = useBookStore();
@@ -52,10 +58,11 @@ export default function StudyGuide() {
     useStudyStore();
   const wordPosition = useReaderStore((s) => s.wordPosition);
   const [error, setError] = useState<string | null>(null);
-  const [showQuizSelector, setShowQuizSelector] = useState(false);
+  const [view, setView] = useState<StudyView>("home");
   const [quizzes, setQuizzes] = useState<StudyQuiz[]>([]);
   const [attempts, setAttempts] = useState<StudyQuizAttempt[]>([]);
   const [badges, setBadges] = useState<StudyBadgeAward[]>([]);
+  const [flashcards, setFlashcards] = useState<StudyFlashcard[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,17 +70,20 @@ export default function StudyGuide() {
       setQuizzes([]);
       setAttempts([]);
       setBadges([]);
+      setFlashcards([]);
       return;
     }
     Promise.all([
       storage.loadStudyQuizzes(activeBook.id).catch(() => [] as StudyQuiz[]),
       storage.loadStudyQuizAttempts(activeBook.id).catch(() => [] as StudyQuizAttempt[]),
       storage.loadStudyBadgeAwards(activeBook.id).catch(() => [] as StudyBadgeAward[]),
-    ]).then(([loadedQuizzes, loadedAttempts, loadedBadges]) => {
+      storage.loadStudyFlashcards(activeBook.id).catch(() => [] as StudyFlashcard[]),
+    ]).then(([loadedQuizzes, loadedAttempts, loadedBadges, loadedFlashcards]) => {
       if (cancelled) return;
       setQuizzes(loadedQuizzes);
       setAttempts(loadedAttempts);
       setBadges(loadedBadges);
+      setFlashcards(loadedFlashcards);
     });
     return () => {
       cancelled = true;
@@ -153,27 +163,19 @@ export default function StudyGuide() {
     );
   }
 
-  // ── Guide exists: segment list ─────────────────────────────────────────────
+  // ── Guide exists: dashboard ────────────────────────────────────────────────
   if (guide && guide.bookId === activeBook.id) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-hair px-4 py-3">
           <div>
-            <p className="text-sm font-medium text-ink/85">Study Segments</p>
+            <p className="text-sm font-medium text-ink/85">Study Guide</p>
             <p className="text-[11px] text-ink-faint">
               {guide.segments.length} segment{guide.segments.length === 1 ? "" : "s"}
               {guide.source === "heuristic" ? " · draft map" : " · refined"}
             </p>
           </div>
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setShowQuizSelector(true)}
-              title="Choose what part of the book to quiz"
-              className="flex items-center gap-1.5 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-2.5 py-1.5 text-[11px] font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15"
-            >
-              <ListChecks size={12} />
-              Quizzes
-            </button>
             {guide.source === "heuristic" ? (
               <button
                 onClick={runRefine}
@@ -204,7 +206,30 @@ export default function StudyGuide() {
           <p className="border-b border-hair px-4 py-2 text-[11px] text-rose-400/80">{error}</p>
         )}
 
-        {showQuizSelector && (
+        {view !== "home" && (
+          <button
+            onClick={() => setView("home")}
+            className="flex items-center gap-1.5 border-b border-hair px-4 py-2 text-[11px] text-ink-faint transition-colors hover:text-ink-soft"
+          >
+            <ChevronLeft size={13} />
+            Study Guide
+          </button>
+        )}
+
+        {view === "home" && (
+          <StudyDashboard
+            guide={guide}
+            quizzes={quizzes}
+            badges={badges}
+            flashcards={flashcards}
+            wordPosition={wordPosition}
+            onOpen={setView}
+          />
+        )}
+
+        {view === "map" && <StudyMap guide={guide} wordPosition={wordPosition} />}
+
+        {view === "quizzes" && (
           <QuizSelector
             guide={guide}
             activeStructure={activeStructure}
@@ -215,32 +240,20 @@ export default function StudyGuide() {
             onQuizSaved={(quiz) => setQuizzes((current) => [...current.filter((q) => q.id !== quiz.id), quiz])}
             onAttemptSaved={(attempt) => setAttempts((current) => [...current, attempt])}
             onBadgeSaved={(badge) => setBadges((current) => [...current.filter((b) => b.id !== badge.id), badge])}
-            onClose={() => setShowQuizSelector(false)}
           />
         )}
 
-        {badges.length > 0 && (
-          <div className="border-b border-hair px-3 py-2">
-            <div className="flex gap-1.5 overflow-x-auto scrollbar-thin">
-              {badges.map((badge) => (
-                <span
-                  key={badge.id}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-lumina-gold/24 bg-lumina-gold/[0.06] px-2.5 py-1 text-[10px] text-lumina-gold/75"
-                  title={`${badge.label} · ${badge.score}%`}
-                >
-                  <Trophy size={11} />
-                  {badge.label}
-                </span>
-              ))}
-            </div>
-          </div>
+        {view === "flashcards" && (
+          <FlashcardStudio
+            guide={guide}
+            activeStructure={activeStructure}
+            wordPosition={wordPosition}
+            cards={flashcards}
+            onCardsSaved={(cards) => setFlashcards((current) => [...current, ...cards])}
+          />
         )}
 
-        <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-3 py-3 scrollbar-thin">
-          {guide.segments.map((segment) => (
-            <SegmentRow key={segment.id} segment={segment} reached={isSegmentReached(segment, wordPosition)} />
-          ))}
-        </div>
+        {view === "badges" && <BadgesView badges={badges} />}
       </div>
     );
   }
@@ -269,6 +282,318 @@ export default function StudyGuide() {
   );
 }
 
+function StudyDashboard({
+  guide,
+  quizzes,
+  badges,
+  flashcards,
+  wordPosition,
+  onOpen,
+}: {
+  guide: StudyGuide;
+  quizzes: StudyQuiz[];
+  badges: StudyBadgeAward[];
+  flashcards: StudyFlashcard[];
+  wordPosition: number;
+  onOpen: (view: StudyView) => void;
+}) {
+  const reachedCount = guide.segments.filter((segment) => isSegmentReached(segment, wordPosition)).length;
+  return (
+    <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 scrollbar-thin">
+      <div className="rounded-xl border border-hair bg-ink/[0.025] px-3.5 py-3">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-lumina-gold/70">Current Book</p>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-soft">
+          {reachedCount} of {guide.segments.length} study segments reached.
+        </p>
+      </div>
+
+      <DashboardButton
+        icon={<Map size={17} />}
+        title="Study Map"
+        detail="Readable stopping points created from this book."
+        meta={`${guide.segments.length} segment${guide.segments.length === 1 ? "" : "s"}`}
+        onClick={() => onOpen("map")}
+      />
+      <DashboardButton
+        icon={<ListChecks size={17} />}
+        title="Quizzes"
+        detail="Generate checks by segment, chapter, or whole book."
+        meta={`${quizzes.length} saved`}
+        onClick={() => onOpen("quizzes")}
+      />
+      <DashboardButton
+        icon={<Layers3 size={17} />}
+        title="Flashcards"
+        detail="Choose any segments and turn them into review cards."
+        meta={`${flashcards.length} card${flashcards.length === 1 ? "" : "s"}`}
+        onClick={() => onOpen("flashcards")}
+      />
+      <DashboardButton
+        icon={<Trophy size={17} />}
+        title="Badges"
+        detail="Awards earned from completed quizzes."
+        meta={`${badges.length} earned`}
+        onClick={() => onOpen("badges")}
+      />
+    </div>
+  );
+}
+
+function DashboardButton({
+  icon,
+  title,
+  detail,
+  meta,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+  meta: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-start gap-3 rounded-xl border border-hair bg-ink/[0.025] px-3.5 py-3 text-left transition-colors hover:border-lumina-gold/30 hover:bg-lumina-gold/[0.04]"
+    >
+      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-lumina-gold/20 bg-lumina-gold/[0.06] text-lumina-gold/75">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-medium text-ink/88">{title}</span>
+        <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-faint">{detail}</span>
+      </span>
+      <span className="shrink-0 rounded-full border border-hair px-2 py-1 text-[10px] text-ink-faint">
+        {meta}
+      </span>
+    </button>
+  );
+}
+
+function StudyMap({ guide, wordPosition }: { guide: StudyGuide; wordPosition: number }) {
+  return (
+    <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-3 py-3 scrollbar-thin">
+      {guide.segments.map((segment) => (
+        <SegmentRow key={segment.id} segment={segment} reached={isSegmentReached(segment, wordPosition)} />
+      ))}
+    </div>
+  );
+}
+
+function BadgesView({ badges }: { badges: StudyBadgeAward[] }) {
+  if (badges.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-lumina-gold/20 bg-lumina-gold/[0.06] text-lumina-gold/75">
+          <Trophy size={21} />
+        </span>
+        <p className="text-sm font-medium text-ink/85">No badges yet</p>
+        <p className="max-w-xs text-xs leading-relaxed text-ink-faint">
+          Pass quizzes to collect awards for this book.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-3 py-3 scrollbar-thin">
+      {badges.map((badge) => (
+        <div key={badge.id} className="rounded-xl border border-lumina-gold/24 bg-lumina-gold/[0.045] px-3.5 py-3">
+          <div className="flex items-start gap-2.5">
+            <Trophy size={16} className="mt-0.5 shrink-0 text-lumina-gold/75" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-medium text-ink/88">{badge.label}</p>
+              <p className="mt-1 text-[11px] text-ink-faint">
+                {badge.scope} quiz · {badge.score}% · {new Date(badge.awardedAt).toLocaleDateString()}
+              </p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FlashcardStudio({
+  guide,
+  activeStructure,
+  wordPosition,
+  cards,
+  onCardsSaved,
+}: {
+  guide: StudyGuide;
+  activeStructure: BookStructure | null;
+  wordPosition: number;
+  cards: StudyFlashcard[];
+  onCardsSaved: (cards: StudyFlashcard[]) => void;
+}) {
+  const reachedSegments = guide.segments.filter((segment) => isSegmentReached(segment, wordPosition));
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => reachedSegments.slice(0, 1).map((s) => s.id));
+  const [activeCardIndex, setActiveCardIndex] = useState(0);
+  const [showBack, setShowBack] = useState(false);
+  const [isGeneratingCards, setIsGeneratingCards] = useState(false);
+  const [flashcardError, setFlashcardError] = useState<string | null>(null);
+
+  const selectedSegments = guide.segments.filter((segment) => selectedIds.includes(segment.id));
+  const activeCard = cards[activeCardIndex] ?? null;
+
+  const toggleSegment = (segmentId: string) => {
+    setSelectedIds((current) =>
+      current.includes(segmentId)
+        ? current.filter((id) => id !== segmentId)
+        : [...current, segmentId]
+    );
+  };
+
+  const runGenerateFlashcards = async () => {
+    if (!activeStructure) {
+      setFlashcardError("The book structure is still loading. Try again in a moment.");
+      return;
+    }
+    const apiKey = await storage.loadApiKey("lumina_google_ai_key");
+    if (!apiKey) {
+      setFlashcardError("Add a Google AI key in Settings to generate flashcards.");
+      return;
+    }
+    setFlashcardError(null);
+    setIsGeneratingCards(true);
+    try {
+      const generated = await generateFlashcards({
+        segments: selectedSegments,
+        structure: activeStructure,
+        apiKey,
+      });
+      await storage.saveStudyFlashcards(generated);
+      onCardsSaved(generated);
+      setActiveCardIndex(cards.length);
+      setShowBack(false);
+    } catch (err) {
+      console.error("[StudyGuide] Flashcard generation failed:", err);
+      setFlashcardError(err instanceof Error ? err.message : "Flashcard generation failed.");
+    } finally {
+      setIsGeneratingCards(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="border-b border-hair px-3 py-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-lumina-gold/75">Flashcards</p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
+          Select any reached segments, then generate cards from that exact material.
+        </p>
+      </div>
+
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 scrollbar-thin">
+        <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Segments</p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setSelectedIds(reachedSegments.map((segment) => segment.id))}
+                className="rounded-md border border-hair px-2 py-1 text-[10px] text-ink-faint hover:text-ink-soft"
+              >
+                All
+              </button>
+              <button
+                onClick={() => setSelectedIds([])}
+                className="rounded-md border border-hair px-2 py-1 text-[10px] text-ink-faint hover:text-ink-soft"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
+            {guide.segments.map((segment) => {
+              const reached = isSegmentReached(segment, wordPosition);
+              const selected = selectedIds.includes(segment.id);
+              return (
+                <button
+                  key={segment.id}
+                  onClick={() => {
+                    if (reached) toggleSegment(segment.id);
+                  }}
+                  disabled={!reached}
+                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                    selected
+                      ? "border-lumina-gold/40 bg-lumina-gold/[0.07]"
+                      : "border-hair bg-ink/[0.02] hover:bg-ink/[0.04]"
+                  } disabled:cursor-default disabled:opacity-45`}
+                >
+                  <span className={selected ? "mt-0.5 text-lumina-gold/75" : "mt-0.5 text-ink-faint"}>
+                    {selected ? <CheckCircle2 size={13} /> : reached ? <Circle size={13} /> : <Lock size={13} />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12px] font-medium text-ink/85">{segment.title}</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-ink-faint">{segment.chapterTitle}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={runGenerateFlashcards}
+            disabled={selectedSegments.length === 0 || isGeneratingCards}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-4 py-2.5 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
+          >
+            {isGeneratingCards ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {isGeneratingCards ? "Generating Cards" : "Generate Flashcards"}
+          </button>
+          {flashcardError && <p className="mt-2 text-[11px] leading-relaxed text-rose-400/80">{flashcardError}</p>}
+        </div>
+
+        <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Saved Cards</p>
+            <p className="text-[10px] text-ink-faint">{cards.length} total</p>
+          </div>
+          {activeCard ? (
+            <>
+              <button
+                onClick={() => setShowBack((value) => !value)}
+                className="min-h-36 w-full rounded-xl border border-lumina-gold/24 bg-lumina-gold/[0.045] px-4 py-5 text-center transition-colors hover:bg-lumina-gold/[0.065]"
+              >
+                <p className="text-[10px] uppercase tracking-[0.16em] text-lumina-gold/65">
+                  {showBack ? "Back" : "Front"} · {activeCard.type}
+                </p>
+                <p className="mt-3 text-[14px] leading-relaxed text-ink/88">
+                  {showBack ? activeCard.back : activeCard.front}
+                </p>
+                {activeCard.tags.length > 0 && (
+                  <p className="mt-3 text-[10px] text-ink-faint">{activeCard.tags.join(" · ")}</p>
+                )}
+              </button>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                    setActiveCardIndex((index) => Math.max(0, index - 1));
+                    setShowBack(false);
+                  }}
+                  className="rounded-lg border border-hair px-3 py-2 text-xs text-ink-faint hover:text-ink-soft"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveCardIndex((index) => Math.min(cards.length - 1, index + 1));
+                    setShowBack(false);
+                  }}
+                  className="rounded-lg border border-hair px-3 py-2 text-xs text-ink-faint hover:text-ink-soft"
+                >
+                  Next
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="py-8 text-center text-xs text-ink-faint">No flashcards saved yet.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function QuizSelector({
   guide,
   activeStructure,
@@ -279,7 +604,6 @@ function QuizSelector({
   onQuizSaved,
   onAttemptSaved,
   onBadgeSaved,
-  onClose,
 }: {
   guide: StudyGuide;
   activeStructure: BookStructure | null;
@@ -290,7 +614,6 @@ function QuizSelector({
   onQuizSaved: (quiz: StudyQuiz) => void;
   onAttemptSaved: (attempt: StudyQuizAttempt) => void;
   onBadgeSaved: (badge: StudyBadgeAward) => void;
-  onClose: () => void;
 }) {
   const [mode, setMode] = useState<QuizMode>("segment");
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
@@ -391,13 +714,7 @@ function QuizSelector({
             Choose the scope before generating a quiz.
           </p>
         </div>
-        <button
-          onClick={onClose}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-ink/[0.06] hover:text-ink-soft"
-          aria-label="Close quiz selector"
-        >
-          <X size={14} />
-        </button>
+        <ListChecks size={15} className="text-lumina-gold/70" />
       </div>
 
       <div className="grid grid-cols-3 gap-1 rounded-lg border border-hair bg-black/16 p-1">

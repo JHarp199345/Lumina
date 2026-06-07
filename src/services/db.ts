@@ -20,6 +20,7 @@ import type {
   StudyQuiz,
   StudyQuizAttempt,
   StudyBadgeAward,
+  StudyFlashcard,
 } from "@/types";
 
 let _db: Database | null = null;
@@ -142,6 +143,15 @@ async function initSchema(db: Database): Promise<void> {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS study_flashcards (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      card_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS image_cache (
       id TEXT PRIMARY KEY,
       book_id TEXT NOT NULL,
@@ -213,6 +223,7 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quiz_attempts WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_flashcards WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
 }
@@ -540,6 +551,32 @@ export async function dbLoadStudyBadgeAwards(bookId: string): Promise<StudyBadge
   });
 }
 
+export async function dbSaveStudyFlashcards(cards: StudyFlashcard[]): Promise<void> {
+  const db = await getDb();
+  for (const card of cards) {
+    await db.execute(
+      `INSERT OR REPLACE INTO study_flashcards (id, book_id, card_json, created_at)
+       VALUES ($1, $2, $3, $4)`,
+      [card.id, card.bookId, JSON.stringify(card), card.createdAt]
+    );
+  }
+}
+
+export async function dbLoadStudyFlashcards(bookId: string): Promise<StudyFlashcard[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT card_json FROM study_flashcards WHERE book_id = $1 ORDER BY created_at ASC`,
+    [bookId]
+  );
+  return rows.flatMap((row) => {
+    try {
+      return [JSON.parse(String(row.card_json)) as StudyFlashcard];
+    } catch {
+      return [];
+    }
+  });
+}
+
 // ─── Image Cache ──────────────────────────────────────────────────────────────
 
 export async function dbSaveImageCache(image: CachedImage): Promise<void> {
@@ -638,6 +675,7 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
     [`DELETE FROM study_guides WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_quizzes WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_quiz_attempts WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM study_flashcards WHERE book_id = $1`, [bookId]],
     [`DELETE FROM image_cache WHERE book_id = $1`, [bookId]],
     [`DELETE FROM book_settings WHERE book_id = $1`, [bookId]],
   ] as [string, unknown[]][];

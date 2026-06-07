@@ -24,6 +24,7 @@ import type {
   StudyQuiz,
   StudyQuizAttempt,
   StudyBadgeAward,
+  StudyFlashcard,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -91,6 +92,8 @@ export interface StorageAdapter {
   loadStudyQuizAttempts(bookId: string): Promise<StudyQuizAttempt[]>;
   saveStudyBadgeAward(award: StudyBadgeAward): Promise<void>;
   loadStudyBadgeAwards(bookId: string): Promise<StudyBadgeAward[]>;
+  saveStudyFlashcards(cards: StudyFlashcard[]): Promise<void>;
+  loadStudyFlashcards(bookId: string): Promise<StudyFlashcard[]>;
 
   // ── Style seed ────────────────────────────────────────────────────────────
 

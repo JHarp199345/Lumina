@@ -646,3 +646,22 @@ export interface StudyBadgeAward {
   score: number;
   awardedAt: string;
 }
+
+export type StudyFlashcardType =
+  | "term"
+  | "character"
+  | "event"
+  | "concept"
+  | "cause-effect"
+  | "question";
+
+export interface StudyFlashcard {
+  id: string;
+  bookId: string;
+  segmentIds: string[];
+  front: string;
+  back: string;
+  type: StudyFlashcardType;
+  tags: string[];
+  createdAt: string;
+}

@@ -24,6 +24,7 @@ import type {
   StudyQuiz,
   StudyQuizAttempt,
   StudyBadgeAward,
+  StudyFlashcard,
 } from "@/types";
 import {
   openEpubDialog,
@@ -66,6 +67,8 @@ import {
   dbLoadStudyQuizAttempts,
   dbSaveStudyBadgeAward,
   dbLoadStudyBadgeAwards,
+  dbSaveStudyFlashcards,
+  dbLoadStudyFlashcards,
   dbSaveBookStyleSeed,
   dbLoadBookStyleSeed,
   dbSaveImageCache,
@@ -214,6 +217,14 @@ export class TauriStorageAdapter implements StorageAdapter {
 
   async loadStudyBadgeAwards(bookId: string): Promise<StudyBadgeAward[]> {
     return dbLoadStudyBadgeAwards(bookId);
+  }
+
+  async saveStudyFlashcards(cards: StudyFlashcard[]): Promise<void> {
+    await dbSaveStudyFlashcards(cards);
+  }
+
+  async loadStudyFlashcards(bookId: string): Promise<StudyFlashcard[]> {
+    return dbLoadStudyFlashcards(bookId);
   }
 
   // ── Style seed ───────────────────────────────────────────────────────────
