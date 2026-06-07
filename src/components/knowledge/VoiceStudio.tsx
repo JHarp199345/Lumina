@@ -13,9 +13,7 @@ import {
 } from "lucide-react";
 import { useAudioStore } from "@/store/audioStore";
 import { useBookStore } from "@/store/bookStore";
-import { useDrawerStore } from "@/store/drawerStore";
 import { useReaderStore } from "@/store/readerStore";
-import { useStudyStore } from "@/store/studyStore";
 import { useApiKeys } from "@/hooks/useApiKeys";
 import { storage } from "@/storage";
 import {
@@ -23,16 +21,54 @@ import {
   ELEVENLABS_KEY_NAME,
   VOICE_PRESETS,
   fetchElevenLabsVoices,
-  generateSegmentAudio,
+  generateChapterGroupAudio,
   hashText,
   loadCachedElevenLabsVoices,
 } from "@/pipeline/audioDirector";
-import type { AudioArtifact, AudioStylePreset, AudioVoicePreset, StudySegment } from "@/types";
+import type { ChapterAudioUnit } from "@/pipeline/audioDirector";
+import type { AudioArtifact, AudioStylePreset, AudioVoicePreset, Chapter } from "@/types";
 
-function segmentTextHash(segment: StudySegment, rawText: string | undefined): string {
-  if (!rawText) return "";
-  const words = rawText.split(/\s+/).filter(Boolean);
-  return hashText(words.slice(segment.startWordOffset, segment.endWordOffset).join(" ").slice(0, 8500));
+function normalizeNarrationTitle(title: string): string {
+  const cleaned = title
+    .replace(/\s*[•-]\s*Part\s+\d+\s*$/i, "")
+    .replace(/\s+Part\s+\d+\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || title.trim() || "Untitled Chapter";
+}
+
+function chapterGroupTextHash(unit: ChapterAudioUnit | null | undefined): string {
+  if (!unit) return "";
+  const text = unit.chapters
+    .map((chapter) => (chapter.rawText ?? "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n\n");
+  return text ? hashText(text) : "";
+}
+
+function buildNarrationChapters(chapters: Chapter[]): ChapterAudioUnit[] {
+  const units: ChapterAudioUnit[] = [];
+
+  for (const chapter of chapters) {
+    const title = normalizeNarrationTitle(chapter.title || `Chapter ${chapter.index + 1}`);
+    const last = units[units.length - 1];
+    if (last && last.title === title) {
+      last.chapters.push(chapter);
+      last.endChapterIndex = chapter.index;
+      last.wordCount += chapter.wordCount;
+      continue;
+    }
+    units.push({
+      id: `chapter-group-${chapter.index}`,
+      title,
+      chapters: [chapter],
+      startChapterIndex: chapter.index,
+      endChapterIndex: chapter.index,
+      wordCount: chapter.wordCount,
+    });
+  }
+
+  return units;
 }
 
 function formatTime(seconds: number): string {
@@ -42,22 +78,9 @@ function formatTime(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-function findCurrentSegment(segments: StudySegment[], wordPosition: number): StudySegment | null {
-  if (segments.length === 0) return null;
-  return (
-    segments.find(
-      (segment) => wordPosition >= segment.approxWordStart && wordPosition <= segment.approxWordEnd
-    ) ??
-    [...segments].reverse().find((segment) => segment.approxWordStart <= wordPosition) ??
-    segments[0]
-  );
-}
-
 export default function VoiceStudio() {
   const { activeBook, activeStructure } = useBookStore();
-  const { guide } = useStudyStore();
-  const wordPosition = useReaderStore((s) => s.wordPosition);
-  const setDrawerView = useDrawerStore((s) => s.setView);
+  const currentChapterIndex = useReaderStore((s) => s.currentChapterIndex);
   const { saveElevenLabsKey } = useApiKeys();
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -92,8 +115,7 @@ export default function VoiceStudio() {
     setError,
   } = useAudioStore();
 
-  const currentGuide = guide && activeBook && guide.bookId === activeBook.id ? guide : null;
-  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [voices, setVoices] = useState<AudioVoicePreset[]>(() => {
     const cached = loadCachedElevenLabsVoices();
     return cached.length > 0 ? cached : VOICE_PRESETS;
@@ -135,44 +157,59 @@ export default function VoiceStudio() {
     };
   }, [activeBook, bookId, mount]);
 
-  const currentSegment = useMemo(() => {
-    if (!currentGuide) return null;
-    return findCurrentSegment(currentGuide.segments, wordPosition);
-  }, [currentGuide, wordPosition]);
+  const chapters = activeStructure?.chapters ?? [];
+  const narrationChapters = useMemo(() => buildNarrationChapters(chapters), [chapters]);
+  const currentNarrationChapter = useMemo(() => {
+    if (narrationChapters.length === 0) return null;
+    return (
+      narrationChapters.find(
+        (unit) => currentChapterIndex >= unit.startChapterIndex && currentChapterIndex <= unit.endChapterIndex
+      ) ?? narrationChapters[0]
+    );
+  }, [currentChapterIndex, narrationChapters]);
 
   useEffect(() => {
-    if (!selectedSegmentId && currentSegment) {
-      setSelectedSegmentId(currentSegment.id);
-      setActiveSegment(currentSegment.id);
+    if (selectedUnitId === null && currentNarrationChapter) {
+      setSelectedUnitId(currentNarrationChapter.id);
+      setActiveSegment(currentNarrationChapter.id);
     }
-  }, [currentSegment, selectedSegmentId, setActiveSegment]);
+  }, [currentNarrationChapter, selectedUnitId, setActiveSegment]);
 
-  const selectedSegment =
-    currentGuide?.segments.find((segment) => segment.id === selectedSegmentId) ?? currentSegment;
+  useEffect(() => {
+    setSelectedUnitId(null);
+    setActiveAudio(null);
+  }, [activeBook?.id, setActiveAudio]);
+
+  const selectedUnit =
+    narrationChapters.find((unit) => unit.id === selectedUnitId) ?? currentNarrationChapter;
   const selectedVoice = voices.find((voice) => voice.id === selectedVoiceId) ?? voices[0] ?? VOICE_PRESETS[0];
   const selectedStyle =
     AUDIO_STYLE_PRESETS.find((style) => style.id === selectedStylePresetId) ?? AUDIO_STYLE_PRESETS[0];
+
+  useEffect(() => {
+    if (selectedUnit) setActiveSegment(selectedUnit.id);
+  }, [selectedUnit, setActiveSegment]);
 
   useEffect(() => {
     if (selectedVoiceId === "kore" && voices[0]?.id) setVoice(voices[0].id);
   }, [selectedVoiceId, setVoice, voices]);
 
   const matchingArtifact = useMemo(() => {
-    if (!selectedSegment || !activeStructure) return null;
-    const chapter = activeStructure.chapters.find((item) => item.index === selectedSegment.chapterIndex);
-    const textHash = segmentTextHash(selectedSegment, chapter?.rawText);
+    if (!selectedUnit) return null;
+    const textHash = chapterGroupTextHash(selectedUnit);
     return (
       artifacts.find(
         (artifact) =>
           artifact.status === "ready" &&
           (artifact.provider ?? "gemini") === "elevenlabs" &&
-          artifact.segmentId === selectedSegment.id &&
+          (artifact.scope ?? (artifact.segmentId.startsWith("chapter-") ? "chapter" : "segment")) === "chapter" &&
+          artifact.segmentId === selectedUnit.id &&
           (artifact.voiceProviderId ?? artifact.voiceId) === selectedVoice.providerVoiceName &&
           artifact.stylePresetId === selectedStyle.id &&
           (!textHash || artifact.textHash === textHash)
       ) ?? null
     );
-  }, [activeStructure, artifacts, selectedSegment, selectedStyle.id, selectedVoice.id]);
+  }, [artifacts, selectedStyle.id, selectedUnit, selectedVoice.id, selectedVoice.providerVoiceName]);
 
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeAudioId) ?? matchingArtifact;
 
@@ -202,8 +239,8 @@ export default function VoiceStudio() {
   };
 
   const runGenerate = async (mode: "saved" | "streamed" = "saved", force = false) => {
-    if (!selectedSegment || !activeStructure) {
-      setError("Choose a segment first.");
+    if (!selectedUnit || !activeStructure) {
+      setError("Choose a chapter first.");
       return;
     }
     if (matchingArtifact && !force) {
@@ -220,8 +257,8 @@ export default function VoiceStudio() {
     setIsGenerating(true);
     setProgress(mode === "streamed" ? "Streaming narration" : "Generating narration");
     try {
-      const generated = await generateSegmentAudio({
-        segment: selectedSegment,
+      const generated = await generateChapterGroupAudio({
+        unit: selectedUnit,
         structure: activeStructure,
         apiKey,
         voice: selectedVoice,
@@ -286,10 +323,15 @@ export default function VoiceStudio() {
   };
 
   const queueNext = () => {
-    if (!currentGuide || !selectedSegment) return;
-    const index = currentGuide.segments.findIndex((segment) => segment.id === selectedSegment.id);
-    const next = currentGuide.segments[index + 1];
-    if (next) queueSegment(next.id);
+    if (!selectedUnit) return;
+    const index = narrationChapters.findIndex((unit) => unit.id === selectedUnit.id);
+    const next = narrationChapters[index + 1];
+    if (next) {
+      setSelectedUnitId(next.id);
+      setActiveSegment(next.id);
+      queueSegment(next.id);
+      setActiveAudio(null);
+    }
   };
 
   const playVoicePreview = async (voice: AudioVoicePreset) => {
@@ -336,25 +378,18 @@ export default function VoiceStudio() {
     );
   }
 
-  if (!currentGuide) {
+  if (!activeStructure || narrationChapters.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
         <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-lumina-gold/20 bg-lumina-gold/[0.06] text-lumina-gold/80">
           <Headphones size={22} />
         </span>
         <div className="space-y-1.5">
-          <p className="text-sm font-medium text-ink/85">Voice Needs a Study Guide</p>
+          <p className="text-sm font-medium text-ink/85">Voice Needs a Readable Book</p>
           <p className="max-w-xs text-xs leading-relaxed text-ink-faint">
-            Narration is generated from saved Study Guide segments so audio stays organized.
+            Open an imported book with detected chapters and Voice Studio will build its own audio library.
           </p>
         </div>
-        <button
-          onClick={() => setDrawerView("study-guide")}
-          className="flex items-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-4 py-2.5 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15"
-        >
-          <Sparkles size={14} />
-          Open Study Guide
-        </button>
       </div>
     );
   }
@@ -436,25 +471,26 @@ export default function VoiceStudio() {
         )}
 
         <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Segment</p>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Chapter</p>
           <select
-            value={selectedSegment?.id ?? ""}
+            value={selectedUnit?.id ?? ""}
             onChange={(event) => {
-              setSelectedSegmentId(event.target.value);
+              setSelectedUnitId(event.target.value);
               setActiveSegment(event.target.value);
               setActiveAudio(null);
             }}
             className="mt-2 w-full rounded-lg border border-hair bg-surface-dark px-3 py-2 text-xs text-ink-soft focus:outline-none"
           >
-            {currentGuide.segments.map((segment) => (
-              <option key={segment.id} value={segment.id}>
-                {segment.title}
+            {narrationChapters.map((unit) => (
+              <option key={unit.id} value={unit.id}>
+                {unit.title}
               </option>
             ))}
           </select>
-          {selectedSegment?.summary && (
-            <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">{selectedSegment.summary}</p>
-          )}
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+            Voice Studio saves narration as chapter audio, separate from Study Guide segments.
+            {selectedUnit ? ` ${selectedUnit.wordCount.toLocaleString()} words in this chapter.` : ""}
+          </p>
         </div>
 
         <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
@@ -524,7 +560,7 @@ export default function VoiceStudio() {
                 {matchingArtifact ? "Cached Narration" : "Not Generated"}
               </p>
               <p className="mt-1 truncate text-sm font-medium text-ink/88">
-                {selectedSegment?.title ?? "Choose a segment"}
+                {selectedUnit?.title ?? "Choose a chapter"}
               </p>
             </div>
             {matchingArtifact && <CheckCircle2 size={16} className="shrink-0 text-lumina-gold/75" />}
@@ -541,7 +577,7 @@ export default function VoiceStudio() {
             </button>
             <button
               onClick={() => runGenerate("saved")}
-              disabled={isGenerating || !selectedSegment}
+              disabled={isGenerating || !selectedUnit}
               className="flex items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-2.5 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
             >
               {isGenerating ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
@@ -552,14 +588,14 @@ export default function VoiceStudio() {
           <div className="mt-2 grid grid-cols-2 gap-2">
             <button
               onClick={() => runGenerate("streamed", true)}
-              disabled={isGenerating || !selectedSegment}
+              disabled={isGenerating || !selectedUnit}
               className="rounded-lg border border-hair bg-ink/[0.03] px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-40"
             >
               Stream Now
             </button>
             <button
               onClick={() => runGenerate("saved", true)}
-              disabled={isGenerating || !selectedSegment}
+              disabled={isGenerating || !selectedUnit}
               className="rounded-lg border border-hair bg-ink/[0.03] px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-40"
             >
               Regenerate Explicitly
@@ -607,12 +643,12 @@ export default function VoiceStudio() {
             onClick={queueNext}
             className="mt-3 w-full rounded-lg border border-hair px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft"
           >
-            Queue Next Segment {queue.length > 0 ? `(${queue.length})` : ""}
+            Queue Next Chapter {queue.length > 0 ? `(${queue.length})` : ""}
           </button>
         </div>
 
         <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Generated Audio</p>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Voice Library</p>
           {artifacts.length === 0 ? (
             <p className="py-5 text-center text-xs text-ink-faint">No narration saved yet.</p>
           ) : (
@@ -631,7 +667,7 @@ export default function VoiceStudio() {
                     {artifact.segmentTitle}
                   </span>
                   <span className="mt-0.5 block text-[10px] text-ink-faint">
-                    {artifact.provider ?? "gemini"} · {artifact.voiceId} · {artifact.mode ?? "saved"}
+                    {artifact.scope ?? "segment"} · {artifact.provider ?? "gemini"} · {artifact.voiceId} · {artifact.mode ?? "saved"}
                   </span>
                 </button>
               ))}

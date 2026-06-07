@@ -672,6 +672,7 @@ export interface StudyFlashcard {
 export type AudioArtifactStatus = "queued" | "generating" | "ready" | "failed";
 export type AudioProvider = "gemini" | "elevenlabs";
 export type AudioGenerationMode = "saved" | "streamed";
+export type AudioArtifactScope = "segment" | "chapter";
 
 export interface AudioVoicePreset {
   id: string;
@@ -698,6 +699,7 @@ export interface AudioArtifact {
   segmentTitle: string;
   voiceId: string;
   provider?: AudioProvider;
+  scope?: AudioArtifactScope;
   voiceProviderId?: string;
   modelId?: string;
   mode?: AudioGenerationMode;

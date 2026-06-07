@@ -12,6 +12,7 @@ import type {
   AudioStylePreset,
   AudioVoicePreset,
   BookStructure,
+  Chapter,
   StudySegment,
 } from "@/types";
 
@@ -94,6 +95,15 @@ export interface SegmentAudioText {
   absoluteEndWord: number;
 }
 
+export interface ChapterAudioUnit {
+  id: string;
+  title: string;
+  chapters: Chapter[];
+  startChapterIndex: number;
+  endChapterIndex: number;
+  wordCount: number;
+}
+
 export function getSegmentAudioText(segment: StudySegment, structure: BookStructure): SegmentAudioText {
   const chapter = structure.chapters.find((item) => item.index === segment.chapterIndex);
   if (!chapter?.rawText) return { text: "", absoluteStartWord: segment.approxWordStart, absoluteEndWord: segment.approxWordEnd };
@@ -106,6 +116,37 @@ export function getSegmentAudioText(segment: StudySegment, structure: BookStruct
     text,
     absoluteStartWord: wordsBeforeChapter + segment.startWordOffset,
     absoluteEndWord: wordsBeforeChapter + segment.startWordOffset + text.split(/\s+/).filter(Boolean).length,
+  };
+}
+
+export function getChapterAudioText(chapter: Chapter, structure: BookStructure): SegmentAudioText {
+  const text = (chapter.rawText ?? "").replace(/\s+/g, " ").trim();
+  const wordsBeforeChapter = structure.chapters
+    .slice(0, chapter.index)
+    .reduce((sum, item) => sum + item.wordCount, 0);
+  return {
+    text,
+    absoluteStartWord: wordsBeforeChapter,
+    absoluteEndWord: wordsBeforeChapter + text.split(/\s+/).filter(Boolean).length,
+  };
+}
+
+export function getChapterGroupAudioText(chapters: Chapter[], structure: BookStructure): SegmentAudioText {
+  const usableChapters = chapters.filter((chapter) => chapter.rawText?.trim());
+  if (usableChapters.length === 0) return { text: "", absoluteStartWord: 0, absoluteEndWord: 0 };
+
+  const first = usableChapters[0];
+  const text = usableChapters
+    .map((chapter) => (chapter.rawText ?? "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n\n");
+  const wordsBeforeFirstChapter = structure.chapters
+    .slice(0, first.index)
+    .reduce((sum, item) => sum + item.wordCount, 0);
+  return {
+    text,
+    absoluteStartWord: wordsBeforeFirstChapter,
+    absoluteEndWord: wordsBeforeFirstChapter + text.split(/\s+/).filter(Boolean).length,
   };
 }
 
@@ -299,6 +340,97 @@ export async function generateSegmentAudio({
       segmentTitle: segment.title,
       voiceId: voice.id,
       provider: "elevenlabs",
+      scope: "segment",
+      voiceProviderId: voice.providerVoiceName,
+      modelId: ELEVENLABS_MODEL_ID,
+      mode,
+      stylePresetId: style.id,
+      textHash,
+      promptHash,
+      textStartPosition: absoluteStartWord,
+      textEndPosition: absoluteEndWord,
+      alignment,
+      mimeType: "audio/mpeg",
+      generatedAt,
+      generationApi: `elevenlabs:${ELEVENLABS_MODEL_ID}`,
+      status: "ready",
+    },
+    data: bytes,
+  };
+}
+
+export async function generateChapterAudio({
+  chapter,
+  structure,
+  apiKey,
+  voice,
+  style,
+  mode = "saved",
+}: {
+  chapter: Chapter;
+  structure: BookStructure;
+  apiKey: string;
+  voice: AudioVoicePreset;
+  style: AudioStylePreset;
+  mode?: AudioGenerationMode;
+}): Promise<{ artifact: Omit<AudioArtifact, "filePath">; data: Uint8Array }> {
+  return generateChapterGroupAudio({
+    unit: {
+      id: `chapter-${chapter.index}`,
+      title: chapter.title || `Chapter ${chapter.index + 1}`,
+      chapters: [chapter],
+      startChapterIndex: chapter.index,
+      endChapterIndex: chapter.index,
+      wordCount: chapter.wordCount,
+    },
+    structure,
+    apiKey,
+    voice,
+    style,
+    mode,
+  });
+}
+
+export async function generateChapterGroupAudio({
+  unit,
+  structure,
+  apiKey,
+  voice,
+  style,
+  mode = "saved",
+}: {
+  unit: ChapterAudioUnit;
+  structure: BookStructure;
+  apiKey: string;
+  voice: AudioVoicePreset;
+  style: AudioStylePreset;
+  mode?: AudioGenerationMode;
+}): Promise<{ artifact: Omit<AudioArtifact, "filePath">; data: Uint8Array }> {
+  const { text, absoluteStartWord, absoluteEndWord } = getChapterGroupAudioText(unit.chapters, structure);
+  if (text.split(/\s+/).filter(Boolean).length < 40) {
+    throw new Error("This chapter is too short for narration.");
+  }
+
+  const textHash = hashText(text);
+  const promptHash = hashText(`${text}|${style.direction}|${voice.providerVoiceName}|${ELEVENLABS_MODEL_ID}|${mode}`);
+  const data = await callElevenLabsTts({ apiKey, voice, text, style, mode });
+  if (!data.audio_base64) throw new Error("ElevenLabs response did not include audio data.");
+
+  const rawAlignment = data.normalized_alignment ?? data.alignment;
+  const alignment = buildAlignmentSpans(text, rawAlignment, absoluteStartWord);
+  const generatedAt = new Date().toISOString();
+  const bytes = base64ToBytes(data.audio_base64);
+
+  return {
+    artifact: {
+      id: `audio-${structure.bookId}-${unit.id}-${voice.id}-${style.id}-${mode}-${Date.now()}`,
+      bookId: structure.bookId,
+      segmentId: unit.id,
+      chapterIndex: unit.startChapterIndex,
+      segmentTitle: unit.title,
+      voiceId: voice.id,
+      provider: "elevenlabs",
+      scope: "chapter",
       voiceProviderId: voice.providerVoiceName,
       modelId: ELEVENLABS_MODEL_ID,
       mode,
