@@ -599,3 +599,38 @@ export interface StudyGuide {
   source: StudyGuideSource;
   segments: StudySegment[];
 }
+
+export type StudyQuizScope = "segment" | "chapter" | "book";
+export type StudyQuestionLevel = "recall" | "relationship" | "interpretation" | "synthesis";
+
+export interface StudyQuizQuestion {
+  id: string;
+  questionNumber: number;
+  level: StudyQuestionLevel;
+  question: string;
+  options: string[];
+  correctOptionIndex: number;
+  explanation: string;
+  purpose?: string;
+}
+
+export interface StudyQuiz {
+  id: string;
+  bookId: string;
+  scope: StudyQuizScope;
+  targetId: string;
+  title: string;
+  generatedAt: string;
+  questionCount: number;
+  questions: StudyQuizQuestion[];
+}
+
+export interface StudyQuizAttempt {
+  id: string;
+  quizId: string;
+  bookId: string;
+  answers: number[];
+  score: number;
+  passed: boolean;
+  completedAt: string;
+}

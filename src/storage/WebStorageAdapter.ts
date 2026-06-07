@@ -23,6 +23,8 @@ import type {
   Note,
   CachedImage,
   StudyGuide,
+  StudyQuiz,
+  StudyQuizAttempt,
 } from "@/types";
 import {
   STORES,
@@ -236,6 +238,22 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async deleteStudyGuide(bookId: string): Promise<void> {
     await dbDelete(STORES.STUDY_GUIDES, bookId);
+  }
+
+  async saveStudyQuiz(quiz: StudyQuiz): Promise<void> {
+    await dbPut(STORES.STUDY_QUIZZES, quiz);
+  }
+
+  async loadStudyQuizzes(bookId: string): Promise<StudyQuiz[]> {
+    return dbGetByIndex<StudyQuiz>(STORES.STUDY_QUIZZES, "bookId", bookId);
+  }
+
+  async saveStudyQuizAttempt(attempt: StudyQuizAttempt): Promise<void> {
+    await dbPut(STORES.STUDY_ATTEMPTS, attempt);
+  }
+
+  async loadStudyQuizAttempts(bookId: string): Promise<StudyQuizAttempt[]> {
+    return dbGetByIndex<StudyQuizAttempt>(STORES.STUDY_ATTEMPTS, "bookId", bookId);
   }
 
   // ── Style seed ───────────────────────────────────────────────────────────

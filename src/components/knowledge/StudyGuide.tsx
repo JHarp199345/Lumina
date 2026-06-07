@@ -10,7 +10,7 @@
  * The reader asks; Lumina responds.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Brain,
   Sparkles,
@@ -22,6 +22,7 @@ import {
   ListChecks,
   X,
   Lock,
+  Trophy,
 } from "lucide-react";
 import { useBookStore } from "@/store/bookStore";
 import { useStudyStore } from "@/store/studyStore";
@@ -32,6 +33,7 @@ import {
   STUDY_GUIDE_PROGRESS_STEPS,
 } from "@/pipeline/studySegmenter";
 import { refineStudyGuide } from "@/pipeline/studyRefiner";
+import { generateSegmentQuiz } from "@/pipeline/studyQuizzer";
 import {
   groupSegmentsByChapter,
   isBookComplete,
@@ -39,7 +41,7 @@ import {
   isSegmentReached,
   type StudyChapterGroup,
 } from "@/utils/studyProgress";
-import type { StudyGuide, StudySegment } from "@/types";
+import type { BookStructure, StudyGuide, StudyQuiz, StudyQuizAttempt, StudySegment } from "@/types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type QuizMode = "segment" | "chapter" | "book";
@@ -51,6 +53,28 @@ export default function StudyGuide() {
   const wordPosition = useReaderStore((s) => s.wordPosition);
   const [error, setError] = useState<string | null>(null);
   const [showQuizSelector, setShowQuizSelector] = useState(false);
+  const [quizzes, setQuizzes] = useState<StudyQuiz[]>([]);
+  const [attempts, setAttempts] = useState<StudyQuizAttempt[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeBook) {
+      setQuizzes([]);
+      setAttempts([]);
+      return;
+    }
+    Promise.all([
+      storage.loadStudyQuizzes(activeBook.id).catch(() => [] as StudyQuiz[]),
+      storage.loadStudyQuizAttempts(activeBook.id).catch(() => [] as StudyQuizAttempt[]),
+    ]).then(([loadedQuizzes, loadedAttempts]) => {
+      if (cancelled) return;
+      setQuizzes(loadedQuizzes);
+      setAttempts(loadedAttempts);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBook?.id]);
 
   // No book open — nothing to study yet.
   if (!activeBook) {
@@ -179,7 +203,12 @@ export default function StudyGuide() {
         {showQuizSelector && (
           <QuizSelector
             guide={guide}
+            activeStructure={activeStructure}
             wordPosition={wordPosition}
+            quizzes={quizzes}
+            attempts={attempts}
+            onQuizSaved={(quiz) => setQuizzes((current) => [...current.filter((q) => q.id !== quiz.id), quiz])}
+            onAttemptSaved={(attempt) => setAttempts((current) => [...current, attempt])}
             onClose={() => setShowQuizSelector(false)}
           />
         )}
@@ -219,11 +248,21 @@ export default function StudyGuide() {
 
 function QuizSelector({
   guide,
+  activeStructure,
   wordPosition,
+  quizzes,
+  attempts,
+  onQuizSaved,
+  onAttemptSaved,
   onClose,
 }: {
   guide: StudyGuide;
+  activeStructure: BookStructure | null;
   wordPosition: number;
+  quizzes: StudyQuiz[];
+  attempts: StudyQuizAttempt[];
+  onQuizSaved: (quiz: StudyQuiz) => void;
+  onAttemptSaved: (attempt: StudyQuizAttempt) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<QuizMode>("segment");
@@ -231,12 +270,21 @@ function QuizSelector({
   const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(null);
   const [allowSpoilers, setAllowSpoilers] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
+  const [activeQuiz, setActiveQuiz] = useState<StudyQuiz | null>(null);
+  const [quizError, setQuizError] = useState<string | null>(null);
 
   const quizSegments = guide.segments.filter((segment) => segment.quizWorthy);
   const chapters = groupSegmentsByChapter(guide).filter((chapter) => chapter.quizWorthy);
   const selectedSegment = quizSegments.find((segment) => segment.id === selectedSegmentId) ?? null;
   const selectedChapter = chapters.find((chapter) => chapter.chapterIndex === selectedChapterIndex) ?? null;
   const bookComplete = isBookComplete(guide, wordPosition);
+  const existingSegmentQuiz = selectedSegment
+    ? quizzes.find((quiz) => quiz.scope === "segment" && quiz.targetId === selectedSegment.id)
+    : null;
+  const latestAttempt = activeQuiz
+    ? [...attempts].reverse().find((attempt) => attempt.quizId === activeQuiz.id)
+    : null;
 
   const canGenerate =
     mode === "segment"
@@ -257,7 +305,42 @@ function QuizSelector({
 
   const handleGenerate = () => {
     if (!canGenerate) return;
-    setNotice("Quiz generation is the next build phase. This selector is ready for it.");
+    setNotice(null);
+    setQuizError(null);
+    if (mode !== "segment") {
+      setNotice("Chapter and whole-book quiz generation come next. Segment quizzes are live now.");
+      return;
+    }
+    if (!selectedSegment) return;
+    if (existingSegmentQuiz) {
+      setActiveQuiz(existingSegmentQuiz);
+      return;
+    }
+    void generateSelectedSegmentQuiz(selectedSegment);
+  };
+
+  const generateSelectedSegmentQuiz = async (segment: StudySegment) => {
+    if (!activeStructure) {
+      setQuizError("The book structure is still loading. Try again in a moment.");
+      return;
+    }
+    const apiKey = await storage.loadApiKey("lumina_google_ai_key");
+    if (!apiKey) {
+      setQuizError("Add a Google AI key in Settings to generate quizzes.");
+      return;
+    }
+    setIsGeneratingQuiz(true);
+    try {
+      const quiz = await generateSegmentQuiz({ segment, structure: activeStructure, apiKey });
+      await storage.saveStudyQuiz(quiz);
+      onQuizSaved(quiz);
+      setActiveQuiz(quiz);
+    } catch (err) {
+      console.error("[StudyGuide] Quiz generation failed:", err);
+      setQuizError(err instanceof Error ? err.message : "Quiz generation failed.");
+    } finally {
+      setIsGeneratingQuiz(false);
+    }
   };
 
   return (
@@ -365,6 +448,12 @@ function QuizSelector({
         <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Selected</p>
         <p className="mt-1 text-sm font-medium text-ink/85">{targetLabel}</p>
         <p className="mt-1 text-[11px] text-ink-faint">{questionRange}</p>
+        {mode === "segment" && existingSegmentQuiz && (
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-lumina-gold/70">
+            <CheckCircle2 size={12} />
+            Quiz generated
+          </p>
+        )}
         {!canGenerate && (
           <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-ink-faint">
             <Lock size={12} className="mt-0.5 shrink-0" />
@@ -376,15 +465,145 @@ function QuizSelector({
       </div>
 
       {notice && <p className="mt-2 text-[11px] leading-relaxed text-lumina-gold/70">{notice}</p>}
+      {quizError && <p className="mt-2 text-[11px] leading-relaxed text-rose-400/80">{quizError}</p>}
+
+      {activeQuiz && (
+        <QuizRunner
+          quiz={activeQuiz}
+          latestAttempt={latestAttempt}
+          onClose={() => setActiveQuiz(null)}
+          onComplete={async (answers) => {
+            const correct = answers.reduce(
+              (sum, answer, index) => sum + (answer === activeQuiz.questions[index]?.correctOptionIndex ? 1 : 0),
+              0
+            );
+            const score = Math.round((correct / activeQuiz.questions.length) * 100);
+            const attempt: StudyQuizAttempt = {
+              id: `attempt-${activeQuiz.id}-${Date.now()}`,
+              quizId: activeQuiz.id,
+              bookId: activeQuiz.bookId,
+              answers,
+              score,
+              passed: score >= 70,
+              completedAt: new Date().toISOString(),
+            };
+            await storage.saveStudyQuizAttempt(attempt);
+            onAttemptSaved(attempt);
+          }}
+        />
+      )}
 
       <button
         onClick={handleGenerate}
-        disabled={!canGenerate}
+        disabled={!canGenerate || isGeneratingQuiz}
         className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-4 py-2.5 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
       >
-        <Sparkles size={14} />
-        Generate Quiz
+        {isGeneratingQuiz ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+        {existingSegmentQuiz && mode === "segment" ? "Take Quiz" : isGeneratingQuiz ? "Generating Quiz" : "Generate Quiz"}
       </button>
+    </div>
+  );
+}
+
+function QuizRunner({
+  quiz,
+  latestAttempt,
+  onClose,
+  onComplete,
+}: {
+  quiz: StudyQuiz;
+  latestAttempt?: StudyQuizAttempt | null;
+  onClose: () => void;
+  onComplete: (answers: number[]) => Promise<void>;
+}) {
+  const [answers, setAnswers] = useState<number[]>(() => Array(quiz.questions.length).fill(-1));
+  const [submitted, setSubmitted] = useState(Boolean(latestAttempt));
+  const displayAnswers = submitted && latestAttempt ? latestAttempt.answers : answers;
+  const score = latestAttempt?.score;
+
+  const submit = async () => {
+    if (answers.some((answer) => answer < 0)) return;
+    await onComplete(answers);
+    setSubmitted(true);
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-lumina-gold/24 bg-lumina-gold/[0.045] p-3">
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-lumina-gold/70">Segment Quiz</p>
+          <p className="mt-1 text-sm font-medium text-ink/85">{quiz.title}</p>
+          {submitted && score != null && (
+            <p className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-faint">
+              <Trophy size={12} className={score >= 70 ? "text-lumina-gold/75" : "text-ink-faint"} />
+              Score: {score}%
+            </p>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint hover:bg-ink/[0.06] hover:text-ink-soft"
+          aria-label="Close quiz"
+        >
+          <X size={13} />
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {quiz.questions.map((question, questionIndex) => {
+          const selected = displayAnswers[questionIndex] ?? -1;
+          return (
+            <div key={question.id} className="rounded-lg border border-hair bg-surface-dark/55 p-3">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-ink-faint">
+                Question {question.questionNumber} of {quiz.questions.length}
+              </p>
+              <p className="mt-1 text-[13px] leading-relaxed text-ink/88">{question.question}</p>
+              <div className="mt-2 space-y-1.5">
+                {question.options.map((option, optionIndex) => {
+                  const isSelected = selected === optionIndex;
+                  const isCorrect = submitted && question.correctOptionIndex === optionIndex;
+                  const isWrong = submitted && isSelected && !isCorrect;
+                  return (
+                    <button
+                      key={option}
+                      onClick={() => {
+                        if (submitted) return;
+                        setAnswers((current) =>
+                          current.map((answer, index) => (index === questionIndex ? optionIndex : answer))
+                        );
+                      }}
+                      className={`w-full rounded-md border px-2.5 py-2 text-left text-[12px] leading-relaxed transition-colors ${
+                        isCorrect
+                          ? "border-lumina-gold/45 bg-lumina-gold/[0.09] text-ink"
+                          : isWrong
+                            ? "border-rose-400/35 bg-rose-400/[0.08] text-ink"
+                            : isSelected
+                              ? "border-lumina-gold/35 bg-lumina-gold/[0.055] text-ink"
+                              : "border-hair bg-ink/[0.025] text-ink-soft hover:bg-ink/[0.045]"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+              {submitted && (
+                <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">{question.explanation}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {!submitted && (
+        <button
+          onClick={submit}
+          disabled={answers.some((answer) => answer < 0)}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-4 py-2.5 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
+        >
+          Submit Quiz
+        </button>
+      )}
     </div>
   );
 }

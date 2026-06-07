@@ -21,6 +21,8 @@ import type {
   Note,
   CachedImage,
   StudyGuide,
+  StudyQuiz,
+  StudyQuizAttempt,
 } from "@/types";
 import {
   openEpubDialog,
@@ -57,6 +59,10 @@ import {
   dbSaveStudyGuide,
   dbLoadStudyGuide,
   dbDeleteStudyGuide,
+  dbSaveStudyQuiz,
+  dbLoadStudyQuizzes,
+  dbSaveStudyQuizAttempt,
+  dbLoadStudyQuizAttempts,
   dbSaveBookStyleSeed,
   dbLoadBookStyleSeed,
   dbSaveImageCache,
@@ -181,6 +187,22 @@ export class TauriStorageAdapter implements StorageAdapter {
 
   async deleteStudyGuide(bookId: string): Promise<void> {
     await dbDeleteStudyGuide(bookId);
+  }
+
+  async saveStudyQuiz(quiz: StudyQuiz): Promise<void> {
+    await dbSaveStudyQuiz(quiz);
+  }
+
+  async loadStudyQuizzes(bookId: string): Promise<StudyQuiz[]> {
+    return dbLoadStudyQuizzes(bookId);
+  }
+
+  async saveStudyQuizAttempt(attempt: StudyQuizAttempt): Promise<void> {
+    await dbSaveStudyQuizAttempt(attempt);
+  }
+
+  async loadStudyQuizAttempts(bookId: string): Promise<StudyQuizAttempt[]> {
+    return dbLoadStudyQuizAttempts(bookId);
   }
 
   // ── Style seed ───────────────────────────────────────────────────────────

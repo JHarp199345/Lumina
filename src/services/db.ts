@@ -17,6 +17,8 @@ import type {
   CachedImage,
   StyleSeedId,
   StudyGuide,
+  StudyQuiz,
+  StudyQuizAttempt,
 } from "@/types";
 
 let _db: Database | null = null;
@@ -111,6 +113,25 @@ async function initSchema(db: Database): Promise<void> {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS study_quizzes (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      quiz_json TEXT NOT NULL,
+      generated_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS study_quiz_attempts (
+      id TEXT PRIMARY KEY,
+      quiz_id TEXT NOT NULL,
+      book_id TEXT NOT NULL,
+      attempt_json TEXT NOT NULL,
+      completed_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS image_cache (
       id TEXT PRIMARY KEY,
       book_id TEXT NOT NULL,
@@ -181,6 +202,8 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM notes WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_quiz_attempts WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
 }
@@ -436,6 +459,54 @@ export async function dbDeleteStudyGuide(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1`, [bookId]);
 }
 
+export async function dbSaveStudyQuiz(quiz: StudyQuiz): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO study_quizzes (id, book_id, quiz_json, generated_at)
+     VALUES ($1, $2, $3, $4)`,
+    [quiz.id, quiz.bookId, JSON.stringify(quiz), quiz.generatedAt]
+  );
+}
+
+export async function dbLoadStudyQuizzes(bookId: string): Promise<StudyQuiz[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT quiz_json FROM study_quizzes WHERE book_id = $1 ORDER BY generated_at ASC`,
+    [bookId]
+  );
+  return rows.flatMap((row) => {
+    try {
+      return [JSON.parse(String(row.quiz_json)) as StudyQuiz];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export async function dbSaveStudyQuizAttempt(attempt: StudyQuizAttempt): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO study_quiz_attempts (id, quiz_id, book_id, attempt_json, completed_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [attempt.id, attempt.quizId, attempt.bookId, JSON.stringify(attempt), attempt.completedAt]
+  );
+}
+
+export async function dbLoadStudyQuizAttempts(bookId: string): Promise<StudyQuizAttempt[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT attempt_json FROM study_quiz_attempts WHERE book_id = $1 ORDER BY completed_at ASC`,
+    [bookId]
+  );
+  return rows.flatMap((row) => {
+    try {
+      return [JSON.parse(String(row.attempt_json)) as StudyQuizAttempt];
+    } catch {
+      return [];
+    }
+  });
+}
+
 // ─── Image Cache ──────────────────────────────────────────────────────────────
 
 export async function dbSaveImageCache(image: CachedImage): Promise<void> {
@@ -533,6 +604,8 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
     [`DELETE FROM notes WHERE book_id = $1`, [bookId]],
     [`DELETE FROM semantic_maps WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_guides WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM study_quizzes WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM study_quiz_attempts WHERE book_id = $1`, [bookId]],
     [`DELETE FROM image_cache WHERE book_id = $1`, [bookId]],
     [`DELETE FROM book_settings WHERE book_id = $1`, [bookId]],
   ] as [string, unknown[]][];

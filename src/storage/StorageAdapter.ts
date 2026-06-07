@@ -21,6 +21,8 @@ import type {
   Note,
   CachedImage,
   StudyGuide,
+  StudyQuiz,
+  StudyQuizAttempt,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -82,6 +84,10 @@ export interface StorageAdapter {
   saveStudyGuide(guide: StudyGuide): Promise<void>;
   loadStudyGuide(bookId: string): Promise<StudyGuide | null>;
   deleteStudyGuide(bookId: string): Promise<void>;
+  saveStudyQuiz(quiz: StudyQuiz): Promise<void>;
+  loadStudyQuizzes(bookId: string): Promise<StudyQuiz[]>;
+  saveStudyQuizAttempt(attempt: StudyQuizAttempt): Promise<void>;
+  loadStudyQuizAttempts(bookId: string): Promise<StudyQuizAttempt[]>;
 
   // ── Style seed ────────────────────────────────────────────────────────────
 
