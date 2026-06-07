@@ -13,6 +13,8 @@ interface PageSegment {
   text: string;
   startOffset: number;
   endOffset: number;
+  startWordOffset: number;
+  endWordOffset: number;
 }
 
 function wordCount(text: string): number {
@@ -48,13 +50,18 @@ function splitIntoPageSegments(
   let current: string[] = [];
   let words = 0;
   let renderedOffset = 0;
+  let wordOffset = 0;
 
   const pushPage = (parts: string[]) => {
     const pageText = parts.join("\n\n");
     const startOffset = renderedOffset;
     const endOffset = startOffset + renderedTextLength(pageText);
-    pages.push({ text: pageText, startOffset, endOffset });
+    const pageWordCount = wordCount(pageText);
+    const startWordOffset = wordOffset;
+    const endWordOffset = startWordOffset + pageWordCount;
+    pages.push({ text: pageText, startOffset, endOffset, startWordOffset, endWordOffset });
     renderedOffset = endOffset;
+    wordOffset = endWordOffset;
   };
 
   for (const paragraph of paragraphs) {
@@ -84,7 +91,13 @@ function splitIntoPageSegments(
   if (current.length > 0) pushPage(current);
   if (pages.length > 0) return pages;
   const fallback = cleanedText.trim();
-  return [{ text: fallback, startOffset: 0, endOffset: renderedTextLength(fallback) }];
+  return [{
+    text: fallback,
+    startOffset: 0,
+    endOffset: renderedTextLength(fallback),
+    startWordOffset: 0,
+    endWordOffset: wordCount(fallback),
+  }];
 }
 
 // The chapter heading already renders in ChapterHeader, so drop a duplicate of
@@ -205,16 +218,14 @@ export default function StructuredTextRenderer({
   useEffect(() => {
     if (currentChapterIndex < 0) return;
     const pages = chapterPages[currentChapterIndex];
-    if (!pages || pages.length === 0) return;
-    let acc = 0;
+    const segments = chapterPageSegments[currentChapterIndex];
+    if (!pages || pages.length === 0 || !segments || segments.length === 0) return;
     let target = pages.length - 1;
-    for (let i = 0; i < pages.length; i++) {
-      const wc = wordCount(pages[i]);
-      if (chapterWordOffsetRef.current < acc + wc) {
+    for (let i = 0; i < segments.length; i++) {
+      if (chapterWordOffsetRef.current < segments[i].endWordOffset) {
         target = i;
         break;
       }
-      acc += wc;
     }
     setPageIndex((prev) => (prev === target ? prev : target));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -225,11 +236,7 @@ export default function StructuredTextRenderer({
       if (!activeBook || !activeStructure) return;
 
       const safeChapterIndex = Math.max(0, chapterIndex);
-      const chapterCount = Math.max(1, activeStructure.chapters.length);
       const pagesInChapter = Math.max(1, chapterPages[safeChapterIndex]?.length ?? 1);
-      const chapterProgress =
-        chapterIndex < 0 ? 0 : (safeChapterIndex + nextPageIndex / pagesInChapter) / chapterCount;
-      const percentComplete = Math.max(0, Math.min(100, chapterProgress * 100));
       const wordsBeforeChapter =
         chapterIndex < 0
           ? 0
@@ -239,11 +246,14 @@ export default function StructuredTextRenderer({
       const wordsIntoChapter =
         chapterIndex < 0
           ? 0
-          : Math.round(
-              (activeStructure.chapters[safeChapterIndex]?.wordCount ?? 0) *
-                (nextPageIndex / pagesInChapter)
-            );
+          : chapterPageSegments[safeChapterIndex]?.[nextPageIndex]?.startWordOffset ??
+            Math.round(
+                (activeStructure.chapters[safeChapterIndex]?.wordCount ?? 0) *
+                  (nextPageIndex / pagesInChapter)
+              );
       const wordPosition = wordsBeforeChapter + wordsIntoChapter;
+      const totalWords = Math.max(1, activeStructure.totalWords || activeStructure.chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0));
+      const percentComplete = Math.max(0, Math.min(100, (wordPosition / totalWords) * 100));
       const cfi =
         chapterIndex < 0
           ? "lumina://cover"
@@ -267,6 +277,7 @@ export default function StructuredTextRenderer({
       activeBook,
       activeStructure,
       chapterPages,
+      chapterPageSegments,
       setCurrentCfi,
       setCurrentChapterIndex,
       setPercentComplete,
@@ -293,9 +304,7 @@ export default function StructuredTextRenderer({
 
       // Record the word offset at the start of this page so re-pagination can
       // return the reader to the same text.
-      let offset = 0;
-      if (pages) for (let i = 0; i < safePageIndex && i < pages.length; i++) offset += wordCount(pages[i]);
-      chapterWordOffsetRef.current = offset;
+      chapterWordOffsetRef.current = chapterPageSegments[safeChapterIndex]?.[safePageIndex]?.startWordOffset ?? 0;
 
       setPageIndex(safePageIndex);
       saveLocation(safeChapterIndex, safePageIndex);

@@ -15,10 +15,11 @@ import { generateImage, extractPaletteContext } from "@/pipeline/imageGenerator"
 import { getStyleSeedById } from "@/data/styleSeeds";
 import { storage } from "@/storage";
 
-import { LUMINA_CONFIG } from "@/config";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import type { IdentifiedScene, CachedImage } from "@/types";
+
+const VISUAL_PRELOAD_DISTANCE_WORDS = 500;
 
 function scenePositions(
   scenes: IdentifiedScene[],
@@ -177,30 +178,53 @@ export function useImageTrigger() {
       }
     }
 
-    // ── Queue pass: enqueue generation for upcoming scenes ────────────────────
-    for (const { scene, position: scenePos } of scenes) {
-      if (imageCache[scene.id]) continue; // already generated
+    // ── Queue pass: generate only what the reader actually needs ──────────────
+    // Display never happens early. Generation may happen for the current missing
+    // anchor, or for the next anchor within a tight 500-word runway.
+    const generatableScenes = scenes.filter(({ scene }) => {
       const beat = activeSemanticMap.storyboard?.beats.find((item) => item.sceneId === scene.id);
-      if (beat?.generationIntent === "planned_only") continue;
+      return beat?.generationIntent !== "planned_only";
+    });
+    const passedGeneratableScenes = generatableScenes.filter(({ position }) => position <= wordPosition);
+    const governingPlannedScene = passedGeneratableScenes[passedGeneratableScenes.length - 1] ?? null;
+
+    if (governingPlannedScene && !imageCache[governingPlannedScene.scene.id]) {
+      enqueue({
+        sceneId: governingPlannedScene.scene.id,
+        bookId: activeSemanticMap.bookId,
+        priority: 0,
+        status: "pending",
+        description: governingPlannedScene.scene.directorBrief?.finalPrompt || governingPlannedScene.scene.imageDescription || "",
+      });
+      diagnosticInfo("image.queue.enqueue", "Queued current missing visual anchor", {
+        sceneId: governingPlannedScene.scene.id,
+        bookId: activeSemanticMap.bookId,
+        distance: governingPlannedScene.position - wordPosition,
+        anchorPosition: governingPlannedScene.position,
+      });
+    }
+
+    for (const { scene, position: scenePos } of generatableScenes) {
+      if (imageCache[scene.id]) continue; // already generated
 
       const distance = scenePos - wordPosition;
 
       if (
-        distance >= -500 &&
-        distance <= LUMINA_CONFIG.GENERATION_APPROACH_DISTANCE_WORDS
+        distance > 0 &&
+        distance <= VISUAL_PRELOAD_DISTANCE_WORDS
       ) {
         enqueue({
           sceneId: scene.id,
           bookId: activeSemanticMap.bookId,
-          priority: distance, // closer = higher priority (lower number)
+          priority: distance,
           status: "pending",
           description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
         });
-        diagnosticInfo("image.queue.enqueue", "Queued upcoming image", {
+        diagnosticInfo("image.queue.enqueue", "Queued nearby visual anchor", {
           sceneId: scene.id,
           bookId: activeSemanticMap.bookId,
           distance,
-          generationIntent: beat?.generationIntent ?? "default",
+          anchorPosition: scenePos,
         });
       }
     }
@@ -318,10 +342,6 @@ export function useImageTrigger() {
     updateQueueItemStatus,
     addToCache,
     setIsGenerating,
-    wordPosition,
-    getSceneWordPosition,
-    setCurrentImage,
-    setCurrentThemes,
   ]);
 
   // Run proximity check when position changes

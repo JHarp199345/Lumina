@@ -44,6 +44,7 @@ export function useReadPosition(onPositionChange?: (wordPosition: number) => voi
       if (currentCfi === lastCfi.current) return;
 
       lastCfi.current = currentCfi;
+      if (currentCfi.startsWith("lumina://")) return;
       const position = estimateWordPosition();
       setWordPosition(position);
       onPositionChange?.(position);
