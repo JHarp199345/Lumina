@@ -11,7 +11,13 @@ import type { Note } from "@/types";
  *   - "notepad" → opened from the Notepad list → close returns to the Notepad
  */
 
-export type DrawerView = "menu" | "glossary" | "notepad" | "lens-studio" | "study-guide";
+export type DrawerView =
+  | "menu"
+  | "glossary"
+  | "notepad"
+  | "lens-studio"
+  | "study-guide"
+  | "voice-studio";
 export type SunburstOrigin = "tray" | "notepad";
 
 interface DrawerStore {

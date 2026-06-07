@@ -19,10 +19,12 @@ export const LUMINA_CONFIG = {
   SEMANTIC_CHUNK_MAX_TOKENS: 400,
   GEMINI_MODEL: "gemini-3-flash-preview",
   GEMINI_IMAGE_MODEL: "gemini-2.5-flash-image",
+  GEMINI_TTS_MODEL: "gemini-2.5-flash-preview-tts",
   IMAGEN_MODEL: "imagen-3.0-generate-002",
 
   // Storage
   IMAGE_CACHE_DIR: "lumina/cache/images",
+  AUDIO_CACHE_DIR: "lumina/cache/audio",
   DB_NAME: "lumina.db",
 
   // Reader defaults

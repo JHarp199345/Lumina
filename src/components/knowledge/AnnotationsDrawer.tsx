@@ -22,6 +22,7 @@ import {
   StickyNote,
   WandSparkles,
   Brain,
+  Headphones,
 } from "lucide-react";
 import { useDrawerStore } from "@/store/drawerStore";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -35,6 +36,7 @@ import {
 import type { Highlight, Note } from "@/types";
 import LensStudio from "@/components/knowledge/LensStudio";
 import StudyGuide from "@/components/knowledge/StudyGuide";
+import VoiceStudio from "@/components/knowledge/VoiceStudio";
 
 const LENS_EDGE: Record<string, string> = {
   yellow: "border-l-[#d8b24e]",
@@ -80,6 +82,9 @@ export default function AnnotationsDrawer() {
             )}
             {view === "study-guide" && (
               <StudyGuideView onBack={() => setView("menu")} onClose={close} />
+            )}
+            {view === "voice-studio" && (
+              <VoiceStudioView onBack={() => setView("menu")} onClose={close} />
             )}
           </motion.aside>
         </>
@@ -131,7 +136,7 @@ function MenuView({
   onPick,
   onClose,
 }: {
-  onPick: (v: "glossary" | "notepad" | "lens-studio" | "study-guide") => void;
+  onPick: (v: "glossary" | "notepad" | "lens-studio" | "study-guide" | "voice-studio") => void;
   onClose: () => void;
 }) {
   const { activeBook } = useBookStore();
@@ -171,6 +176,13 @@ function MenuView({
           count={0}
           onClick={() => onPick("study-guide")}
         />
+        <HubButton
+          icon={<Headphones size={18} />}
+          label="Voice Studio"
+          sub="Narration, audio cache, and queue"
+          count={0}
+          onClick={() => onPick("voice-studio")}
+        />
       </div>
       <div className="mt-auto px-4 py-4">
         <p className="text-[11px] leading-relaxed text-ink-faint">
@@ -196,6 +208,15 @@ function StudyGuideView({ onBack, onClose }: { onBack: () => void; onClose: () =
     <>
       <DrawerHeader title="Study Guide" onBack={onBack} onClose={onClose} />
       <StudyGuide />
+    </>
+  );
+}
+
+function VoiceStudioView({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+  return (
+    <>
+      <DrawerHeader title="Voice Studio" onBack={onBack} onClose={onClose} />
+      <VoiceStudio />
     </>
   );
 }

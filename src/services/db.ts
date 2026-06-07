@@ -21,6 +21,7 @@ import type {
   StudyQuizAttempt,
   StudyBadgeAward,
   StudyFlashcard,
+  AudioArtifact,
 } from "@/types";
 
 let _db: Database | null = null;
@@ -166,6 +167,15 @@ async function initSchema(db: Database): Promise<void> {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS audio_cache (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      audio_json TEXT NOT NULL,
+      generated_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS book_settings (
       book_id TEXT PRIMARY KEY,
       style_seed TEXT,
@@ -225,6 +235,7 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM study_quiz_attempts WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_flashcards WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM audio_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
 }
 
@@ -642,6 +653,37 @@ export async function dbDeleteImageCache(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM image_cache WHERE book_id = $1`, [bookId]);
 }
 
+// ─── Audio Cache ──────────────────────────────────────────────────────────────
+
+export async function dbSaveAudioArtifact(artifact: AudioArtifact): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO audio_cache (id, book_id, audio_json, generated_at)
+     VALUES ($1, $2, $3, $4)`,
+    [artifact.id, artifact.bookId, JSON.stringify(artifact), artifact.generatedAt]
+  );
+}
+
+export async function dbLoadAudioArtifacts(bookId: string): Promise<AudioArtifact[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT audio_json FROM audio_cache WHERE book_id = $1 ORDER BY generated_at ASC`,
+    [bookId]
+  );
+  return rows.flatMap((row) => {
+    try {
+      return [JSON.parse(String(row.audio_json)) as AudioArtifact];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export async function dbDeleteAudioArtifacts(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM audio_cache WHERE book_id = $1`, [bookId]);
+}
+
 // ─── Book Settings ────────────────────────────────────────────────────────────
 
 export async function dbSaveBookStyleSeed(bookId: string, seedId: StyleSeedId): Promise<void> {
@@ -677,6 +719,7 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
     [`DELETE FROM study_quiz_attempts WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_flashcards WHERE book_id = $1`, [bookId]],
     [`DELETE FROM image_cache WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM audio_cache WHERE book_id = $1`, [bookId]],
     [`DELETE FROM book_settings WHERE book_id = $1`, [bookId]],
   ] as [string, unknown[]][];
   for (const [sql, params] of queries) {

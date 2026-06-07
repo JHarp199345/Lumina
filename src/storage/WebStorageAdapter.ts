@@ -27,6 +27,7 @@ import type {
   StudyQuizAttempt,
   StudyBadgeAward,
   StudyFlashcard,
+  AudioArtifact,
 } from "@/types";
 import {
   STORES,
@@ -79,6 +80,13 @@ function detectImageMimeType(data: Uint8Array): string {
     return "image/webp";
   }
   return "image/png";
+}
+
+function makeAudioBlobUrl(data: Uint8Array, mimeType: string): string {
+  const blob = new Blob([data], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  activeBlobUrls.add(url);
+  return url;
 }
 
 // ─── Adapter ──────────────────────────────────────────────────────────────────
@@ -275,6 +283,38 @@ export class WebStorageAdapter implements StorageAdapter {
     return cards.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
+  // ── Voice Studio ────────────────────────────────────────────────────────
+
+  async saveAudioArtifact(meta: Omit<AudioArtifact, "filePath">, data: Uint8Array): Promise<string> {
+    await dbPut(STORES.AUDIO_BLOBS, data, meta.id);
+    const displayUrl = makeAudioBlobUrl(data, meta.mimeType);
+    const fullMeta: AudioArtifact = { ...meta, filePath: `idb-audio://${meta.id}` };
+    await dbPut(STORES.AUDIO_META, fullMeta);
+    return displayUrl;
+  }
+
+  async loadAudioArtifacts(bookId: string): Promise<AudioArtifact[]> {
+    const metas = await dbGetByIndex<AudioArtifact>(STORES.AUDIO_META, "bookId", bookId);
+    const resolved = await Promise.all(
+      metas.map(async (meta) => {
+        const data = await dbGet<Uint8Array>(STORES.AUDIO_BLOBS, meta.id);
+        if (!data) return meta;
+        return { ...meta, filePath: makeAudioBlobUrl(data, meta.mimeType) };
+      })
+    );
+    return resolved.sort((a, b) => new Date(a.generatedAt).getTime() - new Date(b.generatedAt).getTime());
+  }
+
+  async deleteAudioArtifacts(bookId: string): Promise<void> {
+    const metas = await dbGetByIndex<AudioArtifact>(STORES.AUDIO_META, "bookId", bookId);
+    await Promise.all(
+      metas.map(async (meta) => {
+        await dbDelete(STORES.AUDIO_META, meta.id);
+        await dbDelete(STORES.AUDIO_BLOBS, meta.id).catch(() => {});
+      })
+    );
+  }
+
   // ── Style seed ───────────────────────────────────────────────────────────
 
   async saveBookStyleSeed(bookId: string, seedId: StyleSeedId): Promise<void> {
@@ -362,6 +402,7 @@ export class WebStorageAdapter implements StorageAdapter {
       dbDeleteByIndex(STORES.STUDY_QUIZZES, "bookId", bookId),
       dbDeleteByIndex(STORES.STUDY_ATTEMPTS, "bookId", bookId),
       dbDeleteByIndex(STORES.STUDY_FLASHCARDS, "bookId", bookId),
+      this.deleteAudioArtifacts(bookId),
       dbDelete(STORES.BOOK_SETTINGS, bookId),
       this.deleteImages(bookId),
     ]);

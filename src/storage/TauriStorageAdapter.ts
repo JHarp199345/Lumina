@@ -25,6 +25,7 @@ import type {
   StudyQuizAttempt,
   StudyBadgeAward,
   StudyFlashcard,
+  AudioArtifact,
 } from "@/types";
 import {
   openEpubDialog,
@@ -69,6 +70,9 @@ import {
   dbLoadStudyBadgeAwards,
   dbSaveStudyFlashcards,
   dbLoadStudyFlashcards,
+  dbSaveAudioArtifact,
+  dbLoadAudioArtifacts,
+  dbDeleteAudioArtifacts,
   dbSaveBookStyleSeed,
   dbLoadBookStyleSeed,
   dbSaveImageCache,
@@ -227,6 +231,31 @@ export class TauriStorageAdapter implements StorageAdapter {
     return dbLoadStudyFlashcards(bookId);
   }
 
+  // ── Voice Studio ────────────────────────────────────────────────────────
+
+  async saveAudioArtifact(meta: Omit<AudioArtifact, "filePath">, data: Uint8Array): Promise<string> {
+    const appDataDir = await getAppDataDir();
+    const extension = meta.mimeType.includes("wav") ? "wav" : "audio";
+    const relativePath = `${LUMINA_CONFIG.AUDIO_CACHE_DIR}/${meta.bookId}/${meta.id}.${extension}`;
+    const fullPath = `${appDataDir}/${relativePath}`;
+    await writeFileBytes(fullPath, data);
+    const displayUrl = `${toAssetUrl(fullPath)}?v=${encodeURIComponent(meta.generatedAt)}`;
+    await dbSaveAudioArtifact({ ...meta, filePath: displayUrl });
+    return displayUrl;
+  }
+
+  async loadAudioArtifacts(bookId: string): Promise<AudioArtifact[]> {
+    return dbLoadAudioArtifacts(bookId);
+  }
+
+  async deleteAudioArtifacts(bookId: string): Promise<void> {
+    await dbDeleteAudioArtifacts(bookId);
+    const appDataDir = await getAppDataDir().catch(() => "");
+    if (appDataDir) {
+      await deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.AUDIO_CACHE_DIR}/${bookId}`).catch(() => {});
+    }
+  }
+
   // ── Style seed ───────────────────────────────────────────────────────────
 
   async saveBookStyleSeed(bookId: string, seedId: StyleSeedId): Promise<void> {
@@ -290,6 +319,7 @@ export class TauriStorageAdapter implements StorageAdapter {
       await Promise.allSettled([
         deleteDirectory(`${appDataDir}/books/${bookId}`),
         deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.IMAGE_CACHE_DIR}/${bookId}`),
+        deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.AUDIO_CACHE_DIR}/${bookId}`),
       ]);
     }
   }

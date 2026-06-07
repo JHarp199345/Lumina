@@ -25,6 +25,7 @@ import type {
   StudyQuizAttempt,
   StudyBadgeAward,
   StudyFlashcard,
+  AudioArtifact,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -94,6 +95,12 @@ export interface StorageAdapter {
   loadStudyBadgeAwards(bookId: string): Promise<StudyBadgeAward[]>;
   saveStudyFlashcards(cards: StudyFlashcard[]): Promise<void>;
   loadStudyFlashcards(bookId: string): Promise<StudyFlashcard[]>;
+
+  // ── Voice Studio ─────────────────────────────────────────────────────────
+
+  saveAudioArtifact(meta: Omit<AudioArtifact, "filePath">, data: Uint8Array): Promise<string>;
+  loadAudioArtifacts(bookId: string): Promise<AudioArtifact[]>;
+  deleteAudioArtifacts(bookId: string): Promise<void>;
 
   // ── Style seed ────────────────────────────────────────────────────────────
 

@@ -665,3 +665,39 @@ export interface StudyFlashcard {
   tags: string[];
   createdAt: string;
 }
+
+// ─── Voice Studio (PLANVI) ────────────────────────────────────────────────────
+
+export type AudioArtifactStatus = "queued" | "generating" | "ready" | "failed";
+
+export interface AudioVoicePreset {
+  id: string;
+  displayName: string;
+  description: string;
+  providerVoiceName: string;
+}
+
+export interface AudioStylePreset {
+  id: string;
+  displayName: string;
+  direction: string;
+}
+
+export interface AudioArtifact {
+  id: string;
+  bookId: string;
+  segmentId: string;
+  chapterIndex: number;
+  segmentTitle: string;
+  voiceId: string;
+  stylePresetId: string;
+  textHash: string;
+  promptHash: string;
+  durationSeconds?: number;
+  mimeType: string;
+  filePath: string;
+  generatedAt: string;
+  generationApi: string;
+  status: AudioArtifactStatus;
+  error?: string;
+}

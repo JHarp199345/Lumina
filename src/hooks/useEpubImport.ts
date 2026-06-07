@@ -6,6 +6,7 @@ import { useAnnotationStore } from "@/store/annotationStore";
 import { useImageStore } from "@/store/imageStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useStudyStore } from "@/store/studyStore";
+import { useAudioStore } from "@/store/audioStore";
 import { storage } from "@/storage";
 import type { Book, BookStructure, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
@@ -51,6 +52,7 @@ export function useEpubImport() {
     clearImagesForUnmount();
     resetReader();
     useStudyStore.getState().clear();
+    useAudioStore.getState().clear();
   }, [clearActiveBookState, clearAnnotations, clearImagesForUnmount, resetReader]);
 
   // ── Import a new EPUB file ──────────────────────────────────────────────────
@@ -207,13 +209,14 @@ export function useEpubImport() {
         : book.id;
 
       // 3. Load all ancillary data
-      const [semanticMap, seedId, highlights, notes, cachedImages, studyGuide] = await Promise.all([
+      const [semanticMap, seedId, highlights, notes, cachedImages, studyGuide, audioArtifacts] = await Promise.all([
         storage.loadSemanticMap(semanticBookId),
         storage.loadBookStyleSeed(book.id),
         storage.loadHighlights(book.id),
         storage.loadNotes(book.id),
         storage.loadImagesForPrefix(book.id),
         storage.loadStudyGuide(book.id).catch(() => null),
+        storage.loadAudioArtifacts(book.id).catch(() => []),
       ]);
 
       // 4. Commit everything to stores before setting activeBook.
@@ -227,6 +230,8 @@ export function useEpubImport() {
       cachedImages.forEach((img) => addToCache(img));
       // Mount this book's Study Guide (PLANv) — opt-in artifact, may be null.
       useStudyStore.getState().mount(book.id, studyGuide);
+      // Mount this book's Voice Studio audio artifacts (PLANVI).
+      useAudioStore.getState().mount(book.id, audioArtifacts);
 
       // 4b. Restore the contextually correct display image.
       //     Find the most recently passed scene that already has a generated image.

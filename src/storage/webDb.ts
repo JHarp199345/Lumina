@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 export const STORES = {
   BOOKS:         "books",           // keyed by book.id
@@ -23,6 +23,8 @@ export const STORES = {
   STUDY_FLASHCARDS: "study_flashcards", // StudyFlashcard, keyed by id, indexed by bookId
   IMAGE_META:    "image_meta",      // CachedImage metadata, keyed by id, indexed by bookId
   IMAGE_BLOBS:   "image_blobs",     // Uint8Array image data, keyed by sceneId
+  AUDIO_META:    "audio_meta",      // AudioArtifact metadata, keyed by id, indexed by bookId
+  AUDIO_BLOBS:   "audio_blobs",     // Uint8Array audio data, keyed by audio artifact id
   BOOK_SETTINGS: "book_settings",   // {seedId}, keyed by bookId
   API_KEYS:      "api_keys",        // string values, keyed by key name
 } as const;
@@ -77,6 +79,11 @@ export function openDb(): Promise<IDBDatabase> {
       imgMeta?.createIndex("bookId", "bookId", { unique: false });
 
       ensure(STORES.IMAGE_BLOBS);                      // explicit key (sceneId)
+
+      const audioMeta = ensure(STORES.AUDIO_META, { keyPath: "id" });
+      audioMeta?.createIndex("bookId", "bookId", { unique: false });
+      ensure(STORES.AUDIO_BLOBS);                      // explicit key (audio artifact id)
+
       ensure(STORES.BOOK_SETTINGS);                    // explicit key (bookId)
       ensure(STORES.API_KEYS);                         // explicit key (name)
     };
