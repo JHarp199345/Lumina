@@ -16,6 +16,7 @@ import type {
   SemanticMap,
   CachedImage,
   StyleSeedId,
+  StudyGuide,
 } from "@/types";
 
 let _db: Database | null = null;
@@ -102,6 +103,14 @@ async function initSchema(db: Database): Promise<void> {
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN narrative_blueprint TEXT`).catch(() => {});
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS study_guides (
+      book_id TEXT PRIMARY KEY,
+      guide_json TEXT NOT NULL,
+      generated_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS image_cache (
       id TEXT PRIMARY KEY,
       book_id TEXT NOT NULL,
@@ -171,6 +180,7 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM highlights WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM notes WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
 }
@@ -396,6 +406,36 @@ export async function dbLoadSemanticMap(bookId: string): Promise<SemanticMap | n
   };
 }
 
+// ─── Study Guide ────────────────────────────────────────────────────────────────
+
+export async function dbSaveStudyGuide(guide: StudyGuide): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO study_guides (book_id, guide_json, generated_at)
+     VALUES ($1, $2, $3)`,
+    [guide.bookId, JSON.stringify(guide), guide.generatedAt]
+  );
+}
+
+export async function dbLoadStudyGuide(bookId: string): Promise<StudyGuide | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT guide_json FROM study_guides WHERE book_id = $1`,
+    [bookId]
+  );
+  if (rows.length === 0) return null;
+  try {
+    return JSON.parse(String(rows[0].guide_json)) as StudyGuide;
+  } catch {
+    return null;
+  }
+}
+
+export async function dbDeleteStudyGuide(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM study_guides WHERE book_id = $1`, [bookId]);
+}
+
 // ─── Image Cache ──────────────────────────────────────────────────────────────
 
 export async function dbSaveImageCache(image: CachedImage): Promise<void> {
@@ -492,6 +532,7 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
     [`DELETE FROM highlights WHERE book_id = $1`, [bookId]],
     [`DELETE FROM notes WHERE book_id = $1`, [bookId]],
     [`DELETE FROM semantic_maps WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM study_guides WHERE book_id = $1`, [bookId]],
     [`DELETE FROM image_cache WHERE book_id = $1`, [bookId]],
     [`DELETE FROM book_settings WHERE book_id = $1`, [bookId]],
   ] as [string, unknown[]][];

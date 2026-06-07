@@ -5,6 +5,7 @@ import { useBookStore } from "@/store/bookStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useImageStore } from "@/store/imageStore";
 import { useReaderStore } from "@/store/readerStore";
+import { useStudyStore } from "@/store/studyStore";
 import { storage } from "@/storage";
 import type { Book, BookStructure, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
@@ -49,6 +50,7 @@ export function useEpubImport() {
     clearAnnotations();
     clearImagesForUnmount();
     resetReader();
+    useStudyStore.getState().clear();
   }, [clearActiveBookState, clearAnnotations, clearImagesForUnmount, resetReader]);
 
   // ── Import a new EPUB file ──────────────────────────────────────────────────
@@ -205,12 +207,13 @@ export function useEpubImport() {
         : book.id;
 
       // 3. Load all ancillary data
-      const [semanticMap, seedId, highlights, notes, cachedImages] = await Promise.all([
+      const [semanticMap, seedId, highlights, notes, cachedImages, studyGuide] = await Promise.all([
         storage.loadSemanticMap(semanticBookId),
         storage.loadBookStyleSeed(book.id),
         storage.loadHighlights(book.id),
         storage.loadNotes(book.id),
         storage.loadImagesForPrefix(book.id),
+        storage.loadStudyGuide(book.id).catch(() => null),
       ]);
 
       // 4. Commit everything to stores before setting activeBook.
@@ -222,6 +225,8 @@ export function useEpubImport() {
       if (seedId) setActiveStyleSeed(seedId);
       loadAnnotations(highlights, notes);
       cachedImages.forEach((img) => addToCache(img));
+      // Mount this book's Study Guide (PLANv) — opt-in artifact, may be null.
+      useStudyStore.getState().mount(book.id, studyGuide);
 
       // 4b. Restore the contextually correct display image.
       //     Find the most recently passed scene that already has a generated image.

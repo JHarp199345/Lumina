@@ -22,6 +22,7 @@ import type {
   HighlightColor,
   Note,
   CachedImage,
+  StudyGuide,
 } from "@/types";
 import {
   STORES,
@@ -223,6 +224,20 @@ export class WebStorageAdapter implements StorageAdapter {
     await dbDelete(STORES.SEMANTIC_MAPS, bookId);
   }
 
+  // ── Study guide ──────────────────────────────────────────────────────────
+
+  async saveStudyGuide(guide: StudyGuide): Promise<void> {
+    await dbPut(STORES.STUDY_GUIDES, guide, guide.bookId);
+  }
+
+  async loadStudyGuide(bookId: string): Promise<StudyGuide | null> {
+    return (await dbGet<StudyGuide>(STORES.STUDY_GUIDES, bookId)) ?? null;
+  }
+
+  async deleteStudyGuide(bookId: string): Promise<void> {
+    await dbDelete(STORES.STUDY_GUIDES, bookId);
+  }
+
   // ── Style seed ───────────────────────────────────────────────────────────
 
   async saveBookStyleSeed(bookId: string, seedId: StyleSeedId): Promise<void> {
@@ -307,6 +322,7 @@ export class WebStorageAdapter implements StorageAdapter {
       dbDeleteByIndex(STORES.HIGHLIGHTS, "bookId", bookId),
       dbDeleteByIndex(STORES.NOTES, "bookId", bookId),
       dbDelete(STORES.SEMANTIC_MAPS, bookId),
+      dbDelete(STORES.STUDY_GUIDES, bookId),
       dbDelete(STORES.BOOK_SETTINGS, bookId),
       this.deleteImages(bookId),
     ]);

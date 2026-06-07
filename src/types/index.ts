@@ -543,3 +543,59 @@ export interface GenerationQueueItem {
   status: GenerationStatus;
   description: string;
 }
+
+// ─── Study Guide (PLANv) ──────────────────────────────────────────────────────
+
+/**
+ * A Study Guide divides a book into meaning-based study segments — natural
+ * stopping points a reader can review or be quizzed on. The artifact is
+ * book-scoped: opening a book mounts its guide, switching books dismounts it.
+ *
+ * Phase 2 produces these heuristically (offline, no AI). Phase 3 refines them
+ * with AI (better names, summaries, quiz-worthiness). The shape is the same so
+ * refinement is an in-place upgrade, not a new model.
+ */
+export type StudySegmentStatus =
+  | "ready"          // segment exists, no quiz yet
+  | "quiz-generated" // a quiz has been built for it
+  | "passed"         // reader passed its quiz
+  | "review"         // reader should review (missed questions)
+  | "locked";        // reader hasn't reached this segment yet
+
+export type StudySpoilerLevel = "none" | "low" | "high";
+
+export interface StudySegment {
+  id: string;
+  bookId: string;
+  chapterIndex: number;
+  chapterTitle: string;
+  title: string;
+
+  /** Stable anchors — chapter index + word offsets, not page numbers. */
+  startWordOffset: number; // word offset within the chapter
+  endWordOffset: number;   // word offset within the chapter (exclusive)
+  approxWordStart: number; // global word offset into the whole book
+  approxWordEnd: number;
+  wordCount: number;
+
+  summary?: string;
+  purpose?: string;
+  quizWorthy: boolean;
+  spoilerLevel: StudySpoilerLevel;
+  concepts?: string[];
+  characters?: string[];
+  locations?: string[];
+  themes?: string[];
+
+  status: StudySegmentStatus;
+}
+
+export type StudyGuideSource = "heuristic" | "ai-refined";
+
+export interface StudyGuide {
+  bookId: string;
+  generatedAt: string;
+  version: number;
+  source: StudyGuideSource;
+  segments: StudySegment[];
+}

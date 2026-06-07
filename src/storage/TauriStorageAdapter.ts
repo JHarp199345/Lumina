@@ -20,6 +20,7 @@ import type {
   HighlightColor,
   Note,
   CachedImage,
+  StudyGuide,
 } from "@/types";
 import {
   openEpubDialog,
@@ -53,6 +54,9 @@ import {
   dbSaveSemanticMap,
   dbLoadSemanticMap,
   dbDeleteSemanticMap,
+  dbSaveStudyGuide,
+  dbLoadStudyGuide,
+  dbDeleteStudyGuide,
   dbSaveBookStyleSeed,
   dbLoadBookStyleSeed,
   dbSaveImageCache,
@@ -163,6 +167,20 @@ export class TauriStorageAdapter implements StorageAdapter {
 
   async deleteSemanticMap(bookId: string): Promise<void> {
     await dbDeleteSemanticMap(bookId);
+  }
+
+  // ── Study guide ──────────────────────────────────────────────────────────
+
+  async saveStudyGuide(guide: StudyGuide): Promise<void> {
+    await dbSaveStudyGuide(guide);
+  }
+
+  async loadStudyGuide(bookId: string): Promise<StudyGuide | null> {
+    return dbLoadStudyGuide(bookId);
+  }
+
+  async deleteStudyGuide(bookId: string): Promise<void> {
+    await dbDeleteStudyGuide(bookId);
   }
 
   // ── Style seed ───────────────────────────────────────────────────────────

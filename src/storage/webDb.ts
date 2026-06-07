@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const STORES = {
   BOOKS:         "books",           // keyed by book.id
@@ -16,6 +16,7 @@ export const STORES = {
   HIGHLIGHTS:    "highlights",      // Highlight[], keyed by id, indexed by bookId
   NOTES:         "notes",           // Note[], keyed by id, indexed by bookId
   SEMANTIC_MAPS: "semantic_maps",   // SemanticMap, keyed by bookId
+  STUDY_GUIDES:  "study_guides",    // StudyGuide, keyed by bookId
   IMAGE_META:    "image_meta",      // CachedImage metadata, keyed by id, indexed by bookId
   IMAGE_BLOBS:   "image_blobs",     // Uint8Array image data, keyed by sceneId
   BOOK_SETTINGS: "book_settings",   // {seedId}, keyed by bookId
@@ -54,6 +55,7 @@ export function openDb(): Promise<IDBDatabase> {
       noteStore?.createIndex("bookId", "bookId", { unique: false });
 
       ensure(STORES.SEMANTIC_MAPS);                    // explicit key on put()
+      ensure(STORES.STUDY_GUIDES);                     // explicit key on put() (bookId)
 
       const imgMeta = ensure(STORES.IMAGE_META, { keyPath: "id" });
       imgMeta?.createIndex("bookId", "bookId", { unique: false });

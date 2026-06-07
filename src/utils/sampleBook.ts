@@ -12,6 +12,62 @@ interface SampleChapter {
   paragraphs: string[];
 }
 
+/**
+ * Themed atmospheric sentence pools. We assemble extra paragraphs from these so
+ * each chapter is long enough (~2,000–2,800 words) to exercise real Study Guide
+ * segmentation (multi-segment chapters), while still reading as coherent prose.
+ * Hand-written opening and closing paragraphs (below) bookend each chapter.
+ */
+const ATMOSPHERE: string[][] = [
+  [
+    "The morning came in grey and unhurried, the way it always did along this stretch of coast.",
+    "Somewhere out past the breakwater a bell buoy tolled, slow and patient, marking a channel no one used anymore.",
+    "She had learned long ago that the sea kept its own counsel and offered nothing it was not asked for twice.",
+    "Salt had worked its way into everything here — the railings, the window frames, the very grain of the wood beneath her hand.",
+    "A fisherman raised one hand to her in greeting and she returned it without quite remembering his name.",
+    "The tide was going out, dragging its long fingers through the shingle, and the gulls followed it down to the waterline.",
+    "There was a rhythm to the place that asked nothing of her, and that, more than anything, was why she had stayed away.",
+    "Even the light seemed older here, filtered through cloud and habit until it lay soft and forgiving over the rooftops.",
+  ],
+  [
+    "Memory, she had decided, was less a record than a weather — it arrived without warning and left the ground changed.",
+    "She turned the thought over the way she might turn a stone, looking for the dry side, the side that had not touched the dark.",
+    "There were things one carried not because they were heavy but because setting them down required a place to set them.",
+    "The kettle ticked as it cooled, and the small ordinary sound was almost enough to hold the larger silence at bay.",
+    "She thought of her mother's hands, and her father's voice, and the particular hush of a house where no one is angry yet.",
+    "Forgiveness, if it came at all, would not arrive as a thunderclap but as a slow thaw, unnoticed until the river moved.",
+    "Outside, a dog barked twice and gave it up, and the street returned to the business of being empty.",
+    "She had rehearsed a hundred conversations and meant none of them, and now the words sat unused in her like coins.",
+  ],
+  [
+    "The road unspooled ahead of her, pale and certain, threading the green hills toward a horizon she could not yet name.",
+    "Mile by mile the country opened, and with it something in her chest she had kept clenched for longer than she knew.",
+    "She passed a church, a closed petrol station, a field where two horses stood nose to tail against the wind.",
+    "The radio gave her static and then a hymn and then static again, and she let it play to the empty seats behind her.",
+    "It was strange how leaving could feel so much like arriving, as if the going itself were the place she had meant to reach.",
+    "The hills folded one into the next, patient as sleeping animals, and the morning warmed by degrees against the glass.",
+    "She did the sums of her life as she drove — what was owed, what was spent, what could still, with care, be saved.",
+    "Ahead, a bridge crossed a river the colour of weak tea, and beyond it the road climbed and was lost in light.",
+  ],
+];
+
+/** Build `count` atmospheric paragraphs (4–5 sentences each) for chapter `idx`. */
+function buildAtmosphere(idx: number, count: number): string[] {
+  const pool = ATMOSPHERE[idx % ATMOSPHERE.length];
+  const out: string[] = [];
+  let cursor = 0;
+  for (let p = 0; p < count; p++) {
+    const len = 4 + (p % 2); // alternate 4 / 5 sentences
+    const sentences: string[] = [];
+    for (let s = 0; s < len; s++) {
+      sentences.push(pool[cursor % pool.length]);
+      cursor++;
+    }
+    out.push(sentences.join(" "));
+  }
+  return out;
+}
+
 const CHAPTERS: SampleChapter[] = [
   {
     id: "ch1",
@@ -80,7 +136,18 @@ export async function buildSampleEpubFile(): Promise<File> {
 </container>`
   );
 
-  for (const ch of CHAPTERS) {
+  // Compose full chapters: hand-written opening, themed atmospheric middle,
+  // hand-written close. Big enough (~2,400 words each) that Study Guide
+  // segmentation splits each chapter into multiple study segments.
+  const fullChapters: SampleChapter[] = CHAPTERS.map((ch, i) => {
+    const [open1, open2, close1, close2] = ch.paragraphs;
+    return {
+      ...ch,
+      paragraphs: [open1, open2, ...buildAtmosphere(i, 30), close1, close2],
+    };
+  });
+
+  for (const ch of fullChapters) {
     zip.file(`OEBPS/${ch.id}.xhtml`, chapterXhtml(ch));
   }
 

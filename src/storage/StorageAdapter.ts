@@ -20,6 +20,7 @@ import type {
   HighlightColor,
   Note,
   CachedImage,
+  StudyGuide,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -75,6 +76,12 @@ export interface StorageAdapter {
   saveSemanticMap(map: SemanticMap): Promise<void>;
   loadSemanticMap(bookId: string): Promise<SemanticMap | null>;
   deleteSemanticMap(bookId: string): Promise<void>;
+
+  // ── Study guide ───────────────────────────────────────────────────────────
+
+  saveStudyGuide(guide: StudyGuide): Promise<void>;
+  loadStudyGuide(bookId: string): Promise<StudyGuide | null>;
+  deleteStudyGuide(bookId: string): Promise<void>;
 
   // ── Style seed ────────────────────────────────────────────────────────────
 
