@@ -23,6 +23,7 @@ import type {
   AnalysisProgressReporter,
 } from "@/types";
 import { LUMINA_CONFIG } from "@/config";
+import { storyOnlyStructure } from "@/utils/storyContent";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -33,19 +34,20 @@ export async function analyzeBook(
   apiKey: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<SemanticMap> {
+  const analysisStructure = storyOnlyStructure(structure);
   const report = makeProgressReporter(onProgress);
   report({
     phase: "preparing",
-    message: `Preparing ${structure.chapters.length} chapters for analysis…`,
+    message: `Preparing ${analysisStructure.chapters.length} story chapters for analysis…`,
     percent: 3,
     current: 0,
-    total: structure.chapters.length,
+    total: analysisStructure.chapters.length,
   });
 
   // Pass 1: Story shape via proper algorithm
   const shapeResult = await analyzeStoryShape(
-    structure.chapters,
-    structure.title,
+    analysisStructure.chapters,
+    analysisStructure.title,
     apiKey,
     report
   );
@@ -57,7 +59,7 @@ export async function analyzeBook(
   });
 
   // Enrich with dominant emotions and themes via Gemini
-  const macroContext = await getMacroContext(structure, shapeResult.arcShape, apiKey);
+  const macroContext = await getMacroContext(analysisStructure, shapeResult.arcShape, apiKey);
 
   const macroArc: MacroArc = {
     arcShape: shapeResult.arcShape,
@@ -70,14 +72,14 @@ export async function analyzeBook(
   // pipeline reads from. One book-wide call; on failure selection degrades
   // gracefully to emotional-weight ordering.
   const narrativeBlueprint = await buildNarrativeBlueprint({
-    structure,
+    structure: analysisStructure,
     macroArc,
     apiKey,
     onProgress: report,
   });
 
   // Pass 2: Scene identification at each inflection
-  const scenes = await identifyScenes(structure, macroArc, apiKey, report);
+  const scenes = await identifyScenes(analysisStructure, macroArc, apiKey, report);
 
   report({
     phase: "prompts",
@@ -91,7 +93,7 @@ export async function analyzeBook(
   const scenesWithDescriptions = await generateImageDescriptions(
     scenes,
     macroArc,
-    structure.title,
+    analysisStructure.title,
     apiKey,
     report
   );
@@ -101,10 +103,10 @@ export async function analyzeBook(
   const annotatedScenes = annotateScenesWithThreads(
     scenesWithDescriptions,
     narrativeBlueprint,
-    structure
+    analysisStructure
   );
 
-  const goldenNumber = calculateGoldenNumber(structure.totalWords, annotatedScenes.length);
+  const goldenNumber = calculateGoldenNumber(analysisStructure.totalWords, annotatedScenes.length);
   // Structure-aware selection: prefer scenes that complete setup→payoff chains,
   // and pull a payoff's setup in with it, instead of taking the top-sentiment N.
   const defaultScenes = selectNarrativeScenes(annotatedScenes, goldenNumber, narrativeBlueprint);
@@ -115,16 +117,16 @@ export async function analyzeBook(
   const plannedScenes = annotateScenesWithThreads(
     mergeScenesForWholeBookPlan(
       annotatedScenes,
-      buildPlannedChapterScenes(structure, macroArc, annotatedScenes)
+      buildPlannedChapterScenes(analysisStructure, macroArc, annotatedScenes)
     ),
     narrativeBlueprint,
-    structure
+    analysisStructure
   );
 
   const storyboard = buildVisualStoryboard({
-    bookId: structure.bookId,
+    bookId: analysisStructure.bookId,
     arcShape: macroArc.arcShape,
-    structure,
+    structure: analysisStructure,
     scenes: plannedScenes,
     inflectionPoints: macroArc.inflectionPoints,
     goldenNumber,
@@ -140,7 +142,7 @@ export async function analyzeBook(
   });
 
   return {
-    bookId: structure.bookId,
+    bookId: analysisStructure.bookId,
     arcShape: macroArc.arcShape,
     inflectionPoints: macroArc.inflectionPoints,
     scenes: plannedScenes,
@@ -344,7 +346,7 @@ function buildFallbackScene(
   return {
     id:
       inflectionPointId === "opening"
-        ? `scene_opening_${structure.bookId}`
+        ? `scene_opening_${structure.bookId}_${chapter.id}`
         : `scene_${inflectionPointId}_${chapter.id}`,
     inflectionPointId,
     chapterId: chapter.id,
@@ -389,7 +391,7 @@ JSON response:
   const parsed = parseJsonResponse<Partial<IdentifiedScene>>(raw);
 
   return {
-    id: `scene_opening_${structure.bookId}`,
+    id: `scene_opening_${structure.bookId}_${chapter.id}`,
     inflectionPointId: "opening",
     chapterId: chapter.id,
     sectionId: chapter.sections[0]?.id ?? chapter.id,

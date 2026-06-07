@@ -114,15 +114,12 @@ export function useBookOrchestration() {
           }
         }
 
-        // Fallback: show scene 0's image if the reader hasn't passed any scene yet
-        if (!imageToDisplay) {
-          const firstCached = imageCache[existingMap.scenes[0]?.id];
-          if (firstCached) imageToDisplay = firstCached;
-        }
-
         if (imageToDisplay) {
           setCurrentImage(imageToDisplay);
           setCurrentThemes(imageToDisplay.emotionalThemes);
+        } else {
+          setCurrentImage(null);
+          setCurrentThemes([]);
         }
 
         await _ensureOpeningImage(existingMap, styleSeedId, slice.semanticBookId);
@@ -359,13 +356,21 @@ export function useBookOrchestration() {
   // opening image and for the current block on regenerate-all. On failure it
   // queues the scene for the background processor to retry.
   const _ensureSceneImage = useCallback(
-    async (scene: IdentifiedScene | undefined, styleSeedId: StyleSeedId, semanticBookId: string) => {
+    async (
+      scene: IdentifiedScene | undefined,
+      styleSeedId: StyleSeedId,
+      semanticBookId: string,
+      options: { display?: boolean } = {}
+    ) => {
       if (!scene) return;
+      const shouldDisplay = options.display !== false;
 
       const cached = useImageStore.getState().imageCache[scene.id];
       if (cached) {
-        setCurrentImage(cached);
-        setCurrentThemes(cached.emotionalThemes);
+        if (shouldDisplay) {
+          setCurrentImage(cached);
+          setCurrentThemes(cached.emotionalThemes);
+        }
         return;
       }
 
@@ -374,8 +379,10 @@ export function useBookOrchestration() {
       );
       if (persisted) {
         addToCache(persisted);
-        setCurrentImage(persisted);
-        setCurrentThemes(persisted.emotionalThemes);
+        if (shouldDisplay) {
+          setCurrentImage(persisted);
+          setCurrentThemes(persisted.emotionalThemes);
+        }
         diagnosticInfo("image.scene.persisted_cache", "Using persisted image instead of regenerating", {
           sceneId: scene.id,
           bookId: semanticBookId,
@@ -398,13 +405,17 @@ export function useBookOrchestration() {
           falApiKey: falKey ?? undefined,
           onComplete: async (img) => {
             addToCache(img);
-            setCurrentImage(img);
-            setCurrentThemes(img.emotionalThemes);
+            if (shouldDisplay) {
+              setCurrentImage(img);
+              setCurrentThemes(img.emotionalThemes);
+            }
           },
         });
         addToCache(generated);
-        setCurrentImage(generated);
-        setCurrentThemes(generated.emotionalThemes);
+        if (shouldDisplay) {
+          setCurrentImage(generated);
+          setCurrentThemes(generated.emotionalThemes);
+        }
         console.info("[Orchestration] Scene image committed:", generated.sceneId);
         diagnosticInfo("image.scene.committed", "Scene image committed", {
           sceneId: generated.sceneId,
@@ -432,10 +443,11 @@ export function useBookOrchestration() {
     [addToCache, enqueue, setCurrentImage, setCurrentThemes, setIsGenerating]
   );
 
-  // Opening image is just the first scene's image, displayed immediately.
+  // Opening image is prepared up front, but display still belongs to the
+  // governing-section trigger. Generating must not force a future image on screen.
   const _ensureOpeningImage = useCallback(
     async (semanticMap: { scenes: IdentifiedScene[] }, styleSeedId: StyleSeedId, semanticBookId: string) => {
-      await _ensureSceneImage(semanticMap.scenes[0], styleSeedId, semanticBookId);
+      await _ensureSceneImage(semanticMap.scenes[0], styleSeedId, semanticBookId, { display: false });
     },
     [_ensureSceneImage]
   );

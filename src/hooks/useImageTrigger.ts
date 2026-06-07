@@ -20,18 +20,6 @@ import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import type { IdentifiedScene, CachedImage } from "@/types";
 
-function currentAnchorSceneId(
-  scenes: IdentifiedScene[],
-  wordPosition: number,
-  getSceneWordPosition: (scene: IdentifiedScene) => number
-): string | null {
-  let current: IdentifiedScene | null = null;
-  for (const scene of [...scenes].sort((a, b) => getSceneWordPosition(a) - getSceneWordPosition(b))) {
-    if (getSceneWordPosition(scene) <= wordPosition) current = scene;
-  }
-  return current?.id ?? null;
-}
-
 function scenePositions(
   scenes: IdentifiedScene[],
   getSceneWordPosition: (scene: IdentifiedScene) => number
@@ -100,7 +88,7 @@ export function useImageTrigger() {
       ? scenes.find(({ scene }) => scene.id === current.sceneId)?.position ?? null
       : null;
     const eligible = cachedScenes.filter(({ position }) => position <= wordPosition);
-    const governingScene = eligible[eligible.length - 1] ?? cachedScenes[0] ?? null;
+    const governingScene = eligible[eligible.length - 1] ?? null;
     const nextCachedAnchor = cachedScenes.find(({ position }) => position > wordPosition) ?? null;
 
     if (governingScene) {
@@ -151,6 +139,20 @@ export function useImageTrigger() {
         }
       }
     } else {
+      if (current) {
+        diagnosticInfo("image.display.clear_future", "Clearing visual because no cached anchor governs this position", {
+          fromSceneId: current.sceneId,
+          wordPosition,
+          currentScenePosition,
+          nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
+          nextCachedScenePosition: nextCachedAnchor?.position ?? null,
+          cachedSceneCount: cachedScenes.length,
+        });
+        activeVisualSceneIdRef.current = null;
+        setCurrentImage(null);
+        setCurrentThemes([]);
+      }
+
       const decisionSignature = [
         "none",
         current?.sceneId ?? "none",
@@ -239,8 +241,8 @@ export function useImageTrigger() {
     if (existingPersistedImage) {
       addToCache(existingPersistedImage);
       const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-      const sceneIsCurrentAnchor = scene.id === currentAnchorSceneId(semanticMap.scenes, wordPosition, getSceneWordPosition);
-      if (!hasCurrentImage && sceneIsCurrentAnchor) {
+      const sceneCanGovernCurrentPosition = getSceneWordPosition(scene) <= wordPosition;
+      if (!hasCurrentImage && sceneCanGovernCurrentPosition) {
         setCurrentImage(existingPersistedImage);
         setCurrentThemes(existingPersistedImage.emotionalThemes);
       }
@@ -295,12 +297,9 @@ export function useImageTrigger() {
 
           // Display only if this generated image belongs to the current anchor.
           const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-          const sceneIsCurrentAnchor = scene.id === currentAnchorSceneId(
-            semanticMap.scenes,
-            useReaderStore.getState().wordPosition,
-            getSceneWordPosition
-          );
-          if (!hasCurrentImage && sceneIsCurrentAnchor) {
+          const sceneCanGovernCurrentPosition =
+            getSceneWordPosition(scene) <= useReaderStore.getState().wordPosition;
+          if (!hasCurrentImage && sceneCanGovernCurrentPosition) {
             setCurrentImage(img);
             setCurrentThemes(img.emotionalThemes);
           }
@@ -309,12 +308,9 @@ export function useImageTrigger() {
 
       addToCache(cachedImage);
       const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-      const sceneIsCurrentAnchor = scene.id === currentAnchorSceneId(
-        semanticMap.scenes,
-        useReaderStore.getState().wordPosition,
-        getSceneWordPosition
-      );
-      if (!hasCurrentImage && sceneIsCurrentAnchor) {
+      const sceneCanGovernCurrentPosition =
+        getSceneWordPosition(scene) <= useReaderStore.getState().wordPosition;
+      if (!hasCurrentImage && sceneCanGovernCurrentPosition) {
         setCurrentImage(cachedImage);
         setCurrentThemes(cachedImage.emotionalThemes);
       }
