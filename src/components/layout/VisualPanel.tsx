@@ -454,6 +454,7 @@ function ImageDisplay({
   isGenerating: boolean;
 }) {
   const [loadFailed, setLoadFailed] = useState(false);
+  const previousDisplaySrcRef = useRef<string | null>(null);
   const isWebUrl =
     src.startsWith("blob:") ||
     src.startsWith("data:") ||
@@ -461,10 +462,14 @@ function ImageDisplay({
     src.startsWith("http:") ||
     src.startsWith("https:");
   const displaySrc = isTauri && !isWebUrl ? toAssetUrl(src) : src;
+  const sourceChanged =
+    previousDisplaySrcRef.current !== null && previousDisplaySrcRef.current !== displaySrc;
+  const shouldFade = sourceChanged || isTransitioning;
 
   useEffect(() => {
     setLoadFailed(false);
-  }, [src]);
+    previousDisplaySrcRef.current = displaySrc;
+  }, [displaySrc]);
 
   if (loadFailed) {
     return (
@@ -479,10 +484,13 @@ function ImageDisplay({
     <AnimatePresence mode="wait">
       <motion.div
         key={src}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isTransitioning ? 0 : 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: LUMINA_CONFIG.IMAGE_TRANSITION_DURATION_MS / 1000, ease: "easeInOut" }}
+        initial={{ opacity: sourceChanged ? 0 : 1 }}
+        animate={{ opacity: shouldFade && isTransitioning ? 0 : 1 }}
+        exit={{ opacity: sourceChanged ? 0 : 1 }}
+        transition={{
+          duration: sourceChanged ? LUMINA_CONFIG.IMAGE_TRANSITION_DURATION_MS / 1000 : 0,
+          ease: "easeInOut",
+        }}
         className="absolute inset-0"
       >
         <img
