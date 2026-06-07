@@ -28,7 +28,7 @@ export default function TocDrawer({ open, onClose, side = "left" }: Props) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="absolute inset-0 bg-scrim z-30"
+            className="absolute inset-0 z-50 bg-scrim"
             onClick={onClose}
             aria-hidden="true"
           />
@@ -40,7 +40,7 @@ export default function TocDrawer({ open, onClose, side = "left" }: Props) {
             animate={{ x: 0 }}
             exit={{ x: fromLeft ? "-100%" : "100%" }}
             transition={{ type: "spring", damping: 32, stiffness: 320 }}
-            className={`absolute top-0 bottom-0 w-72 z-40 flex flex-col shadow-2xl ${
+            className={`absolute top-0 bottom-0 z-[55] flex w-[min(24rem,calc(100vw-1rem))] flex-col shadow-2xl ${
               fromLeft ? "left-0" : "right-0"
             }`}
             aria-label="Table of Contents"

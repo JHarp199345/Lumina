@@ -14,6 +14,7 @@ import TopNav from "@/components/layout/TopNav";
 import SideRail from "@/components/layout/SideRail";
 import PanelContainer from "@/components/layout/PanelContainer";
 import TabletPanelContainer from "@/components/layout/TabletPanelContainer";
+import TocDrawer from "@/components/layout/TocDrawer";
 import HighlightLayer from "@/components/reader/HighlightLayer";
 import LensStyleBridge from "@/components/reader/LensStyleBridge";
 import SelectionActionBar from "@/components/reader/SelectionActionBar";
@@ -284,7 +285,7 @@ function App() {
 
   return (
     <div className="h-[100dvh] overflow-hidden bg-app p-3 text-ink sm:p-4">
-      <div className="flex h-full overflow-hidden rounded-xl border border-hair bg-surface-dark shadow-2xl shadow-black/35">
+      <div className="relative flex h-full overflow-hidden rounded-xl border border-hair bg-surface-dark shadow-2xl shadow-black/35">
         <SideRail
           onImport={handleImport}
           onLibraryOpen={() => setShowLibrary(true)}
@@ -305,18 +306,21 @@ function App() {
           {isTablet ? (
             <TabletPanelContainer
               isPortrait={isPortrait}
-              tocOpen={tabletTocOpen}
-              onTocClose={() => setTabletTocOpen(false)}
               onImport={handleImport}
             />
           ) : (
             <PanelContainer
-              tocOpen={tabletTocOpen}
               onTocClose={() => setTabletTocOpen(false)}
               onImport={handleImport}
             />
           )}
         </div>
+
+        <TocDrawer
+          open={tabletTocOpen}
+          onClose={() => setTabletTocOpen(false)}
+          side={isTablet && !isPortrait ? "right" : "left"}
+        />
       </div>
 
       <HighlightLayer />
