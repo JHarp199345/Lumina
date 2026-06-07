@@ -90,52 +90,69 @@ export function useImageTrigger() {
       activeVisualSceneIdRef.current = current.sceneId;
     }
 
-    // ── Display pass: literal forward anchor rule ───────────────────────────
-    // Keep the active image frozen. Advance only when the reader crosses the
-    // next cached image anchor. Do not recalculate "best image" on every page.
+    // ── Display pass: governing-section rule ────────────────────────────────
+    // The displayed image is the latest cached scene anchor at or before the
+    // reader's current word position. This works in both directions: reading
+    // forward advances into the next visual section; paging backward restores
+    // the image that governs the section the reader returned to.
     const cachedScenes = scenes.filter(({ scene }) => Boolean(imageCache[scene.id]));
-    const activeSceneId = current?.sceneId ?? activeVisualSceneIdRef.current;
-    if (activeSceneId) activeVisualSceneIdRef.current = activeSceneId;
-    const activeScene = activeSceneId
-      ? scenes.find(({ scene }) => scene.id === activeSceneId) ?? null
+    const currentScenePosition = current?.sceneId
+      ? scenes.find(({ scene }) => scene.id === current.sceneId)?.position ?? null
       : null;
+    const eligible = cachedScenes.filter(({ position }) => position <= wordPosition);
+    const governingScene = eligible[eligible.length - 1] ?? cachedScenes[0] ?? null;
+    const nextCachedAnchor = cachedScenes.find(({ position }) => position > wordPosition) ?? null;
 
-    let nextDisplay = null as null | { scene: IdentifiedScene; position: number; reason: string };
-
-    if (!current || !activeScene) {
-      const eligible = cachedScenes.filter(({ position }) => position <= wordPosition);
-      const initial = eligible[eligible.length - 1];
-      if (initial) nextDisplay = { ...initial, reason: current ? "restore-active-anchor" : "initial-anchor" };
-    } else {
-      const activePosition = activeScene.position;
-      const eligible = cachedScenes.filter(
-        ({ position }) => position > activePosition && position <= wordPosition
-      );
-      const crossed = eligible[eligible.length - 1];
-      if (crossed) nextDisplay = { ...crossed, reason: "crossed-next-anchor" };
-    }
-
-    if (nextDisplay) {
-      const cached = imageCache[nextDisplay.scene.id];
-      if (cached && (current?.sceneId !== nextDisplay.scene.id || current.filePath !== cached.filePath)) {
+    if (governingScene) {
+      const cached = imageCache[governingScene.scene.id];
+      if (cached && (current?.sceneId !== governingScene.scene.id || current.filePath !== cached.filePath)) {
+        const reason =
+          !current
+            ? "initial-anchor"
+            : currentScenePosition !== null && currentScenePosition > governingScene.position
+              ? "returned-to-anchor"
+              : "entered-anchor";
         diagnosticInfo("image.display.switch", "Switching visual segment", {
-          reason: nextDisplay.reason,
+          reason,
           fromSceneId: current?.sceneId ?? null,
-          activeSceneId,
-          toSceneId: nextDisplay.scene.id,
+          toSceneId: governingScene.scene.id,
           wordPosition,
-          sceneWordPosition: nextDisplay.position,
+          sceneWordPosition: governingScene.position,
+          currentScenePosition,
+          nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
+          nextCachedScenePosition: nextCachedAnchor?.position ?? null,
         });
-        activeVisualSceneIdRef.current = nextDisplay.scene.id;
+        activeVisualSceneIdRef.current = governingScene.scene.id;
         setCurrentImage(cached);
         setCurrentThemes(cached.emotionalThemes);
+      } else {
+        const decisionSignature = [
+          governingScene.scene.id,
+          current?.sceneId ?? "none",
+          wordPosition,
+          nextCachedAnchor?.scene.id ?? "none",
+          nextCachedAnchor?.position ?? "none",
+          cachedScenes.length,
+          "hold",
+        ].join("|");
+
+        if (decisionSignature !== lastDisplayDecisionRef.current) {
+          lastDisplayDecisionRef.current = decisionSignature;
+          diagnosticInfo("image.display.hold", "Holding governing visual segment", {
+            governingSceneId: governingScene.scene.id,
+            currentSceneId: current?.sceneId ?? null,
+            wordPosition,
+            currentScenePosition,
+            governingScenePosition: governingScene.position,
+            nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
+            nextCachedScenePosition: nextCachedAnchor?.position ?? null,
+            cachedSceneCount: cachedScenes.length,
+          });
+        }
       }
     } else {
-      const nextCachedAnchor = activeScene
-        ? cachedScenes.find(({ position }) => position > activeScene.position)
-        : cachedScenes.find(({ position }) => position > wordPosition);
       const decisionSignature = [
-        activeSceneId ?? "none",
+        "none",
         current?.sceneId ?? "none",
         wordPosition,
         nextCachedAnchor?.scene.id ?? "none",
@@ -146,10 +163,11 @@ export function useImageTrigger() {
       if (decisionSignature !== lastDisplayDecisionRef.current) {
         lastDisplayDecisionRef.current = decisionSignature;
         diagnosticInfo("image.display.hold", "Holding visual segment", {
-          activeSceneId,
+          governingSceneId: null,
           currentSceneId: current?.sceneId ?? null,
           wordPosition,
-          activeScenePosition: activeScene?.position ?? null,
+          currentScenePosition,
+          governingScenePosition: null,
           nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
           nextCachedScenePosition: nextCachedAnchor?.position ?? null,
           cachedSceneCount: cachedScenes.length,
