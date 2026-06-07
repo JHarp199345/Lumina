@@ -606,6 +606,7 @@ export type StudyQuestionLevel = "recall" | "relationship" | "interpretation" | 
 export interface StudyQuizQuestion {
   id: string;
   questionNumber: number;
+  chainTitle?: string;
   level: StudyQuestionLevel;
   question: string;
   options: string[];
@@ -633,4 +634,15 @@ export interface StudyQuizAttempt {
   score: number;
   passed: boolean;
   completedAt: string;
+}
+
+export interface StudyBadgeAward {
+  id: string;
+  bookId: string;
+  quizId: string;
+  scope: StudyQuizScope;
+  targetId: string;
+  label: string;
+  score: number;
+  awardedAt: string;
 }

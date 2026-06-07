@@ -25,6 +25,7 @@ import type {
   StudyGuide,
   StudyQuiz,
   StudyQuizAttempt,
+  StudyBadgeAward,
 } from "@/types";
 import {
   STORES,
@@ -256,6 +257,14 @@ export class WebStorageAdapter implements StorageAdapter {
     return dbGetByIndex<StudyQuizAttempt>(STORES.STUDY_ATTEMPTS, "bookId", bookId);
   }
 
+  async saveStudyBadgeAward(award: StudyBadgeAward): Promise<void> {
+    await dbPut(STORES.STUDY_BADGES, award);
+  }
+
+  async loadStudyBadgeAwards(bookId: string): Promise<StudyBadgeAward[]> {
+    return dbGetByIndex<StudyBadgeAward>(STORES.STUDY_BADGES, "bookId", bookId);
+  }
+
   // ── Style seed ───────────────────────────────────────────────────────────
 
   async saveBookStyleSeed(bookId: string, seedId: StyleSeedId): Promise<void> {
@@ -341,6 +350,9 @@ export class WebStorageAdapter implements StorageAdapter {
       dbDeleteByIndex(STORES.NOTES, "bookId", bookId),
       dbDelete(STORES.SEMANTIC_MAPS, bookId),
       dbDelete(STORES.STUDY_GUIDES, bookId),
+      dbDeleteByIndex(STORES.STUDY_QUIZZES, "bookId", bookId),
+      dbDeleteByIndex(STORES.STUDY_ATTEMPTS, "bookId", bookId),
+      dbDeleteByIndex(STORES.STUDY_BADGES, "bookId", bookId),
       dbDelete(STORES.BOOK_SETTINGS, bookId),
       this.deleteImages(bookId),
     ]);

@@ -33,7 +33,7 @@ import {
   STUDY_GUIDE_PROGRESS_STEPS,
 } from "@/pipeline/studySegmenter";
 import { refineStudyGuide } from "@/pipeline/studyRefiner";
-import { generateSegmentQuiz } from "@/pipeline/studyQuizzer";
+import { generateChapterQuiz, generateSegmentQuiz, generateWholeBookQuiz } from "@/pipeline/studyQuizzer";
 import {
   groupSegmentsByChapter,
   isBookComplete,
@@ -41,7 +41,7 @@ import {
   isSegmentReached,
   type StudyChapterGroup,
 } from "@/utils/studyProgress";
-import type { BookStructure, StudyGuide, StudyQuiz, StudyQuizAttempt, StudySegment } from "@/types";
+import type { BookStructure, StudyBadgeAward, StudyGuide, StudyQuiz, StudyQuizAttempt, StudySegment } from "@/types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type QuizMode = "segment" | "chapter" | "book";
@@ -55,21 +55,25 @@ export default function StudyGuide() {
   const [showQuizSelector, setShowQuizSelector] = useState(false);
   const [quizzes, setQuizzes] = useState<StudyQuiz[]>([]);
   const [attempts, setAttempts] = useState<StudyQuizAttempt[]>([]);
+  const [badges, setBadges] = useState<StudyBadgeAward[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     if (!activeBook) {
       setQuizzes([]);
       setAttempts([]);
+      setBadges([]);
       return;
     }
     Promise.all([
       storage.loadStudyQuizzes(activeBook.id).catch(() => [] as StudyQuiz[]),
       storage.loadStudyQuizAttempts(activeBook.id).catch(() => [] as StudyQuizAttempt[]),
-    ]).then(([loadedQuizzes, loadedAttempts]) => {
+      storage.loadStudyBadgeAwards(activeBook.id).catch(() => [] as StudyBadgeAward[]),
+    ]).then(([loadedQuizzes, loadedAttempts, loadedBadges]) => {
       if (cancelled) return;
       setQuizzes(loadedQuizzes);
       setAttempts(loadedAttempts);
+      setBadges(loadedBadges);
     });
     return () => {
       cancelled = true;
@@ -207,10 +211,29 @@ export default function StudyGuide() {
             wordPosition={wordPosition}
             quizzes={quizzes}
             attempts={attempts}
+            badges={badges}
             onQuizSaved={(quiz) => setQuizzes((current) => [...current.filter((q) => q.id !== quiz.id), quiz])}
             onAttemptSaved={(attempt) => setAttempts((current) => [...current, attempt])}
+            onBadgeSaved={(badge) => setBadges((current) => [...current.filter((b) => b.id !== badge.id), badge])}
             onClose={() => setShowQuizSelector(false)}
           />
+        )}
+
+        {badges.length > 0 && (
+          <div className="border-b border-hair px-3 py-2">
+            <div className="flex gap-1.5 overflow-x-auto scrollbar-thin">
+              {badges.map((badge) => (
+                <span
+                  key={badge.id}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-lumina-gold/24 bg-lumina-gold/[0.06] px-2.5 py-1 text-[10px] text-lumina-gold/75"
+                  title={`${badge.label} · ${badge.score}%`}
+                >
+                  <Trophy size={11} />
+                  {badge.label}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
 
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-3 py-3 scrollbar-thin">
@@ -252,8 +275,10 @@ function QuizSelector({
   wordPosition,
   quizzes,
   attempts,
+  badges,
   onQuizSaved,
   onAttemptSaved,
+  onBadgeSaved,
   onClose,
 }: {
   guide: StudyGuide;
@@ -261,8 +286,10 @@ function QuizSelector({
   wordPosition: number;
   quizzes: StudyQuiz[];
   attempts: StudyQuizAttempt[];
+  badges: StudyBadgeAward[];
   onQuizSaved: (quiz: StudyQuiz) => void;
   onAttemptSaved: (attempt: StudyQuizAttempt) => void;
+  onBadgeSaved: (badge: StudyBadgeAward) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<QuizMode>("segment");
@@ -282,6 +309,12 @@ function QuizSelector({
   const existingSegmentQuiz = selectedSegment
     ? quizzes.find((quiz) => quiz.scope === "segment" && quiz.targetId === selectedSegment.id)
     : null;
+  const existingChapterQuiz = selectedChapter
+    ? quizzes.find((quiz) => quiz.scope === "chapter" && quiz.targetId === `chapter-${selectedChapter.chapterIndex}`)
+    : null;
+  const existingBookQuiz = quizzes.find((quiz) => quiz.scope === "book" && quiz.targetId === "whole-book") ?? null;
+  const existingQuiz =
+    mode === "segment" ? existingSegmentQuiz : mode === "chapter" ? existingChapterQuiz : existingBookQuiz;
   const latestAttempt = activeQuiz
     ? [...attempts].reverse().find((attempt) => attempt.quizId === activeQuiz.id)
     : null;
@@ -307,19 +340,14 @@ function QuizSelector({
     if (!canGenerate) return;
     setNotice(null);
     setQuizError(null);
-    if (mode !== "segment") {
-      setNotice("Chapter and whole-book quiz generation come next. Segment quizzes are live now.");
+    if (existingQuiz) {
+      setActiveQuiz(existingQuiz);
       return;
     }
-    if (!selectedSegment) return;
-    if (existingSegmentQuiz) {
-      setActiveQuiz(existingSegmentQuiz);
-      return;
-    }
-    void generateSelectedSegmentQuiz(selectedSegment);
+    void generateSelectedQuiz();
   };
 
-  const generateSelectedSegmentQuiz = async (segment: StudySegment) => {
+  const generateSelectedQuiz = async () => {
     if (!activeStructure) {
       setQuizError("The book structure is still loading. Try again in a moment.");
       return;
@@ -331,7 +359,16 @@ function QuizSelector({
     }
     setIsGeneratingQuiz(true);
     try {
-      const quiz = await generateSegmentQuiz({ segment, structure: activeStructure, apiKey });
+      let quiz: StudyQuiz;
+      if (mode === "segment") {
+        if (!selectedSegment) return;
+        quiz = await generateSegmentQuiz({ segment: selectedSegment, structure: activeStructure, apiKey });
+      } else if (mode === "chapter") {
+        if (!selectedChapter) return;
+        quiz = await generateChapterQuiz({ chapter: selectedChapter, structure: activeStructure, apiKey });
+      } else {
+        quiz = await generateWholeBookQuiz({ segments: guide.segments, structure: activeStructure, apiKey });
+      }
       await storage.saveStudyQuiz(quiz);
       onQuizSaved(quiz);
       setActiveQuiz(quiz);
@@ -454,6 +491,18 @@ function QuizSelector({
             Quiz generated
           </p>
         )}
+        {mode === "chapter" && existingChapterQuiz && (
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-lumina-gold/70">
+            <CheckCircle2 size={12} />
+            Quiz generated
+          </p>
+        )}
+        {mode === "book" && existingBookQuiz && (
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-lumina-gold/70">
+            <CheckCircle2 size={12} />
+            Quiz generated
+          </p>
+        )}
         {!canGenerate && (
           <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-ink-faint">
             <Lock size={12} className="mt-0.5 shrink-0" />
@@ -489,6 +538,25 @@ function QuizSelector({
             };
             await storage.saveStudyQuizAttempt(attempt);
             onAttemptSaved(attempt);
+            if (attempt.passed && !badges.some((badge) => badge.quizId === activeQuiz.id)) {
+              const badge: StudyBadgeAward = {
+                id: `badge-${activeQuiz.id}`,
+                bookId: activeQuiz.bookId,
+                quizId: activeQuiz.id,
+                scope: activeQuiz.scope,
+                targetId: activeQuiz.targetId,
+                label:
+                  activeQuiz.scope === "book"
+                    ? "Whole Book Mastery"
+                    : activeQuiz.scope === "chapter"
+                      ? "Chapter Mastered"
+                      : "Segment Cleared",
+                score,
+                awardedAt: new Date().toISOString(),
+              };
+              await storage.saveStudyBadgeAward(badge);
+              onBadgeSaved(badge);
+            }
           }}
         />
       )}
@@ -499,7 +567,7 @@ function QuizSelector({
         className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-4 py-2.5 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
       >
         {isGeneratingQuiz ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-        {existingSegmentQuiz && mode === "segment" ? "Take Quiz" : isGeneratingQuiz ? "Generating Quiz" : "Generate Quiz"}
+        {existingQuiz ? "Take Quiz" : isGeneratingQuiz ? "Generating Quiz" : "Generate Quiz"}
       </button>
     </div>
   );
@@ -518,12 +586,28 @@ function QuizRunner({
 }) {
   const [answers, setAnswers] = useState<number[]>(() => Array(quiz.questions.length).fill(-1));
   const [submitted, setSubmitted] = useState(Boolean(latestAttempt));
-  const displayAnswers = submitted && latestAttempt ? latestAttempt.answers : answers;
-  const score = latestAttempt?.score;
+  const [completedAttempt, setCompletedAttempt] = useState<StudyQuizAttempt | null>(latestAttempt ?? null);
+  const displayAttempt = completedAttempt ?? latestAttempt ?? null;
+  const displayAnswers = submitted && displayAttempt ? displayAttempt.answers : answers;
+  const score = displayAttempt?.score;
 
   const submit = async () => {
     if (answers.some((answer) => answer < 0)) return;
     await onComplete(answers);
+    const correct = answers.reduce(
+      (sum, answer, index) => sum + (answer === quiz.questions[index]?.correctOptionIndex ? 1 : 0),
+      0
+    );
+    const score = Math.round((correct / quiz.questions.length) * 100);
+    setCompletedAttempt({
+      id: "local-preview",
+      quizId: quiz.id,
+      bookId: quiz.bookId,
+      answers,
+      score,
+      passed: score >= 70,
+      completedAt: new Date().toISOString(),
+    });
     setSubmitted(true);
   };
 
@@ -552,8 +636,15 @@ function QuizRunner({
       <div className="space-y-3">
         {quiz.questions.map((question, questionIndex) => {
           const selected = displayAnswers[questionIndex] ?? -1;
+          const previous = quiz.questions[questionIndex - 1];
+          const showChainTitle = Boolean(question.chainTitle && question.chainTitle !== previous?.chainTitle);
           return (
             <div key={question.id} className="rounded-lg border border-hair bg-surface-dark/55 p-3">
+              {showChainTitle && (
+                <p className="mb-2 text-[10px] uppercase tracking-[0.16em] text-lumina-gold/65">
+                  {question.chainTitle}
+                </p>
+              )}
               <p className="text-[10px] uppercase tracking-[0.12em] text-ink-faint">
                 Question {question.questionNumber} of {quiz.questions.length}
               </p>

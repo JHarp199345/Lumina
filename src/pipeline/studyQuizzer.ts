@@ -1,23 +1,25 @@
 /**
- * Study quiz generation — PLANv Phase 5.
+ * Study quiz generation — PLANv phases 5-7.
  *
- * V1 supports Segment Quizzes only. Chapter and whole-book quizzes use the
- * selector shell from Phase 4 but wait for later phases because they need
- * different prompt structure and question-chain planning.
+ * Segment quizzes are short comprehension checks. Chapter quizzes pull from
+ * multiple segments. Whole-book quizzes use question chains: grouped questions
+ * that build from recall toward synthesis.
  */
 
 import { LUMINA_CONFIG } from "@/config";
 import type {
   BookStructure,
+  StudyQuestionLevel,
   StudyQuiz,
   StudyQuizQuestion,
   StudySegment,
-  StudyQuestionLevel,
 } from "@/types";
+import type { StudyChapterGroup } from "@/utils/studyProgress";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 interface RawQuestion {
+  chainTitle?: string;
   level?: string;
   question?: string;
   options?: unknown;
@@ -56,20 +58,74 @@ function normaliseQuestions(raw: unknown): StudyQuizQuestion[] {
       if (!q.question || options.length !== 4 || !Number.isInteger(correct) || correct < 0 || correct > 3) {
         return null;
       }
-      const question: StudyQuizQuestion = {
+      return {
         id: `q-${index + 1}`,
         questionNumber: index + 1,
+        chainTitle: q.chainTitle?.trim() || undefined,
         level: normaliseLevel(q.level),
         question: q.question.trim(),
         options,
         correctOptionIndex: correct,
-        explanation: q.explanation?.trim() || "This answer best matches the segment.",
+        explanation: q.explanation?.trim() || "This answer best matches the material.",
         purpose: q.purpose?.trim() || undefined,
       };
-      return question;
     })
-    .filter((item): item is StudyQuizQuestion => item !== null)
-    .slice(0, 5);
+    .filter((item): item is StudyQuizQuestion => item !== null);
+}
+
+async function requestQuestions(
+  prompt: string,
+  apiKey: string,
+  minQuestions: number,
+  maxQuestions: number
+): Promise<StudyQuizQuestion[]> {
+  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.35,
+        maxOutputTokens: 3072,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  if (!response.ok) throw new Error(`Gemini error ${response.status}`);
+
+  const data = await response.json();
+  const rawText: string = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+  const parsed = JSON.parse(rawText.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim());
+  const questions = normaliseQuestions(parsed.questions).slice(0, maxQuestions);
+  if (questions.length < minQuestions) throw new Error("AI returned too few usable quiz questions.");
+  return questions.map((question, index) => ({ ...question, questionNumber: index + 1, id: `q-${index + 1}` }));
+}
+
+function titleForChapterGroup(group: StudyChapterGroup): string {
+  return group.chapterTitle || `Chapter ${group.chapterIndex + 1}`;
+}
+
+function chapterText(group: StudyChapterGroup, structure: BookStructure): string {
+  return group.segments
+    .map((segment) => segmentText(segment, structure))
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
+function bookReviewText(segments: StudySegment[], structure: BookStructure): string {
+  return segments
+    .filter((segment) => segment.quizWorthy)
+    .map((segment) => {
+      const excerpt = segmentText(segment, structure).slice(0, 1200);
+      return `### ${segment.title}
+Summary: ${segment.summary || "(none)"}
+Concepts: ${(segment.concepts ?? []).join(", ") || "(none)"}
+Excerpt:
+${excerpt}`;
+    })
+    .join("\n\n");
 }
 
 export async function generateSegmentQuiz({
@@ -100,18 +156,7 @@ Rules:
 - Explanations should be brief and useful.
 
 Return ONLY JSON:
-{
-  "questions": [
-    {
-      "level": "recall" | "relationship" | "interpretation" | "synthesis",
-      "question": string,
-      "options": string[4],
-      "correctOptionIndex": number,
-      "explanation": string,
-      "purpose": string
-    }
-  ]
-}
+{"questions":[{"level":"recall"|"relationship"|"interpretation"|"synthesis","question":string,"options":string[4],"correctOptionIndex":number,"explanation":string,"purpose":string}]}
 
 Segment title: ${segment.title}
 Segment summary: ${segment.summary || "(none)"}
@@ -122,34 +167,115 @@ Segment text:
 ${text.slice(0, 9000)}
 """`;
 
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.35,
-        maxOutputTokens: 2048,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-
-  if (!response.ok) throw new Error(`Gemini error ${response.status}`);
-
-  const data = await response.json();
-  const rawText: string = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  const parsed = JSON.parse(rawText.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim());
-  const questions = normaliseQuestions(parsed.questions);
-  if (questions.length < 3) throw new Error("AI returned too few usable quiz questions.");
-
+  const questions = await requestQuestions(prompt, apiKey, 3, 5);
   return {
     id: `quiz-${segment.id}-${Date.now()}`,
     bookId: segment.bookId,
     scope: "segment",
     targetId: segment.id,
     title: segment.title,
+    generatedAt: new Date().toISOString(),
+    questionCount: questions.length,
+    questions,
+  };
+}
+
+export async function generateChapterQuiz({
+  chapter,
+  structure,
+  apiKey,
+}: {
+  chapter: StudyChapterGroup;
+  structure: BookStructure;
+  apiKey: string;
+}): Promise<StudyQuiz> {
+  const text = chapterText(chapter, structure);
+  if (text.split(/\s+/).filter(Boolean).length < 180) {
+    throw new Error("This chapter selection is too short for a meaningful quiz.");
+  }
+
+  const title = titleForChapterGroup(chapter);
+  const prompt = `You are generating a Study Guide chapter quiz for Lumina.
+
+Create 5 to 10 multiple-choice questions for this chapter.
+
+Rules:
+- Do not ask random trivia.
+- Test recall only when it supports comprehension.
+- Include cause/effect, character motivation, consequences, and theme when appropriate.
+- Each question must have exactly 4 answer options.
+- correctOptionIndex must be 0, 1, 2, or 3.
+- Explanations should be brief and useful.
+
+Return ONLY JSON:
+{"questions":[{"level":"recall"|"relationship"|"interpretation"|"synthesis","question":string,"options":string[4],"correctOptionIndex":number,"explanation":string,"purpose":string}]}
+
+Chapter target: ${title}
+
+Text:
+"""
+${text.slice(0, 14000)}
+"""`;
+
+  const questions = await requestQuestions(prompt, apiKey, 5, 10);
+  return {
+    id: `quiz-chapter-${chapter.chapterIndex}-${Date.now()}`,
+    bookId: chapter.segments[0]?.bookId ?? structure.bookId,
+    scope: "chapter",
+    targetId: `chapter-${chapter.chapterIndex}`,
+    title,
+    generatedAt: new Date().toISOString(),
+    questionCount: questions.length,
+    questions,
+  };
+}
+
+export async function generateWholeBookQuiz({
+  segments,
+  structure,
+  apiKey,
+}: {
+  segments: StudySegment[];
+  structure: BookStructure;
+  apiKey: string;
+}): Promise<StudyQuiz> {
+  const reviewText = bookReviewText(segments, structure);
+  if (reviewText.split(/\s+/).filter(Boolean).length < 400) {
+    throw new Error("This book needs more quiz-worthy guide material first.");
+  }
+
+  const prompt = `You are generating a whole-book Study Guide quiz for Lumina.
+
+Create 8 to 12 multiple-choice questions arranged into 3 question chains.
+
+A question chain is a set of 2-4 questions where each question prepares the reader for the next. Move from recall to relationship to interpretation to synthesis.
+
+Rules:
+- Every question must include a "chainTitle".
+- Do not create isolated trivia questions.
+- Focus on causation, consequences, character decisions, setup/payoff, callbacks, and themes.
+- Some recall is allowed, but recall must support understanding.
+- Each question must have exactly 4 answer options.
+- correctOptionIndex must be 0, 1, 2, or 3.
+- Explanations should be brief and useful.
+
+Return ONLY JSON:
+{"questions":[{"chainTitle":string,"level":"recall"|"relationship"|"interpretation"|"synthesis","question":string,"options":string[4],"correctOptionIndex":number,"explanation":string,"purpose":string}]}
+
+Book: ${structure.title}
+
+Study guide material:
+"""
+${reviewText.slice(0, 18000)}
+"""`;
+
+  const questions = await requestQuestions(prompt, apiKey, 8, 12);
+  return {
+    id: `quiz-book-${Date.now()}`,
+    bookId: structure.bookId,
+    scope: "book",
+    targetId: "whole-book",
+    title: "Whole Book Review",
     generatedAt: new Date().toISOString(),
     questionCount: questions.length,
     questions,

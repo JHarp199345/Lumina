@@ -19,6 +19,7 @@ import type {
   StudyGuide,
   StudyQuiz,
   StudyQuizAttempt,
+  StudyBadgeAward,
 } from "@/types";
 
 let _db: Database | null = null;
@@ -132,6 +133,15 @@ async function initSchema(db: Database): Promise<void> {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS study_badges (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      badge_json TEXT NOT NULL,
+      awarded_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS image_cache (
       id TEXT PRIMARY KEY,
       book_id TEXT NOT NULL,
@@ -204,6 +214,7 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quiz_attempts WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_badges WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
 }
@@ -507,6 +518,30 @@ export async function dbLoadStudyQuizAttempts(bookId: string): Promise<StudyQuiz
   });
 }
 
+export async function dbSaveStudyBadgeAward(award: StudyBadgeAward): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO study_badges (id, book_id, badge_json, awarded_at)
+     VALUES ($1, $2, $3, $4)`,
+    [award.id, award.bookId, JSON.stringify(award), award.awardedAt]
+  );
+}
+
+export async function dbLoadStudyBadgeAwards(bookId: string): Promise<StudyBadgeAward[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT badge_json FROM study_badges WHERE book_id = $1 ORDER BY awarded_at ASC`,
+    [bookId]
+  );
+  return rows.flatMap((row) => {
+    try {
+      return [JSON.parse(String(row.badge_json)) as StudyBadgeAward];
+    } catch {
+      return [];
+    }
+  });
+}
+
 // ─── Image Cache ──────────────────────────────────────────────────────────────
 
 export async function dbSaveImageCache(image: CachedImage): Promise<void> {
@@ -606,6 +641,7 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
     [`DELETE FROM study_guides WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_quizzes WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_quiz_attempts WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM study_badges WHERE book_id = $1`, [bookId]],
     [`DELETE FROM image_cache WHERE book_id = $1`, [bookId]],
     [`DELETE FROM book_settings WHERE book_id = $1`, [bookId]],
   ] as [string, unknown[]][];
