@@ -159,6 +159,7 @@ export interface IdentifiedScene {
 
 export interface SemanticMap {
   bookId: string;
+  visualPlanVersion?: number;
   arcShape: ArcShape;
   inflectionPoints: InflectionPoint[];
   scenes: IdentifiedScene[];

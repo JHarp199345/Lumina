@@ -11,6 +11,8 @@ import { storage } from "@/storage";
 import type { Book, BookStructure, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
+import { diagnosticInfo } from "@/utils/diagnostics";
 
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -209,7 +211,7 @@ export function useEpubImport() {
         : book.id;
 
       // 3. Load all ancillary data
-      const [semanticMap, seedId, highlights, notes, cachedImages, studyGuide, audioArtifacts] = await Promise.all([
+      const [storedSemanticMap, seedId, highlights, notes, cachedImages, studyGuide, audioArtifacts] = await Promise.all([
         storage.loadSemanticMap(semanticBookId),
         storage.loadBookStyleSeed(book.id),
         storage.loadHighlights(book.id),
@@ -218,6 +220,19 @@ export function useEpubImport() {
         storage.loadStudyGuide(book.id).catch(() => null),
         storage.loadAudioArtifacts(book.id).catch(() => []),
       ]);
+      const semanticMap =
+        storedSemanticMap?.visualPlanVersion === VISUAL_PLAN_VERSION
+          ? storedSemanticMap
+          : null;
+      if (storedSemanticMap && !semanticMap) {
+        diagnosticInfo("semantic_map.stale_ignored", "Ignoring stale visual plan", {
+          bookId: book.id,
+          semanticBookId,
+          storedVersion: storedSemanticMap.visualPlanVersion ?? null,
+          currentVersion: VISUAL_PLAN_VERSION,
+          scenes: storedSemanticMap.scenes.length,
+        });
+      }
 
       // 4. Commit everything to stores before setting activeBook.
       //    React batches these, but initialCfi/loadProgress being set first

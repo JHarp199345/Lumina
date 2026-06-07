@@ -21,6 +21,7 @@ import { storage } from "@/storage";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
+import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import type {
   AnalysisProgressDetail,
   AnalysisProgressUpdate,
@@ -75,7 +76,17 @@ export function useBookOrchestration() {
 
       // Check for cached semantic map for this book or collection segment.
       const existingMap = await storage.loadSemanticMap(slice.semanticBookId);
-      if (existingMap) {
+      if (existingMap && existingMap.visualPlanVersion !== VISUAL_PLAN_VERSION) {
+        diagnosticInfo("semantic_map.stale_deleted", "Deleting stale visual plan", {
+          semanticBookId: slice.semanticBookId,
+          storedVersion: existingMap.visualPlanVersion ?? null,
+          currentVersion: VISUAL_PLAN_VERSION,
+          scenes: existingMap.scenes.length,
+        });
+        await storage.deleteSemanticMap(slice.semanticBookId).catch(() => {});
+      }
+
+      if (existingMap?.visualPlanVersion === VISUAL_PLAN_VERSION) {
         console.log(`[Orchestration] Using cached semantic map for ${slice.label}`);
         diagnosticInfo("orchestration.cached_map", "Using cached semantic map", {
           semanticBookId: slice.semanticBookId,

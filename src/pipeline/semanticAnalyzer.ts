@@ -23,6 +23,7 @@ import type {
   AnalysisProgressReporter,
 } from "@/types";
 import { LUMINA_CONFIG } from "@/config";
+import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -143,6 +144,7 @@ export async function analyzeBook(
 
   return {
     bookId: analysisStructure.bookId,
+    visualPlanVersion: VISUAL_PLAN_VERSION,
     arcShape: macroArc.arcShape,
     inflectionPoints: macroArc.inflectionPoints,
     scenes: plannedScenes,
