@@ -209,7 +209,6 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM book_structures WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM highlights WHERE book_id = $1`, [bookId]);
-  await db.execute(`DELETE FROM notes WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
@@ -635,7 +634,6 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
     [`DELETE FROM books WHERE id = $1`, [bookId]],
     [`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]],
     [`DELETE FROM highlights WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM notes WHERE book_id = $1`, [bookId]],
     [`DELETE FROM semantic_maps WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_guides WHERE book_id = $1`, [bookId]],
     [`DELETE FROM study_quizzes WHERE book_id = $1`, [bookId]],

@@ -347,7 +347,6 @@ export class WebStorageAdapter implements StorageAdapter {
       dbDelete(STORES.EPUBS, bookId),
       dbDelete(STORES.PROGRESS, bookId),
       dbDeleteByIndex(STORES.HIGHLIGHTS, "bookId", bookId),
-      dbDeleteByIndex(STORES.NOTES, "bookId", bookId),
       dbDelete(STORES.SEMANTIC_MAPS, bookId),
       dbDelete(STORES.STUDY_GUIDES, bookId),
       dbDeleteByIndex(STORES.STUDY_QUIZZES, "bookId", bookId),
