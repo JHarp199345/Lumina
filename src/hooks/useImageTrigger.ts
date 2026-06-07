@@ -20,6 +20,18 @@ import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import type { IdentifiedScene, CachedImage } from "@/types";
 
+function currentAnchorSceneId(
+  scenes: IdentifiedScene[],
+  wordPosition: number,
+  getSceneWordPosition: (scene: IdentifiedScene) => number
+): string | null {
+  let current: IdentifiedScene | null = null;
+  for (const scene of [...scenes].sort((a, b) => getSceneWordPosition(a) - getSceneWordPosition(b))) {
+    if (getSceneWordPosition(scene) <= wordPosition) current = scene;
+  }
+  return current?.id ?? null;
+}
+
 export function useImageTrigger() {
   const { activeBook, activeSemanticMap, activeStyleSeed } = useBookStore();
   const { wordPosition } = useReaderStore();
@@ -28,7 +40,6 @@ export function useImageTrigger() {
     addToCache,
     setCurrentImage,
     setCurrentThemes,
-    setIsTransitioning,
     queue,
     enqueue,
     dequeue,
@@ -41,16 +52,10 @@ export function useImageTrigger() {
   const isGeneratingRef = useRef(false);
   const priorPromptRef = useRef<string>("");
   const generatedCountRef = useRef(0);
-  const activeSegmentSceneIdRef = useRef<string | null>(null);
-  const transitionTimerRef = useRef<number | null>(null);
-  const DISPLAY_SWITCH_HYSTERESIS_WORDS = 140;
 
   useEffect(() => {
-    activeSegmentSceneIdRef.current = null;
-    if (transitionTimerRef.current != null) {
-      window.clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = null;
-    }
+    priorPromptRef.current = "";
+    generatedCountRef.current = 0;
   }, [activeBook?.id]);
 
   // Calculate word position of each scene using real anchor data
@@ -69,63 +74,27 @@ export function useImageTrigger() {
     const scenes = [...activeSemanticMap.scenes].sort(
       (a, b) => getSceneWordPosition(a) - getSceneWordPosition(b)
     );
-    const storeCurrentImage = useImageStore.getState().currentImage;
-
-    if (!activeSegmentSceneIdRef.current && storeCurrentImage?.sceneId) {
-      activeSegmentSceneIdRef.current = storeCurrentImage.sceneId;
+    // ── Display pass: literal anchor rule ───────────────────────────────────
+    // An image belongs to the scene/segment that sourced it. Keep displaying it
+    // until the reader crosses the next scene anchor with a cached image.
+    let anchoredScene: IdentifiedScene | null = null;
+    for (const scene of scenes) {
+      if (!imageCache[scene.id]) continue;
+      if (getSceneWordPosition(scene) <= wordPosition) anchoredScene = scene;
     }
 
-    // ── Display pass: always show the most recently passed scene's image ──────
-    // Find the cached scene whose word position is <= current position and
-    // closest to it. This means the correct image persists across the full
-    // span between scenes — no empty gaps.
-    const currentSegmentScene = activeSegmentSceneIdRef.current
-      ? scenes.find((scene) => scene.id === activeSegmentSceneIdRef.current)
-      : null;
-    const currentSegmentIndex = currentSegmentScene
-      ? scenes.findIndex((scene) => scene.id === currentSegmentScene.id)
-      : -1;
-    const currentSegmentStart = currentSegmentScene
-      ? getSceneWordPosition(currentSegmentScene)
-      : -Infinity;
-    const nextSegmentStart = currentSegmentIndex >= 0 && scenes[currentSegmentIndex + 1]
-      ? getSceneWordPosition(scenes[currentSegmentIndex + 1])
-      : Infinity;
-
-    let bestDisplayScene: IdentifiedScene | null = null;
-    const shouldKeepCurrent =
-      currentSegmentScene &&
-      imageCache[currentSegmentScene.id] &&
-      wordPosition >= currentSegmentStart - DISPLAY_SWITCH_HYSTERESIS_WORDS &&
-      wordPosition < nextSegmentStart + DISPLAY_SWITCH_HYSTERESIS_WORDS;
-
-    if (shouldKeepCurrent) {
-      bestDisplayScene = currentSegmentScene;
-    } else {
-      for (const scene of scenes) {
-        if (!imageCache[scene.id]) continue;
-        const scenePos = getSceneWordPosition(scene);
-        const activationPos = scenePos + (activeSegmentSceneIdRef.current ? DISPLAY_SWITCH_HYSTERESIS_WORDS : 0);
-        if (wordPosition >= activationPos) {
-          bestDisplayScene = scene;
-        }
-      }
-    }
-
-    if (bestDisplayScene) {
-      const cached = imageCache[bestDisplayScene.id];
+    if (anchoredScene) {
+      const cached = imageCache[anchoredScene.id];
       const current = useImageStore.getState().currentImage;
-      if (current?.sceneId !== bestDisplayScene.id) {
+      if (current?.sceneId !== anchoredScene.id || current.filePath !== cached.filePath) {
         diagnosticInfo("image.display.switch", "Switching visual segment", {
           fromSceneId: current?.sceneId ?? null,
-          toSceneId: bestDisplayScene.id,
+          toSceneId: anchoredScene.id,
           wordPosition,
-          sceneWordPosition: getSceneWordPosition(bestDisplayScene),
+          sceneWordPosition: getSceneWordPosition(anchoredScene),
         });
-        activeSegmentSceneIdRef.current = bestDisplayScene.id;
-        transitionToImage(cached);
-      } else {
-        activeSegmentSceneIdRef.current = bestDisplayScene.id;
+        setCurrentImage(cached);
+        setCurrentThemes(cached.emotionalThemes);
       }
     }
 
@@ -165,6 +134,8 @@ export function useImageTrigger() {
     wordPosition,
     getSceneWordPosition,
     enqueue,
+    setCurrentImage,
+    setCurrentThemes,
   ]);
 
   // Process generation queue (one at a time)
@@ -174,7 +145,10 @@ export function useImageTrigger() {
     const next = dequeue();
     if (!next || next.status !== "pending") return;
 
-    const scene = activeSemanticMap?.scenes.find((s) => s.id === next.sceneId);
+    const semanticMap = activeSemanticMap;
+    if (!semanticMap) return;
+
+    const scene = semanticMap.scenes.find((s) => s.id === next.sceneId);
     if (!scene) return;
 
     const existingMemoryImage = useImageStore.getState().imageCache[scene.id];
@@ -188,11 +162,11 @@ export function useImageTrigger() {
     );
     if (existingPersistedImage) {
       addToCache(existingPersistedImage);
-      const activeSegmentSceneId = activeSegmentSceneIdRef.current;
       const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-      if (!hasCurrentImage || activeSegmentSceneId === scene.id) {
-        activeSegmentSceneIdRef.current = scene.id;
-        transitionToImage(existingPersistedImage);
+      const sceneIsCurrentAnchor = scene.id === currentAnchorSceneId(semanticMap.scenes, wordPosition, getSceneWordPosition);
+      if (!hasCurrentImage && sceneIsCurrentAnchor) {
+        setCurrentImage(existingPersistedImage);
+        setCurrentThemes(existingPersistedImage.emotionalThemes);
       }
       updateQueueItemStatus(next.sceneId, "complete");
       diagnosticInfo("image.generation.persisted_cache", "Using persisted image instead of regenerating", {
@@ -243,20 +217,30 @@ export function useImageTrigger() {
             [img.descriptionUsed]
           );
 
-          // Display only if this generated image belongs to the current visual segment.
+          // Display only if this generated image belongs to the current anchor.
           const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-          if (!hasCurrentImage || activeSegmentSceneIdRef.current === scene.id) {
-            activeSegmentSceneIdRef.current = scene.id;
-            transitionToImage(img);
+          const sceneIsCurrentAnchor = scene.id === currentAnchorSceneId(
+            semanticMap.scenes,
+            useReaderStore.getState().wordPosition,
+            getSceneWordPosition
+          );
+          if (!hasCurrentImage && sceneIsCurrentAnchor) {
+            setCurrentImage(img);
+            setCurrentThemes(img.emotionalThemes);
           }
         },
       });
 
       addToCache(cachedImage);
       const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-      if (!hasCurrentImage || activeSegmentSceneIdRef.current === scene.id) {
-        activeSegmentSceneIdRef.current = scene.id;
-        transitionToImage(cachedImage);
+      const sceneIsCurrentAnchor = scene.id === currentAnchorSceneId(
+        semanticMap.scenes,
+        useReaderStore.getState().wordPosition,
+        getSceneWordPosition
+      );
+      if (!hasCurrentImage && sceneIsCurrentAnchor) {
+        setCurrentImage(cachedImage);
+        setCurrentThemes(cachedImage.emotionalThemes);
       }
       console.info("[ImageTrigger] Generated image committed:", cachedImage.sceneId);
       diagnosticInfo("image.generation.complete", "Image generation complete", {
@@ -286,29 +270,9 @@ export function useImageTrigger() {
     setIsGenerating,
     wordPosition,
     getSceneWordPosition,
+    setCurrentImage,
+    setCurrentThemes,
   ]);
-
-  // Image transition
-  const transitionToImage = useCallback(
-    (image: CachedImage) => {
-      const current = useImageStore.getState().currentImage;
-      if (current?.sceneId === image.sceneId && current.filePath === image.filePath) return;
-
-      if (transitionTimerRef.current != null) {
-        window.clearTimeout(transitionTimerRef.current);
-        transitionTimerRef.current = null;
-      }
-
-      setIsTransitioning(true);
-      transitionTimerRef.current = window.setTimeout(() => {
-        setCurrentImage(image);
-        setCurrentThemes(image.emotionalThemes);
-        setIsTransitioning(false);
-        transitionTimerRef.current = null;
-      }, LUMINA_CONFIG.IMAGE_TRANSITION_DURATION_MS / 2);
-    },
-    [setCurrentImage, setCurrentThemes, setIsTransitioning]
-  );
 
   // Run proximity check when position changes
   useEffect(() => {

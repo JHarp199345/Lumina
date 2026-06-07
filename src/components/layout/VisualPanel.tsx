@@ -11,7 +11,6 @@ import { useBookOrchestration } from "@/hooks/useBookOrchestration";
 import { storage } from "@/storage";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
-import { LUMINA_CONFIG } from "@/config";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useLongPress } from "@/hooks/useLongPress";
 import AmbientSceneLayer, { type AmbientPhase } from "@/components/visual/AmbientSceneLayer";
@@ -60,7 +59,6 @@ export default function VisualPanel() {
     currentImage,
     currentThemes,
     imageCache,
-    isTransitioning,
     isGenerating,
     queue,
     clearQueue,
@@ -259,7 +257,6 @@ export default function VisualPanel() {
         ) : currentImage ? (
           <ImageDisplay
             src={currentImage.filePath}
-            isTransitioning={isTransitioning}
             isGenerating={isGenerating || isAnalyzing}
           />
         ) : isAnalyzing ? (
@@ -446,11 +443,9 @@ export default function VisualPanel() {
 
 function ImageDisplay({
   src,
-  isTransitioning,
   isGenerating,
 }: {
   src: string;
-  isTransitioning: boolean;
   isGenerating: boolean;
 }) {
   const [loadFailed, setLoadFailed] = useState(false);
@@ -464,7 +459,6 @@ function ImageDisplay({
   const displaySrc = isTauri && !isWebUrl ? toAssetUrl(src) : src;
   const sourceChanged =
     previousDisplaySrcRef.current !== null && previousDisplaySrcRef.current !== displaySrc;
-  const shouldFade = sourceChanged || isTransitioning;
 
   useEffect(() => {
     setLoadFailed(false);
@@ -485,10 +479,10 @@ function ImageDisplay({
       <motion.div
         key={src}
         initial={{ opacity: sourceChanged ? 0 : 1 }}
-        animate={{ opacity: shouldFade && isTransitioning ? 0 : 1 }}
-        exit={{ opacity: sourceChanged ? 0 : 1 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 1 }}
         transition={{
-          duration: sourceChanged ? LUMINA_CONFIG.IMAGE_TRANSITION_DURATION_MS / 1000 : 0,
+          duration: sourceChanged ? 0.8 : 0,
           ease: "easeInOut",
         }}
         className="absolute inset-0"
