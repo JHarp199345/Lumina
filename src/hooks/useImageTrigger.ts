@@ -240,12 +240,6 @@ export function useImageTrigger() {
     );
     if (existingPersistedImage) {
       addToCache(existingPersistedImage);
-      const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-      const sceneCanGovernCurrentPosition = getSceneWordPosition(scene) <= wordPosition;
-      if (!hasCurrentImage && sceneCanGovernCurrentPosition) {
-        setCurrentImage(existingPersistedImage);
-        setCurrentThemes(existingPersistedImage.emotionalThemes);
-      }
       updateQueueItemStatus(next.sceneId, "complete");
       diagnosticInfo("image.generation.persisted_cache", "Using persisted image instead of regenerating", {
         sceneId: scene.id,
@@ -294,26 +288,10 @@ export function useImageTrigger() {
             styleSeed,
             [img.descriptionUsed]
           );
-
-          // Display only if this generated image belongs to the current anchor.
-          const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-          const sceneCanGovernCurrentPosition =
-            getSceneWordPosition(scene) <= useReaderStore.getState().wordPosition;
-          if (!hasCurrentImage && sceneCanGovernCurrentPosition) {
-            setCurrentImage(img);
-            setCurrentThemes(img.emotionalThemes);
-          }
         },
       });
 
       addToCache(cachedImage);
-      const hasCurrentImage = Boolean(useImageStore.getState().currentImage);
-      const sceneCanGovernCurrentPosition =
-        getSceneWordPosition(scene) <= useReaderStore.getState().wordPosition;
-      if (!hasCurrentImage && sceneCanGovernCurrentPosition) {
-        setCurrentImage(cachedImage);
-        setCurrentThemes(cachedImage.emotionalThemes);
-      }
       console.info("[ImageTrigger] Generated image committed:", cachedImage.sceneId);
       diagnosticInfo("image.generation.complete", "Image generation complete", {
         sceneId: cachedImage.sceneId,

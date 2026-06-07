@@ -206,11 +206,9 @@ export function useBookOrchestration() {
         current = scene;
       }
     }
-    if (!current) current = generatable[0];
-
     // 3. Instantly repaint the current block. The read-ahead trigger handles the
     //    rest as the reader advances (it enqueues any scene with no cached image).
-    await _ensureSceneImage(current, seedId, map.bookId);
+    if (current) await _ensureSceneImage(current, seedId, map.bookId);
   }, [clearQueue, clearImageCache]);
 
   // ── Internal helpers ─────────────────────────────────────────────────────────

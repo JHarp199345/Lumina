@@ -270,14 +270,12 @@ export function useEpubImport() {
           }
         }
 
-        // Fallback: show the first available image if reader hasn't passed any scene yet
-        if (!imageToDisplay) {
-          imageToDisplay = cachedImages[0] ?? null;
-        }
-
         if (imageToDisplay) {
           setCurrentImage(imageToDisplay);
           setCurrentThemes(imageToDisplay.emotionalThemes);
+        } else {
+          setCurrentImage(null);
+          setCurrentThemes([]);
         }
       }
 
