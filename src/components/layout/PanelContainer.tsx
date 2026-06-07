@@ -13,6 +13,12 @@ const PANEL_COMPONENTS = {
   reader: ReaderPanel,
 };
 
+type PanelId = keyof typeof PANEL_COMPONENTS;
+
+function isPanelId(panelId: string): panelId is PanelId {
+  return panelId in PANEL_COMPONENTS;
+}
+
 const PANEL_MIN_SIZES: Record<string, number> = {
   toc: 0,
   visual: 15,
@@ -60,7 +66,10 @@ export default function PanelContainer({ onImport, tocOpen = false, onTocClose }
     );
   }
 
-  const orderedPanels = panelOrder.panels.filter((panelId) => tocOpen || panelId !== "toc");
+  const savedPanels = panelOrder.panels.filter(isPanelId);
+  const orderedPanels: PanelId[] = tocOpen
+    ? ["toc", ...savedPanels.filter((panelId) => panelId !== "toc")]
+    : savedPanels.filter((panelId) => panelId !== "toc");
 
   // Build defaultLayout keyed by panel id
   const defaultLayout: Layout = {
@@ -79,10 +88,10 @@ export default function PanelContainer({ onImport, tocOpen = false, onTocClose }
       {orderedPanels.map((panelId, index) => {
         const PanelComponent = PANEL_COMPONENTS[panelId];
         const size = panelLayout[panelId];
-        const minSize = PANEL_MIN_SIZES[panelId];
+        const minSize = panelId === "toc" && tocOpen ? 16 : PANEL_MIN_SIZES[panelId];
 
         // When TOC is toggled open from its default 0%, give it a usable opening size
-        const effectiveSize = panelId === "toc" && size === 0 ? 22 : size;
+        const effectiveSize = panelId === "toc" && tocOpen && size === 0 ? 22 : size;
 
         return (
           <div key={panelId} className="contents">
