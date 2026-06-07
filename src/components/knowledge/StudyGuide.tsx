@@ -11,7 +11,7 @@
  */
 
 import { useState } from "react";
-import { Brain, Sparkles, BookOpen, RefreshCw, CheckCircle2, Circle } from "lucide-react";
+import { Brain, Sparkles, BookOpen, RefreshCw, CheckCircle2, Circle, Wand2 } from "lucide-react";
 import { useBookStore } from "@/store/bookStore";
 import { useStudyStore } from "@/store/studyStore";
 import { useReaderStore } from "@/store/readerStore";
@@ -20,6 +20,7 @@ import {
   buildHeuristicStudyGuide,
   STUDY_GUIDE_PROGRESS_STEPS,
 } from "@/pipeline/studySegmenter";
+import { refineStudyGuide } from "@/pipeline/studyRefiner";
 import type { StudySegment } from "@/types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -67,6 +68,28 @@ export default function StudyGuide() {
     }
   };
 
+  const runRefine = async () => {
+    if (!guide || !activeStructure) return;
+    setError(null);
+    const apiKey = await storage.loadApiKey("lumina_google_ai_key");
+    if (!apiKey) {
+      setError("Add a Google AI key in Settings to refine these segments with AI.");
+      return;
+    }
+    setIsGenerating(true);
+    try {
+      const refined = await refineStudyGuide(guide, activeStructure, apiKey, (p) =>
+        setProgress(p.message)
+      );
+      await storage.saveStudyGuide(refined);
+      mount(activeBook.id, refined);
+    } catch (err) {
+      console.error("[StudyGuide] Refinement failed:", err);
+      setError(err instanceof Error ? err.message : "AI refinement failed. The draft map is unchanged.");
+      setIsGenerating(false);
+    }
+  };
+
   // ── Generating: progress UI ────────────────────────────────────────────────
   if (isGenerating) {
     return (
@@ -94,15 +117,36 @@ export default function StudyGuide() {
               {guide.source === "heuristic" ? " · draft map" : " · refined"}
             </p>
           </div>
-          <button
-            onClick={runGenerate}
-            title="Rebuild the segment map"
-            className="flex items-center gap-1.5 rounded-lg border border-hair px-2.5 py-1.5 text-[11px] text-ink-faint transition-colors hover:text-ink-soft"
-          >
-            <RefreshCw size={12} />
-            Rebuild
-          </button>
+          <div className="flex items-center gap-1.5">
+            {guide.source === "heuristic" ? (
+              <button
+                onClick={runRefine}
+                title="Use AI to name and summarise these segments"
+                className="flex items-center gap-1.5 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-2.5 py-1.5 text-[11px] font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15"
+              >
+                <Wand2 size={12} />
+                Refine with AI
+              </button>
+            ) : (
+              <span className="flex items-center gap-1 rounded-lg border border-lumina-gold/20 px-2 py-1 text-[10px] text-lumina-gold/70">
+                <Sparkles size={10} />
+                Refined
+              </span>
+            )}
+            <button
+              onClick={runGenerate}
+              title="Rebuild the draft segment map from scratch"
+              className="flex items-center gap-1.5 rounded-lg border border-hair px-2.5 py-1.5 text-[11px] text-ink-faint transition-colors hover:text-ink-soft"
+            >
+              <RefreshCw size={12} />
+              Rebuild
+            </button>
+          </div>
         </div>
+
+        {error && (
+          <p className="border-b border-hair px-4 py-2 text-[11px] text-rose-400/80">{error}</p>
+        )}
 
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-3 py-3 scrollbar-thin">
           {guide.segments.map((segment) => (
@@ -150,8 +194,11 @@ function SegmentRow({ segment, reached }: { segment: StudySegment; reached: bool
           {reached ? <CheckCircle2 size={15} /> : <Circle size={15} />}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-ink/85">{segment.title}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
+          <p className="text-[13px] font-medium leading-snug text-ink/85">{segment.title}</p>
+          {segment.summary && (
+            <p className="mt-1 text-[11px] leading-relaxed text-ink-soft/80">{segment.summary}</p>
+          )}
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
             <span>{segment.wordCount.toLocaleString()} words</span>
             <span aria-hidden>·</span>
             <span>~{minutes} min</span>
@@ -166,7 +213,25 @@ function SegmentRow({ segment, reached }: { segment: StudySegment; reached: bool
                 <span className="text-ink-faint/60">transitional</span>
               </>
             )}
+            {segment.spoilerLevel === "high" && (
+              <>
+                <span aria-hidden>·</span>
+                <span className="text-rose-400/60">spoiler-heavy</span>
+              </>
+            )}
           </div>
+          {segment.concepts && segment.concepts.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {segment.concepts.map((c) => (
+                <span
+                  key={c}
+                  className="rounded-md border border-hair bg-ink/[0.03] px-1.5 py-0.5 text-[10px] text-ink-faint"
+                >
+                  {c}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
