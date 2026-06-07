@@ -62,11 +62,13 @@ export function useImageTrigger() {
   const priorPromptRef = useRef<string>("");
   const generatedCountRef = useRef(0);
   const activeVisualSceneIdRef = useRef<string | null>(null);
+  const lastDisplayDecisionRef = useRef<string>("");
 
   useEffect(() => {
     priorPromptRef.current = "";
     generatedCountRef.current = 0;
     activeVisualSceneIdRef.current = null;
+    lastDisplayDecisionRef.current = "";
   }, [activeBook?.id]);
 
   // Calculate word position of each scene using real anchor data
@@ -92,9 +94,10 @@ export function useImageTrigger() {
     // Keep the active image frozen. Advance only when the reader crosses the
     // next cached image anchor. Do not recalculate "best image" on every page.
     const cachedScenes = scenes.filter(({ scene }) => Boolean(imageCache[scene.id]));
-    const activeSceneId = activeVisualSceneIdRef.current;
+    const activeSceneId = current?.sceneId ?? activeVisualSceneIdRef.current;
+    if (activeSceneId) activeVisualSceneIdRef.current = activeSceneId;
     const activeScene = activeSceneId
-      ? cachedScenes.find(({ scene }) => scene.id === activeSceneId) ?? null
+      ? scenes.find(({ scene }) => scene.id === activeSceneId) ?? null
       : null;
 
     let nextDisplay = null as null | { scene: IdentifiedScene; position: number; reason: string };
@@ -126,6 +129,31 @@ export function useImageTrigger() {
         activeVisualSceneIdRef.current = nextDisplay.scene.id;
         setCurrentImage(cached);
         setCurrentThemes(cached.emotionalThemes);
+      }
+    } else {
+      const nextCachedAnchor = activeScene
+        ? cachedScenes.find(({ position }) => position > activeScene.position)
+        : cachedScenes.find(({ position }) => position > wordPosition);
+      const decisionSignature = [
+        activeSceneId ?? "none",
+        current?.sceneId ?? "none",
+        wordPosition,
+        nextCachedAnchor?.scene.id ?? "none",
+        nextCachedAnchor?.position ?? "none",
+        cachedScenes.length,
+      ].join("|");
+
+      if (decisionSignature !== lastDisplayDecisionRef.current) {
+        lastDisplayDecisionRef.current = decisionSignature;
+        diagnosticInfo("image.display.hold", "Holding visual segment", {
+          activeSceneId,
+          currentSceneId: current?.sceneId ?? null,
+          wordPosition,
+          activeScenePosition: activeScene?.position ?? null,
+          nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
+          nextCachedScenePosition: nextCachedAnchor?.position ?? null,
+          cachedSceneCount: cachedScenes.length,
+        });
       }
     }
 
