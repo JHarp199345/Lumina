@@ -32,6 +32,15 @@ function currentAnchorSceneId(
   return current?.id ?? null;
 }
 
+function scenePositions(
+  scenes: IdentifiedScene[],
+  getSceneWordPosition: (scene: IdentifiedScene) => number
+): Array<{ scene: IdentifiedScene; position: number }> {
+  return scenes
+    .map((scene) => ({ scene, position: getSceneWordPosition(scene) }))
+    .sort((a, b) => a.position - b.position);
+}
+
 export function useImageTrigger() {
   const { activeBook, activeSemanticMap, activeStyleSeed } = useBookStore();
   const { wordPosition } = useReaderStore();
@@ -52,10 +61,12 @@ export function useImageTrigger() {
   const isGeneratingRef = useRef(false);
   const priorPromptRef = useRef<string>("");
   const generatedCountRef = useRef(0);
+  const activeVisualSceneIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     priorPromptRef.current = "";
     generatedCountRef.current = 0;
+    activeVisualSceneIdRef.current = null;
   }, [activeBook?.id]);
 
   // Calculate word position of each scene using real anchor data
@@ -71,40 +82,59 @@ export function useImageTrigger() {
   const checkProximity = useCallback(() => {
     if (!activeSemanticMap || !imageGenerationEnabled || !activeBook) return;
 
-    const scenes = [...activeSemanticMap.scenes].sort(
-      (a, b) => getSceneWordPosition(a) - getSceneWordPosition(b)
-    );
-    // ── Display pass: literal anchor rule ───────────────────────────────────
-    // An image belongs to the scene/segment that sourced it. Keep displaying it
-    // until the reader crosses the next scene anchor with a cached image.
-    let anchoredScene: IdentifiedScene | null = null;
-    for (const scene of scenes) {
-      if (!imageCache[scene.id]) continue;
-      if (getSceneWordPosition(scene) <= wordPosition) anchoredScene = scene;
+    const scenes = scenePositions(activeSemanticMap.scenes, getSceneWordPosition);
+    const current = useImageStore.getState().currentImage;
+    if (!activeVisualSceneIdRef.current && current?.sceneId) {
+      activeVisualSceneIdRef.current = current.sceneId;
     }
 
-    if (anchoredScene) {
-      const cached = imageCache[anchoredScene.id];
-      const current = useImageStore.getState().currentImage;
-      if (current?.sceneId !== anchoredScene.id || current.filePath !== cached.filePath) {
+    // ── Display pass: literal forward anchor rule ───────────────────────────
+    // Keep the active image frozen. Advance only when the reader crosses the
+    // next cached image anchor. Do not recalculate "best image" on every page.
+    const cachedScenes = scenes.filter(({ scene }) => Boolean(imageCache[scene.id]));
+    const activeSceneId = activeVisualSceneIdRef.current;
+    const activeScene = activeSceneId
+      ? cachedScenes.find(({ scene }) => scene.id === activeSceneId) ?? null
+      : null;
+
+    let nextDisplay = null as null | { scene: IdentifiedScene; position: number; reason: string };
+
+    if (!current || !activeScene) {
+      const eligible = cachedScenes.filter(({ position }) => position <= wordPosition);
+      const initial = eligible[eligible.length - 1];
+      if (initial) nextDisplay = { ...initial, reason: current ? "restore-active-anchor" : "initial-anchor" };
+    } else {
+      const activePosition = activeScene.position;
+      const eligible = cachedScenes.filter(
+        ({ position }) => position > activePosition && position <= wordPosition
+      );
+      const crossed = eligible[eligible.length - 1];
+      if (crossed) nextDisplay = { ...crossed, reason: "crossed-next-anchor" };
+    }
+
+    if (nextDisplay) {
+      const cached = imageCache[nextDisplay.scene.id];
+      if (cached && (current?.sceneId !== nextDisplay.scene.id || current.filePath !== cached.filePath)) {
         diagnosticInfo("image.display.switch", "Switching visual segment", {
+          reason: nextDisplay.reason,
           fromSceneId: current?.sceneId ?? null,
-          toSceneId: anchoredScene.id,
+          activeSceneId,
+          toSceneId: nextDisplay.scene.id,
           wordPosition,
-          sceneWordPosition: getSceneWordPosition(anchoredScene),
+          sceneWordPosition: nextDisplay.position,
         });
+        activeVisualSceneIdRef.current = nextDisplay.scene.id;
         setCurrentImage(cached);
         setCurrentThemes(cached.emotionalThemes);
       }
     }
 
     // ── Queue pass: enqueue generation for upcoming scenes ────────────────────
-    for (const scene of scenes) {
+    for (const { scene, position: scenePos } of scenes) {
       if (imageCache[scene.id]) continue; // already generated
       const beat = activeSemanticMap.storyboard?.beats.find((item) => item.sceneId === scene.id);
       if (beat?.generationIntent === "planned_only") continue;
 
-      const scenePos = getSceneWordPosition(scene);
       const distance = scenePos - wordPosition;
 
       if (
