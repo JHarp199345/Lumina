@@ -4,6 +4,7 @@ import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useUiStore } from "@/store/uiStore";
+import { useAudioStore } from "@/store/audioStore";
 import { parseChapterDisplay } from "@/utils/titleUtils";
 import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
 
@@ -141,6 +142,56 @@ function pageIndexForChapterOffset(pages: PageSegment[] | undefined, offset: num
   return index >= 0 ? index : pages.length - 1;
 }
 
+function ReadAlongParagraph({
+  paragraph,
+  paragraphIndex,
+  pageStartWord,
+  wordCursor,
+  activeWordPosition,
+}: {
+  paragraph: string;
+  paragraphIndex: number;
+  pageStartWord: number;
+  wordCursor: { current: number };
+  activeWordPosition: number | null;
+}) {
+  const parts = paragraph.split(/(\s+)/);
+  return (
+    <p
+      className={`mb-5 text-ink ${
+        paragraphIndex === 0
+          ? "first-letter:float-left first-letter:mr-2 first-letter:font-serif first-letter:text-[3.1em] first-letter:leading-[0.85] first-letter:text-lumina-gold/80"
+          : ""
+      }`}
+    >
+      {parts.map((part, index) => {
+        if (/^\s+$/.test(part)) return part;
+        const absoluteWord = pageStartWord + wordCursor.current;
+        wordCursor.current += 1;
+        const active = activeWordPosition === absoluteWord;
+        const nearby =
+          activeWordPosition !== null &&
+          absoluteWord >= activeWordPosition - 2 &&
+          absoluteWord <= activeWordPosition + 5;
+        return (
+          <span
+            key={`${index}-${absoluteWord}`}
+            className={
+              active
+                ? "rounded-[0.22em] bg-lumina-gold/34 px-[0.08em] text-ink shadow-[0_0_18px_rgba(210,170,80,0.34)]"
+                : nearby
+                  ? "rounded-[0.22em] bg-sky-200/10 px-[0.03em] shadow-[0_0_12px_rgba(125,190,230,0.10)]"
+                  : undefined
+            }
+          >
+            {part}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
+
 export default function StructuredTextRenderer({
   initialCfi,
   onInitialDisplayComplete,
@@ -157,6 +208,7 @@ export default function StructuredTextRenderer({
     setWordPosition,
   } = useReaderStore();
   const { fontSize, lineHeight } = useSettingsStore();
+  const activeWordPosition = useAudioStore((s) => s.activeWordPosition);
   const isFocused = useUiStore((s) => s.focusMode === "reader");
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -433,6 +485,15 @@ export default function StructuredTextRenderer({
   const currentText = isCover
     ? ""
     : chapterPages[currentChapterIndex]?.[pageIndex] ?? activeStructure.chapters[currentChapterIndex]?.rawText ?? "";
+  const wordsBeforeCurrentChapter =
+    currentChapterIndex < 0
+      ? 0
+      : activeStructure.chapters.slice(0, currentChapterIndex).reduce((sum, chapter) => sum + chapter.wordCount, 0);
+  const currentPageStartWord =
+    currentChapterIndex < 0
+      ? 0
+      : wordsBeforeCurrentChapter + (currentPageSegment?.startWordOffset ?? 0);
+  const paragraphWordCursor = { current: 0 };
 
   return (
     <div
@@ -508,16 +569,14 @@ export default function StructuredTextRenderer({
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 font-serif text-ink [text-wrap:pretty]"
           >
             {currentText.split(/\n{2,}/).map((paragraph, index) => (
-              <p
+              <ReadAlongParagraph
                 key={index}
-                className={`mb-5 text-ink ${
-                  index === 0
-                    ? "first-letter:float-left first-letter:mr-2 first-letter:font-serif first-letter:text-[3.1em] first-letter:leading-[0.85] first-letter:text-lumina-gold/80"
-                    : ""
-                }`}
-              >
-                {paragraph}
-              </p>
+                paragraph={paragraph}
+                paragraphIndex={index}
+                pageStartWord={currentPageStartWord}
+                wordCursor={paragraphWordCursor}
+                activeWordPosition={activeWordPosition}
+              />
             ))}
           </div>
         </div>

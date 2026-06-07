@@ -670,12 +670,18 @@ export interface StudyFlashcard {
 // ─── Voice Studio (PLANVI) ────────────────────────────────────────────────────
 
 export type AudioArtifactStatus = "queued" | "generating" | "ready" | "failed";
+export type AudioProvider = "gemini" | "elevenlabs";
+export type AudioGenerationMode = "saved" | "streamed";
 
 export interface AudioVoicePreset {
   id: string;
   displayName: string;
   description: string;
   providerVoiceName: string;
+  provider?: AudioProvider;
+  category?: string;
+  labels?: Record<string, string>;
+  previewUrl?: string;
 }
 
 export interface AudioStylePreset {
@@ -691,9 +697,16 @@ export interface AudioArtifact {
   chapterIndex: number;
   segmentTitle: string;
   voiceId: string;
+  provider?: AudioProvider;
+  voiceProviderId?: string;
+  modelId?: string;
+  mode?: AudioGenerationMode;
   stylePresetId: string;
   textHash: string;
   promptHash: string;
+  textStartPosition?: number;
+  textEndPosition?: number;
+  alignment?: AudioAlignmentSpan[];
   durationSeconds?: number;
   mimeType: string;
   filePath: string;
@@ -701,4 +714,16 @@ export interface AudioArtifact {
   generationApi: string;
   status: AudioArtifactStatus;
   error?: string;
+}
+
+export interface AudioAlignmentSpan {
+  startMs: number;
+  endMs: number;
+  text: string;
+  charStart: number;
+  charEnd: number;
+  wordStart: number;
+  wordEnd: number;
+  absoluteWordStart: number;
+  absoluteWordEnd: number;
 }

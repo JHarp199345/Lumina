@@ -1,38 +1,32 @@
 /**
- * Voice Studio audio director (PLANVI).
+ * Voice Studio audio director.
  *
- * Generates one Study Guide segment at a time and returns playable audio bytes.
+ * ElevenLabs is the primary provider because it can return alignment data that
+ * Lumina maps onto stable book word positions for read-along highlighting.
  */
 
-import { LUMINA_CONFIG } from "@/config";
 import type {
+  AudioAlignmentSpan,
   AudioArtifact,
+  AudioGenerationMode,
   AudioStylePreset,
   AudioVoicePreset,
   BookStructure,
   StudySegment,
 } from "@/types";
 
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const ELEVEN_BASE = "https://api.elevenlabs.io/v1";
+export const ELEVENLABS_KEY_NAME = "lumina_elevenlabs_key";
+export const ELEVENLABS_VOICE_CACHE_KEY = "lumina.elevenlabs.voices";
+export const ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 
 export const VOICE_PRESETS: AudioVoicePreset[] = [
   {
-    id: "kore",
-    displayName: "Kore",
-    description: "Clear, steady narrator",
-    providerVoiceName: "Kore",
-  },
-  {
-    id: "charon",
-    displayName: "Charon",
-    description: "Darker dramatic narration",
-    providerVoiceName: "Charon",
-  },
-  {
-    id: "leda",
-    displayName: "Leda",
-    description: "Warm intimate narration",
-    providerVoiceName: "Leda",
+    id: "eleven-default",
+    displayName: "Default ElevenLabs Voice",
+    description: "Load your ElevenLabs voices to choose a narrator",
+    providerVoiceName: "default",
+    provider: "elevenlabs",
   },
 ];
 
@@ -69,22 +63,50 @@ export const AUDIO_STYLE_PRESETS: AudioStylePreset[] = [
   },
 ];
 
-interface GeminiInlineData {
-  data?: string;
-  mimeType?: string;
-  mime_type?: string;
+interface ElevenVoice {
+  voice_id: string;
+  name: string;
+  category?: string;
+  description?: string;
+  preview_url?: string;
+  labels?: Record<string, string>;
 }
 
-interface GeminiPart {
-  inlineData?: GeminiInlineData;
-  inline_data?: GeminiInlineData;
+interface ElevenVoicesResponse {
+  voices?: ElevenVoice[];
 }
 
-function segmentText(segment: StudySegment, structure: BookStructure): string {
+interface ElevenAlignment {
+  characters?: string[];
+  character_start_times_seconds?: number[];
+  character_end_times_seconds?: number[];
+}
+
+interface ElevenTtsResponse {
+  audio_base64?: string;
+  alignment?: ElevenAlignment;
+  normalized_alignment?: ElevenAlignment;
+}
+
+export interface SegmentAudioText {
+  text: string;
+  absoluteStartWord: number;
+  absoluteEndWord: number;
+}
+
+export function getSegmentAudioText(segment: StudySegment, structure: BookStructure): SegmentAudioText {
   const chapter = structure.chapters.find((item) => item.index === segment.chapterIndex);
-  if (!chapter?.rawText) return "";
+  if (!chapter?.rawText) return { text: "", absoluteStartWord: segment.approxWordStart, absoluteEndWord: segment.approxWordEnd };
   const words = chapter.rawText.split(/\s+/).filter(Boolean);
-  return words.slice(segment.startWordOffset, segment.endWordOffset).join(" ");
+  const text = words.slice(segment.startWordOffset, segment.endWordOffset).join(" ").slice(0, 8500);
+  const wordsBeforeChapter = structure.chapters
+    .slice(0, chapter.index)
+    .reduce((sum, item) => sum + item.wordCount, 0);
+  return {
+    text,
+    absoluteStartWord: wordsBeforeChapter + segment.startWordOffset,
+    absoluteEndWord: wordsBeforeChapter + segment.startWordOffset + text.split(/\s+/).filter(Boolean).length,
+  };
 }
 
 export function hashText(value: string): string {
@@ -103,85 +125,139 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-function sampleRateFromMime(mimeType: string): number {
-  const match = mimeType.match(/rate=(\d+)/i);
-  return match ? Number(match[1]) : 24000;
+function buildVoiceDescription(voice: ElevenVoice): string {
+  const labelText = voice.labels ? Object.values(voice.labels).filter(Boolean).join(", ") : "";
+  return voice.description || labelText || voice.category || "ElevenLabs voice";
 }
 
-function pcm16ToWav(pcm: Uint8Array, sampleRate: number): Uint8Array {
-  const headerSize = 44;
-  const wav = new Uint8Array(headerSize + pcm.length);
-  const view = new DataView(wav.buffer);
-
-  const writeString = (offset: number, text: string) => {
-    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
-  };
-
-  writeString(0, "RIFF");
-  view.setUint32(4, 36 + pcm.length, true);
-  writeString(8, "WAVE");
-  writeString(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(36, "data");
-  view.setUint32(40, pcm.length, true);
-  wav.set(pcm, headerSize);
-  return wav;
+export async function fetchElevenLabsVoices(apiKey: string): Promise<AudioVoicePreset[]> {
+  const response = await fetch(`${ELEVEN_BASE}/voices`, {
+    method: "GET",
+    headers: { "xi-api-key": apiKey },
+  });
+  if (!response.ok) throw new Error(`ElevenLabs voices error ${response.status}`);
+  const data = (await response.json()) as ElevenVoicesResponse;
+  const voices = (data.voices ?? []).map<AudioVoicePreset>((voice) => ({
+    id: voice.voice_id,
+    displayName: voice.name,
+    description: buildVoiceDescription(voice),
+    providerVoiceName: voice.voice_id,
+    provider: "elevenlabs",
+    category: voice.category,
+    labels: voice.labels,
+    previewUrl: voice.preview_url,
+  }));
+  if (voices.length === 0) throw new Error("No ElevenLabs voices were returned.");
+  localStorage.setItem(ELEVENLABS_VOICE_CACHE_KEY, JSON.stringify(voices));
+  return voices;
 }
 
-function playableAudioBytes(bytes: Uint8Array, mimeType: string): { bytes: Uint8Array; mimeType: string } {
-  const lower = mimeType.toLowerCase();
-  if (lower.includes("wav") || lower.includes("mpeg") || lower.includes("mp3") || lower.includes("ogg")) {
-    return { bytes, mimeType };
+export function loadCachedElevenLabsVoices(): AudioVoicePreset[] {
+  try {
+    const raw = localStorage.getItem(ELEVENLABS_VOICE_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as AudioVoicePreset[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
-  if (lower.includes("l16") || lower.includes("pcm")) {
-    return { bytes: pcm16ToWav(bytes, sampleRateFromMime(mimeType)), mimeType: "audio/wav" };
-  }
-  return { bytes, mimeType };
 }
 
-function buildPrompt({
-  segment,
-  structure,
-  style,
-  text,
-}: {
-  segment: StudySegment;
-  structure: BookStructure;
-  style: AudioStylePreset;
-  text: string;
-}): string {
-  return `${style.direction}
-
-Book: ${structure.title}
-Chapter: ${segment.chapterTitle}
-Segment: ${segment.title}
-Segment summary: ${segment.summary || "(none)"}
-
-Read only the passage below. Do not add commentary, explanations, sound effects, or extra words.
-
-Passage:
-"""
-${text}
-"""`;
-}
-
-function extractInlineAudio(data: unknown): { base64: string; mimeType: string } | null {
-  const candidates = (data as { candidates?: { content?: { parts?: GeminiPart[] } }[] }).candidates ?? [];
-  for (const candidate of candidates) {
-    for (const part of candidate.content?.parts ?? []) {
-      const inline = part.inlineData ?? part.inline_data;
-      if (inline?.data) {
-        return { base64: inline.data, mimeType: inline.mimeType ?? inline.mime_type ?? "audio/wav" };
-      }
+function wordIndexAtChar(text: string): number[] {
+  const indexes = new Array(text.length + 1).fill(0);
+  let word = 0;
+  let inWord = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const isWord = /\S/.test(text[i]);
+    if (isWord && !inWord) {
+      inWord = true;
+      word += 1;
     }
+    if (!isWord) inWord = false;
+    indexes[i] = Math.max(0, word - 1);
   }
-  return null;
+  indexes[text.length] = Math.max(0, word - 1);
+  return indexes;
+}
+
+function buildAlignmentSpans(
+  text: string,
+  alignment: ElevenAlignment | undefined,
+  absoluteStartWord: number
+): AudioAlignmentSpan[] {
+  const chars = alignment?.characters ?? [];
+  const starts = alignment?.character_start_times_seconds ?? [];
+  const ends = alignment?.character_end_times_seconds ?? [];
+  if (chars.length === 0 || starts.length === 0 || ends.length === 0) return [];
+
+  const wordAtChar = wordIndexAtChar(text);
+  const spans: AudioAlignmentSpan[] = [];
+  let i = 0;
+  while (i < chars.length) {
+    while (i < chars.length && /\s/.test(chars[i])) i += 1;
+    if (i >= chars.length) break;
+    const start = i;
+    while (i < chars.length && !/\s/.test(chars[i])) i += 1;
+    const end = i;
+    const wordText = chars.slice(start, end).join("");
+    const wordStart = wordAtChar[start] ?? 0;
+    const wordEnd = wordAtChar[Math.max(start, end - 1)] ?? wordStart;
+    spans.push({
+      startMs: Math.max(0, Math.round((starts[start] ?? 0) * 1000)),
+      endMs: Math.max(0, Math.round((ends[end - 1] ?? starts[start] ?? 0) * 1000)),
+      text: wordText,
+      charStart: start,
+      charEnd: end,
+      wordStart,
+      wordEnd,
+      absoluteWordStart: absoluteStartWord + wordStart,
+      absoluteWordEnd: absoluteStartWord + wordEnd,
+    });
+  }
+  return spans;
+}
+
+function voiceSettings(style: AudioStylePreset) {
+  const dramatic = style.id === "dark-dramatic" || style.id === "epic-chronicle";
+  const intimate = style.id === "quiet-intimate" || style.id === "warm-storyteller";
+  return {
+    stability: dramatic ? 0.46 : intimate ? 0.58 : 0.64,
+    similarity_boost: 0.78,
+    style: dramatic ? 0.42 : intimate ? 0.28 : 0.18,
+    use_speaker_boost: true,
+  };
+}
+
+async function callElevenLabsTts({
+  apiKey,
+  voice,
+  text,
+  style,
+  mode,
+}: {
+  apiKey: string;
+  voice: AudioVoicePreset;
+  text: string;
+  style: AudioStylePreset;
+  mode: AudioGenerationMode;
+}): Promise<ElevenTtsResponse> {
+  const suffix = mode === "streamed" ? "stream/with-timestamps" : "with-timestamps";
+  const url = `${ELEVEN_BASE}/text-to-speech/${voice.providerVoiceName}/${suffix}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "xi-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      text,
+      model_id: ELEVENLABS_MODEL_ID,
+      output_format: "mp3_44100_128",
+      voice_settings: voiceSettings(style),
+    }),
+  });
+  if (!response.ok) throw new Error(`ElevenLabs TTS error ${response.status}`);
+  return (await response.json()) as ElevenTtsResponse;
 }
 
 export async function generateSegmentAudio({
@@ -190,64 +266,53 @@ export async function generateSegmentAudio({
   apiKey,
   voice,
   style,
+  mode = "saved",
 }: {
   segment: StudySegment;
   structure: BookStructure;
   apiKey: string;
   voice: AudioVoicePreset;
   style: AudioStylePreset;
+  mode?: AudioGenerationMode;
 }): Promise<{ artifact: Omit<AudioArtifact, "filePath">; data: Uint8Array }> {
-  const text = segmentText(segment, structure).slice(0, 8500);
+  const { text, absoluteStartWord, absoluteEndWord } = getSegmentAudioText(segment, structure);
   if (text.split(/\s+/).filter(Boolean).length < 40) {
     throw new Error("This segment is too short for narration.");
   }
 
-  const prompt = buildPrompt({ segment, structure, style, text });
   const textHash = hashText(text);
-  const promptHash = hashText(`${prompt}|${voice.providerVoiceName}|${LUMINA_CONFIG.GEMINI_TTS_MODEL}`);
+  const promptHash = hashText(`${text}|${style.direction}|${voice.providerVoiceName}|${ELEVENLABS_MODEL_ID}|${mode}`);
+  const data = await callElevenLabsTts({ apiKey, voice, text, style, mode });
+  if (!data.audio_base64) throw new Error("ElevenLabs response did not include audio data.");
 
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_TTS_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice.providerVoiceName },
-          },
-        },
-      },
-    }),
-  });
-
-  if (!response.ok) throw new Error(`Gemini TTS error ${response.status}`);
-
-  const json = await response.json();
-  const inline = extractInlineAudio(json);
-  if (!inline) throw new Error("Gemini response did not include audio data.");
-
-  const playable = playableAudioBytes(base64ToBytes(inline.base64), inline.mimeType);
+  const rawAlignment = data.normalized_alignment ?? data.alignment;
+  const alignment = buildAlignmentSpans(text, rawAlignment, absoluteStartWord);
   const generatedAt = new Date().toISOString();
+  const bytes = base64ToBytes(data.audio_base64);
 
   return {
     artifact: {
-      id: `audio-${segment.bookId}-${segment.id}-${voice.id}-${style.id}-${Date.now()}`,
+      id: `audio-${segment.bookId}-${segment.id}-${voice.id}-${style.id}-${mode}-${Date.now()}`,
       bookId: segment.bookId,
       segmentId: segment.id,
       chapterIndex: segment.chapterIndex,
       segmentTitle: segment.title,
       voiceId: voice.id,
+      provider: "elevenlabs",
+      voiceProviderId: voice.providerVoiceName,
+      modelId: ELEVENLABS_MODEL_ID,
+      mode,
       stylePresetId: style.id,
       textHash,
       promptHash,
-      mimeType: playable.mimeType,
+      textStartPosition: absoluteStartWord,
+      textEndPosition: absoluteEndWord,
+      alignment,
+      mimeType: "audio/mpeg",
       generatedAt,
-      generationApi: LUMINA_CONFIG.GEMINI_TTS_MODEL,
+      generationApi: `elevenlabs:${ELEVENLABS_MODEL_ID}`,
       status: "ready",
     },
-    data: playable.bytes,
+    data: bytes,
   };
 }

@@ -12,9 +12,21 @@ interface ApiKeySetupProps {
 export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKeySetupProps) {
   const [googleKey, setGoogleKey] = useState("");
   const [falKey, setFalKey] = useState("");
+  const [elevenLabsKey, setElevenLabsKey] = useState("");
   const [success, setSuccess] = useState(false);
+  const [voiceSuccess, setVoiceSuccess] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
-  const { saveGoogleKey, saveFalKey, removeGoogleKey, removeFalKey, isSaving, error } = useApiKeys();
+  const {
+    saveGoogleKey,
+    saveFalKey,
+    saveElevenLabsKey,
+    removeGoogleKey,
+    removeFalKey,
+    removeElevenLabsKey,
+    isSaving,
+    error,
+  } = useApiKeys();
   const { apiKeyConfigured } = useSettingsStore();
 
   const handleSave = async () => {
@@ -28,6 +40,18 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
       setTimeout(onComplete, 1200);
     } catch {
       // error shown via hook
+    }
+  };
+
+  const handleSaveVoice = async () => {
+    if (!elevenLabsKey.trim()) return;
+    try {
+      setVoiceError(null);
+      await saveElevenLabsKey(elevenLabsKey.trim());
+      setVoiceSuccess(true);
+      setTimeout(() => setVoiceSuccess(false), 1600);
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : "Could not validate ElevenLabs key.");
     }
   };
 
@@ -88,6 +112,38 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
         />
       </div>
 
+      {/* ElevenLabs Key (optional, Voice Studio) */}
+      <div className="space-y-2">
+        <label className="text-xs text-ink-faint flex items-center gap-2">
+          <Key size={11} />
+          ElevenLabs Key
+          <span className="text-ink-faint">optional — Voice Studio narration</span>
+        </label>
+        <input
+          type="password"
+          value={elevenLabsKey}
+          onChange={(e) => {
+            setElevenLabsKey(e.target.value);
+            setVoiceSuccess(false);
+            setVoiceError(null);
+          }}
+          placeholder="Paste your ElevenLabs API key"
+          className="w-full bg-black/20 border border-hair rounded-lg px-3 py-2.5 text-sm text-ink-faint placeholder:text-ink-faint focus:outline-none focus:border-hair transition-colors font-mono"
+        />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSaveVoice}
+            disabled={!elevenLabsKey.trim()}
+            className="rounded-lg border border-hair bg-ink/[0.04] px-3 py-1.5 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-40"
+          >
+            Validate Voice Key
+          </button>
+          {voiceSuccess && <span className="text-xs text-green-400">Voices loaded.</span>}
+        </div>
+        {voiceError && <p className="text-xs text-red-400/80">{voiceError}</p>}
+      </div>
+
       {/* Error */}
       {error && (
         <motion.div
@@ -141,8 +197,10 @@ export default function ApiKeySetup({ onComplete, isOnboarding = false }: ApiKey
             try {
               await removeGoogleKey();
               await removeFalKey().catch(() => {});
+              await removeElevenLabsKey().catch(() => {});
               setGoogleKey("");
               setFalKey("");
+              setElevenLabsKey("");
             } finally {
               setIsRemoving(false);
             }

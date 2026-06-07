@@ -22,6 +22,8 @@ interface AudioStore {
   isGenerating: boolean;
   currentTime: number;
   duration: number;
+  activeWordPosition: number | null;
+  activeSpanText: string;
   volume: number;
   playbackRate: number;
   generationProgress: string;
@@ -39,6 +41,7 @@ interface AudioStore {
   setIsGenerating: (isGenerating: boolean) => void;
   setProgress: (generationProgress: string) => void;
   setPlaybackPosition: (currentTime: number, duration: number) => void;
+  setActiveReadAlong: (wordPosition: number | null, spanText?: string) => void;
   setVolume: (volume: number) => void;
   setPlaybackRate: (playbackRate: number) => void;
   queueSegment: (segmentId: string) => void;
@@ -60,6 +63,8 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
   isGenerating: false,
   currentTime: 0,
   duration: 0,
+  activeWordPosition: null,
+  activeSpanText: "",
   volume: 1,
   playbackRate: 1,
   generationProgress: "",
@@ -76,6 +81,8 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
       isGenerating: false,
       currentTime: 0,
       duration: 0,
+      activeWordPosition: null,
+      activeSpanText: "",
       generationProgress: "",
       error: null,
     }),
@@ -90,6 +97,8 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
       isGenerating: false,
       currentTime: 0,
       duration: 0,
+      activeWordPosition: null,
+      activeSpanText: "",
       generationProgress: "",
       error: null,
     }),
@@ -107,6 +116,7 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
   setIsGenerating: (isGenerating) => set({ isGenerating }),
   setProgress: (generationProgress) => set({ generationProgress }),
   setPlaybackPosition: (currentTime, duration) => set({ currentTime, duration }),
+  setActiveReadAlong: (activeWordPosition, activeSpanText = "") => set({ activeWordPosition, activeSpanText }),
   setVolume: (volume) => set({ volume: Math.min(1, Math.max(0, volume)) }),
   setPlaybackRate: (playbackRate) => set({ playbackRate: Math.min(2, Math.max(0.5, playbackRate)) }),
   queueSegment: (segmentId) =>

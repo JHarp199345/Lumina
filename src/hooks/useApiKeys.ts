@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { storage } from "@/storage";
 import { useSettingsStore } from "@/store/settingsStore";
+import { ELEVENLABS_KEY_NAME, fetchElevenLabsVoices } from "@/pipeline/audioDirector";
 
 const GOOGLE_KEY_NAME = "lumina_google_ai_key";
 const FAL_KEY_NAME = "lumina_fal_key";
@@ -45,12 +46,25 @@ export function useApiKeys() {
     await storage.saveApiKey(FAL_KEY_NAME, key);
   }, []);
 
+  const saveElevenLabsKey = useCallback(async (key: string) => {
+    const normalizedKey = key.trim();
+    if (normalizedKey.length < 20 || /\s/.test(normalizedKey)) {
+      throw new Error("That ElevenLabs key looks incomplete.");
+    }
+    await fetchElevenLabsVoices(normalizedKey);
+    await storage.saveApiKey(ELEVENLABS_KEY_NAME, normalizedKey);
+  }, []);
+
   const getGoogleKey = useCallback(async (): Promise<string | null> => {
     return storage.loadApiKey(GOOGLE_KEY_NAME);
   }, []);
 
   const getFalKey = useCallback(async (): Promise<string | null> => {
     return storage.loadApiKey(FAL_KEY_NAME);
+  }, []);
+
+  const getElevenLabsKey = useCallback(async (): Promise<string | null> => {
+    return storage.loadApiKey(ELEVENLABS_KEY_NAME);
   }, []);
 
   const removeGoogleKey = useCallback(async () => {
@@ -62,13 +76,20 @@ export function useApiKeys() {
     await storage.deleteApiKey(FAL_KEY_NAME);
   }, []);
 
+  const removeElevenLabsKey = useCallback(async () => {
+    await storage.deleteApiKey(ELEVENLABS_KEY_NAME);
+  }, []);
+
   return {
     saveGoogleKey,
     saveFalKey,
+    saveElevenLabsKey,
     getGoogleKey,
     getFalKey,
+    getElevenLabsKey,
     removeGoogleKey,
     removeFalKey,
+    removeElevenLabsKey,
     isSaving,
     error,
   };

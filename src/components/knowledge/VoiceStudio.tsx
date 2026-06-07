@@ -18,9 +18,12 @@ import { useStudyStore } from "@/store/studyStore";
 import { storage } from "@/storage";
 import {
   AUDIO_STYLE_PRESETS,
+  ELEVENLABS_KEY_NAME,
   VOICE_PRESETS,
+  fetchElevenLabsVoices,
   generateSegmentAudio,
   hashText,
+  loadCachedElevenLabsVoices,
 } from "@/pipeline/audioDirector";
 import type { AudioArtifact, AudioStylePreset, AudioVoicePreset, StudySegment } from "@/types";
 
@@ -79,6 +82,7 @@ export default function VoiceStudio() {
     setIsGenerating,
     setProgress,
     setPlaybackPosition,
+    setActiveReadAlong,
     setVolume,
     setPlaybackRate,
     queueSegment,
@@ -87,6 +91,12 @@ export default function VoiceStudio() {
 
   const currentGuide = guide && activeBook && guide.bookId === activeBook.id ? guide : null;
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+  const [voices, setVoices] = useState<AudioVoicePreset[]>(() => {
+    const cached = loadCachedElevenLabsVoices();
+    return cached.length > 0 ? cached : VOICE_PRESETS;
+  });
+  const [voiceQuery, setVoiceQuery] = useState("");
+  const [isLoadingVoices, setIsLoadingVoices] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,9 +126,13 @@ export default function VoiceStudio() {
 
   const selectedSegment =
     currentGuide?.segments.find((segment) => segment.id === selectedSegmentId) ?? currentSegment;
-  const selectedVoice = VOICE_PRESETS.find((voice) => voice.id === selectedVoiceId) ?? VOICE_PRESETS[0];
+  const selectedVoice = voices.find((voice) => voice.id === selectedVoiceId) ?? voices[0] ?? VOICE_PRESETS[0];
   const selectedStyle =
     AUDIO_STYLE_PRESETS.find((style) => style.id === selectedStylePresetId) ?? AUDIO_STYLE_PRESETS[0];
+
+  useEffect(() => {
+    if (selectedVoiceId === "kore" && voices[0]?.id) setVoice(voices[0].id);
+  }, [selectedVoiceId, setVoice, voices]);
 
   const matchingArtifact = useMemo(() => {
     if (!selectedSegment || !activeStructure) return null;
@@ -128,8 +142,9 @@ export default function VoiceStudio() {
       artifacts.find(
         (artifact) =>
           artifact.status === "ready" &&
+          (artifact.provider ?? "gemini") === "elevenlabs" &&
           artifact.segmentId === selectedSegment.id &&
-          artifact.voiceId === selectedVoice.id &&
+          (artifact.voiceProviderId ?? artifact.voiceId) === selectedVoice.providerVoiceName &&
           artifact.stylePresetId === selectedStyle.id &&
           (!textHash || artifact.textHash === textHash)
       ) ?? null
@@ -143,23 +158,42 @@ export default function VoiceStudio() {
     setActiveAudio(matchingArtifact.id);
   }, [activeAudioId, matchingArtifact, setActiveAudio]);
 
-  const runGenerate = async () => {
+  const refreshVoices = async () => {
+    const apiKey = await storage.loadApiKey(ELEVENLABS_KEY_NAME);
+    if (!apiKey) {
+      setError("Add an ElevenLabs key in Settings to load voices.");
+      return;
+    }
+    setError(null);
+    setIsLoadingVoices(true);
+    try {
+      const loaded = await fetchElevenLabsVoices(apiKey);
+      setVoices(loaded);
+      if (!loaded.some((voice) => voice.id === selectedVoiceId)) setVoice(loaded[0].id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load ElevenLabs voices.");
+    } finally {
+      setIsLoadingVoices(false);
+    }
+  };
+
+  const runGenerate = async (mode: "saved" | "streamed" = "saved", force = false) => {
     if (!selectedSegment || !activeStructure) {
       setError("Choose a segment first.");
       return;
     }
-    if (matchingArtifact) {
+    if (matchingArtifact && !force) {
       setActiveAudio(matchingArtifact.id);
       return;
     }
-    const apiKey = await storage.loadApiKey("lumina_google_ai_key");
+    const apiKey = await storage.loadApiKey(ELEVENLABS_KEY_NAME);
     if (!apiKey) {
-      setError("Add a Google AI key in Settings to generate narration.");
+      setError("Add an ElevenLabs key in Settings to generate narration.");
       return;
     }
     setError(null);
     setIsGenerating(true);
-    setProgress("Directing narration");
+    setProgress(mode === "streamed" ? "Streaming narration" : "Generating narration");
     try {
       const generated = await generateSegmentAudio({
         segment: selectedSegment,
@@ -167,12 +201,23 @@ export default function VoiceStudio() {
         apiKey,
         voice: selectedVoice,
         style: selectedStyle,
+        mode,
       });
       setProgress("Saving audio");
       const filePath = await storage.saveAudioArtifact(generated.artifact, generated.data);
       const artifact: AudioArtifact = { ...generated.artifact, filePath };
       addArtifact(artifact);
       setActiveAudio(artifact.id);
+      if (mode === "streamed") {
+        setTimeout(() => {
+          const audio = audioRef.current;
+          if (!audio) return;
+          audio.src = artifact.filePath;
+          audio.volume = volume;
+          audio.playbackRate = playbackRate;
+          audio.play().then(() => setIsPlaying(true)).catch(() => {});
+        }, 0);
+      }
     } catch (err) {
       console.error("[VoiceStudio] Audio generation failed:", err);
       setError(err instanceof Error ? err.message : "Narration generation failed.");
@@ -197,11 +242,40 @@ export default function VoiceStudio() {
     setIsPlaying(true);
   };
 
+  const updateReadAlong = (audio: HTMLAudioElement, artifact: AudioArtifact | null) => {
+    setPlaybackPosition(audio.currentTime, audio.duration);
+    if (!artifact?.alignment?.length) {
+      setActiveReadAlong(null);
+      return;
+    }
+    const nowMs = audio.currentTime * 1000;
+    const span =
+      artifact.alignment.find((item) => nowMs >= item.startMs && nowMs <= item.endMs) ??
+      artifact.alignment.find((item) => item.startMs > nowMs) ??
+      null;
+    if (!span) {
+      setActiveReadAlong(null);
+      return;
+    }
+    setActiveReadAlong(span.absoluteWordStart, span.text);
+  };
+
   const queueNext = () => {
     if (!currentGuide || !selectedSegment) return;
     const index = currentGuide.segments.findIndex((segment) => segment.id === selectedSegment.id);
     const next = currentGuide.segments[index + 1];
     if (next) queueSegment(next.id);
+  };
+
+  const playVoicePreview = async (voice: AudioVoicePreset) => {
+    if (!voice.previewUrl || !audioRef.current) return;
+    const audio = audioRef.current;
+    audio.pause();
+    audio.src = voice.previewUrl;
+    audio.volume = volume;
+    audio.playbackRate = 1;
+    await audio.play();
+    setIsPlaying(true);
   };
 
   if (!activeBook) {
@@ -244,19 +318,22 @@ export default function VoiceStudio() {
         ref={audioRef}
         onTimeUpdate={(event) => {
           const audio = event.currentTarget;
-          setPlaybackPosition(audio.currentTime, audio.duration);
+          updateReadAlong(audio, activeArtifact);
         }}
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
           setPlaybackPosition(audio.currentTime, audio.duration);
         }}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false);
+          setActiveReadAlong(null);
+        }}
       />
 
       <div className="border-b border-hair px-3 py-3">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-lumina-gold/75">Voice Studio</p>
         <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
-          Generate one segment at a time using your Google AI key.
+          Generate timestamped narration using your ElevenLabs voices.
         </p>
       </div>
 
@@ -283,13 +360,58 @@ export default function VoiceStudio() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <PresetSelect
-            label="Voice"
-            value={selectedVoice.id}
-            options={VOICE_PRESETS}
-            onChange={setVoice}
+        <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-ink-faint">Voice</p>
+            <button
+              onClick={refreshVoices}
+              disabled={isLoadingVoices}
+              className="flex items-center gap-1 rounded border border-hair px-2 py-1 text-[10px] text-ink-faint hover:text-ink-soft disabled:opacity-40"
+            >
+              <RefreshCw size={10} className={isLoadingVoices ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
+          <input
+            value={voiceQuery}
+            onChange={(event) => setVoiceQuery(event.target.value)}
+            placeholder="Search voices"
+            className="mb-2 w-full rounded-lg border border-hair bg-surface-dark px-2 py-2 text-xs text-ink-soft placeholder:text-ink-faint focus:outline-none"
           />
+          <div className="max-h-48 space-y-1 overflow-y-auto pr-1 scrollbar-thin">
+            {voices
+              .filter((voice) => {
+                const q = voiceQuery.trim().toLowerCase();
+                if (!q) return true;
+                return `${voice.displayName} ${voice.description} ${voice.category ?? ""}`.toLowerCase().includes(q);
+              })
+              .map((voice) => (
+                <div
+                  key={voice.id}
+                  className={`flex gap-2 rounded-lg border px-2.5 py-2 transition-colors ${
+                    selectedVoice.id === voice.id
+                      ? "border-lumina-gold/40 bg-lumina-gold/[0.08]"
+                      : "border-hair bg-ink/[0.02] hover:bg-ink/[0.04]"
+                  }`}
+                >
+                  <button className="min-w-0 flex-1 text-left" onClick={() => setVoice(voice.id)}>
+                    <span className="block truncate text-xs font-medium text-ink/85">{voice.displayName}</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-ink-faint">{voice.description}</span>
+                  </button>
+                  {voice.previewUrl && (
+                    <button
+                      onClick={() => playVoicePreview(voice)}
+                      className="shrink-0 rounded border border-hair px-2 text-[10px] text-lumina-gold/70 hover:text-lumina-gold"
+                    >
+                      Preview
+                    </button>
+                  )}
+                </div>
+              ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2">
           <PresetSelect
             label="Style"
             value={selectedStyle.id}
@@ -321,12 +443,29 @@ export default function VoiceStudio() {
               {isPlaying ? "Pause" : "Play"}
             </button>
             <button
-              onClick={runGenerate}
+              onClick={() => runGenerate("saved")}
               disabled={isGenerating || !selectedSegment}
               className="flex items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-2.5 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
             >
               {isGenerating ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
               {matchingArtifact ? "Use Cache" : isGenerating ? "Generating" : "Generate"}
+            </button>
+          </div>
+
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => runGenerate("streamed", true)}
+              disabled={isGenerating || !selectedSegment}
+              className="rounded-lg border border-hair bg-ink/[0.03] px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-40"
+            >
+              Stream Now
+            </button>
+            <button
+              onClick={() => runGenerate("saved", true)}
+              disabled={isGenerating || !selectedSegment}
+              className="rounded-lg border border-hair bg-ink/[0.03] px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-40"
+            >
+              Regenerate Explicitly
             </button>
           </div>
 
@@ -395,7 +534,7 @@ export default function VoiceStudio() {
                     {artifact.segmentTitle}
                   </span>
                   <span className="mt-0.5 block text-[10px] text-ink-faint">
-                    {artifact.voiceId} · {artifact.stylePresetId}
+                    {artifact.provider ?? "gemini"} · {artifact.voiceId} · {artifact.mode ?? "saved"}
                   </span>
                 </button>
               ))}
