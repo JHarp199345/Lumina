@@ -129,7 +129,7 @@ export default function VisualDebugOverlay() {
             Visual Debug
           </p>
           <p className="truncate text-xs text-sky-100/70">
-            {activeBook?.title ?? "No active book"} · word {wordPosition} · chapter {currentChapterIndex + 1} · {(percentComplete * 100).toFixed(1)}%
+            {activeBook?.title ?? "No active book"} · word {wordPosition} · chapter {currentChapterIndex + 1} · {percentComplete.toFixed(1)}%
           </p>
         </div>
         <button
