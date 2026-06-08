@@ -180,9 +180,13 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
 
     setStatus(`Downloading ${book.title}…`);
     try {
-      const response = await fetch(epubUrl);
+      const response = await fetch(epubUrl, {
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+      });
       if (!response.ok) throw new Error(`Download returned ${response.status}`);
       const blob = await response.blob();
+      await assertLooksLikeEpub(blob);
       const file = new File([blob], `${safeFileName(book.title)}.epub`, {
         type: "application/epub+zip",
       });
@@ -334,11 +338,41 @@ function buildCatalogUrl(query: string, genre: string, sort: SortMode): string {
 }
 
 function pickEpubUrl(book: GutendexBook): string | null {
+  const epubEntries = Object.entries(book.formats)
+    .filter(([type, url]) => type.toLowerCase().includes("epub") && Boolean(url))
+    .map(([type, url]) => ({ type: type.toLowerCase(), url: normalizeDownloadUrl(url) }));
+
+  const exact = epubEntries.filter((entry) => entry.type.includes("application/epub+zip"));
+  const candidates = exact.length > 0 ? exact : epubEntries;
+  if (candidates.length === 0) return null;
+
   return (
-    book.formats["application/epub+zip"] ??
-    Object.entries(book.formats).find(([type]) => type.includes("epub"))?.[1] ??
+    candidates.find((entry) => /\.epub3?\.images($|\?)/i.test(entry.url))?.url ??
+    candidates.find((entry) => !/\.noimages($|\?)/i.test(entry.url))?.url ??
+    candidates[0]?.url ??
     null
   );
+}
+
+function normalizeDownloadUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" && parsed.hostname.endsWith("gutenberg.org")) {
+      parsed.protocol = "https:";
+    }
+    return parsed.toString();
+  } catch {
+    return url.replace(/^http:\/\/(www\.)?gutenberg\.org/i, "https://www.gutenberg.org");
+  }
+}
+
+async function assertLooksLikeEpub(blob: Blob): Promise<void> {
+  const header = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+  const looksLikeZip = header[0] === 0x50 && header[1] === 0x4b;
+  if (looksLikeZip) return;
+
+  const contentType = blob.type || "unknown content type";
+  throw new Error(`The download was not an EPUB file (${contentType}).`);
 }
 
 function authorLine(book: GutendexBook): string {
