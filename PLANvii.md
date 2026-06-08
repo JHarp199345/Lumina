@@ -96,18 +96,22 @@ reader/drawer.
 │  LENGTH                          ~20 min                   │
 │  [ 5 ⏤⏤⏤⏤●⏤⏤⏤ 35 ]   (5-min steps; default 20)        │
 ├───────────────────────────────────────────────────────────┤
-│  WHAT SHOULD IT COVER?                          ✨ Suggest │
+│  WHAT SHOULD IT COVER?                   ✨ Suggest fuller │
+│  ( As a story )( Themes )( Relationships )( Chapter…)( ▸ ) │  ← angle chips
 │  ┌─────────────────────────────────────────────────────┐  │
-│  │ (ghost suggestion outline appears here, editable)   │  │
-│  │                                                     │  │
-│  │                                                     │  │
+│  │ Explain how Hari Seldon's psychohistory unfolds      │  │  ← field PREFILLED
+│  │ across the Foundation, the tension between the        │  │    with discovered
+│  │ Encyclopedists and the traders, and how the plan      │  │    meaning (editable
+│  │ keeps re-shaping politics long after Seldon's death.  │  │    real text)
 │  └─────────────────────────────────────────────────────┘  │
-│  Leave empty for a full guided overview.                  │
+│  Clear the field for a full guided overview.              │
 ├───────────────────────────────────────────────────────────┤
-│  Voice: [ Clear Narrator ▾ ]      ~larger generation ⓘ   │
+│  Voice: [ Kore ▾ ]                ~larger generation ⓘ    │
 │                              [  Generate Overview  ]       │
 └───────────────────────────────────────────────────────────┘
 ```
+(For scholarly works the angle chips become: By subject · Key arguments · Methods &
+evidence · For a first-time reader · Like a lecture.)
 
 ### 1. Scope selector
 
@@ -137,37 +141,39 @@ targetWords = minutes * AUDIO_OVERVIEW_WPM
 // 20 min → ~2,800 words ; 35 min → ~4,900 words
 ```
 
-### 3. The prompt field with ghost-writing suggestions
+### 3. The prompt field — PREFILLED from the Source Intelligence Profile
 
-This is the heart of the feature. The field behaves in three layers:
+This is the heart of the feature, and it is a single field. There is **no second
+suggestion box**. The prompt field is **prefilled with a real, discovered overview plan**
+drawn from the book's **Source Intelligence Profile** (SIP — see its own section below).
+The reader reads it, edits it, or replaces it. It is normal editable text from the first
+moment — not a separate "ghost" the reader must accept into the box.
 
-**a. Ghost suggestion (pre-seeded, not yet "real").**
-When the window opens, Lumina populates the field with a **ghost outline** — a low-
-opacity, editable-on-accept suggestion derived from the book's ingestion map for the
-chosen scope. It reads like a genuine chapter/book outline ("This overview will cover:
-the central conflict between …, the turn at …, the thematic throughline of …"). It is
-visibly a *suggestion* (dimmed / italic / marked), not committed text.
+**What goes in the box is discovered meaning, never raw fragments.**
+Not: *"Opens: 'His name was Gaal Dornick…'"*
+But: *"Explain how Hari Seldon's psychohistory project unfolds across the Foundation,
+the tension between the Encyclopedists and the traders, and how Seldon's plan keeps
+re-shaping the politics generations after his death."*
+The prefill is generated from the SIP's concepts, entity relationships, and progression —
+the things a smart narrator should know — not from chapter opening lines.
 
-**b. Accepting / editing / replacing.**
-- The reader can **accept** the ghost (a tap, or "Use this") → it becomes real, editable
-  text they can then trim.
-- The reader can **start typing** → the ghost dismisses and their text is what's
-  respected.
-- The reader can **trim the outline**: accept it, then highlight the part they care
-  about, delete the rest, and generate an overview focused only on that.
-- The reader can **leave it empty** → the hidden **default prompt** is used (see below).
+**Behavior:**
+- **On open:** the field is prefilled with the SIP's *best suggested overview plan* for the
+  current scope and detected work type.
+- **Overview-angle chips** above the field instantly rewrite the field with a different
+  discovered plan — e.g. "As a story", "Major themes", "Character relationships",
+  "Chapter-by-chapter", "For a first-time reader", "Like a lecture". (For scholarly works
+  the angles shift to "By subject", "Key arguments", "Methods & evidence", etc.) These come
+  from the SIP's **suggestion bank**.
+- **✨ Suggest fuller** rewrites the *same field* in place with a richer SIP-derived plan
+  (one cheap Gemini call). It never opens a second box.
+- The reader can **edit or fully replace** the text; whatever is in the field at generate
+  time is respected as primary.
+- If the reader **clears the field entirely**, the hidden **default prompt** (type-aware,
+  below) is used.
 
-**c. Re-suggesting.**
-A small **✨ Suggest** affordance regenerates the ghost outline (e.g., if the reader
-changed scope, or wants a fuller/different outline). Suggestions are derived from the
-map; a richer outline can be produced by a quick Gemini expansion of the map's per-
-chapter understanding (see "Suggestion generator" below).
-
-> Interaction note: the "ghost text that doesn't count until selected" is the inline-
-> suggestion pattern (Copilot-style). Implementation options to decide at build time:
-> (1) a styled overlay behind a transparent textarea, accepted via a Tab/Use-this; or
-> (2) prefilled dimmed text in the textarea that "solidifies" on focus/edit. Option (2)
-> is simpler and touch-friendly; prefer it unless the overlay feel is clearly better.
+> Raw ingestion fragments (chapter opening text, selected snippets) are NOT shown here.
+> If surfaced at all, they belong in a developer/debug view, never the generation prompt.
 
 ### 4. Voice + generate
 
@@ -182,66 +188,120 @@ chapter understanding (see "Suggestion generator" below).
 
 ---
 
-## THE DEFAULT PROMPT (when the field is empty)
+## THE DEFAULT PROMPT (hidden system behavior, type-aware)
 
-If the reader generates with an empty field, Lumina uses a finely-tuned default that, on
-its own, produces a thorough, structured overview — not a thin summary. The default is
-NOT shown as text in the field (the field stays empty / shows only the ghost); it is the
-system behavior for "no custom instruction."
+The default prompt is the hidden system behavior used when the reader clears the field.
+No one sees it. It must, on its own, produce a thorough, well-organized explanation — and
+crucially it is **type-aware**: it organizes the result by the work's natural structure.
 
-The default prompt is assembled at generation time from three parts:
+Assembled at generation time from:
 
-1. **Role + time frame instruction** (the spine):
+1. **Role + organization spine — chosen by detected work type** (from the SIP):
 
-   > "You are a subject-matter expert and an excellent teacher. You have approximately
-   > {minutes} minutes (about {targetWords} spoken words) to give a clear, structured
-   > breakdown of the following material. Explain it, teach it, simplify the hard parts,
-   > and expand on what matters. Move in a logical order. Open by framing what this
-   > material is and why it matters, develop the key ideas/sections in sequence, and
-   > close with the throughline a listener should walk away understanding. Speak
-   > naturally, as continuous narration meant to be heard, not read. Do not include
-   > stage directions, headers, or markup — only the spoken words."
+   *Fiction / narrative:*
+   > "You are a subject-matter expert and an excellent teacher. In about {minutes} minutes
+   > (~{targetWords} spoken words), explain this book clearly and engagingly. Explain the
+   > main story arc, the major characters and factions, the central conflicts, the
+   > important turning points, and the major themes — and how the relationships and ideas
+   > develop across the work. Organize the overview by the book's natural parts or acts.
+   > Do not read passages aloud; explain what happens, why it matters, and how it develops.
+   > Speak as continuous narration meant to be heard — no headings, labels, or markup."
 
-2. **The scope outline** — the ingestion-map-derived outline for the chosen scope
-   (full book outline, or the selected chapters' outlines). This is what gives the
-   default depth: it is grounded in Lumina's actual understanding of the book.
+   *Nonfiction / scholarly:*
+   > "You are a subject-matter expert and an excellent teacher. In about {minutes} minutes
+   > (~{targetWords} spoken words), give a structured explanation of this work. Explain the
+   > central thesis, the major concepts, the subject hierarchy, the supporting arguments,
+   > key terminology, important examples and evidence, and the implications. Organize the
+   > overview by topic and subject hierarchy — not by simply summarizing chapter openings.
+   > Speak as continuous narration meant to be heard — no headings, labels, or markup."
 
-3. **Length + pacing guardrails** — target word count, reminder that it is approximate,
-   and a pacing instruction (calm explanatory pace, no filler to pad time).
+2. **The SIP grounding** for the chosen scope (concepts, entities + relationships,
+   progression / subject hierarchy) — the discovered meaning, not chapter openings.
 
-When the reader DOES provide a custom prompt, part 1's role line is replaced/augmented by
-their instruction, **their instruction is respected as primary**, and parts 2 and 3 still
-provide grounding + length control (unless the reader's text already constrains scope, in
-which case the outline narrows accordingly).
+3. **Length + pacing guardrails** — target word count, "approximate," calm explanatory
+   pace, no filler to pad time.
+
+When the reader DOES provide text (including an edited SIP prefill), **their text is
+primary**; parts 2 and 3 still supply grounding + length control.
 
 ---
 
-## THE SUGGESTION GENERATOR (ghost outlines from the map)
+## SOURCE INTELLIGENCE PROFILE (SIP) — THE INGESTION CHANGE
 
-The ghost suggestions are the "weird but cool" part — and they're cheap because the book
-is already analyzed.
+The prompt prefill and the type-aware default are only as good as what ingestion knows
+about the book. Today ingestion captures **visual** meaning (scenes, arc, lore, threads)
+and **navigational** scaffolding (TOC, chapter openings). That is weak for explaining a
+book. We add a **Source Intelligence Profile** — a hidden, teaching-oriented profile of
+the work, saved at ingestion, that answers: *what should a smart narrator know before
+explaining this book?*
 
-### Source
+### What the SIP contains
 
-For the chosen scope, gather from the existing `SemanticMap` / structure:
-- chapter titles (from the parse),
-- per-chapter understanding already captured during ingestion (themes, key
-  scenes/inflections, narrative threads, lore touchpoints),
-- the macro arc and central themes for whole-book scope.
+```
+1. Work identity
+   - title, author, (best-effort) genre and era
+   - work type: fiction | nonfiction | scholarly | manual | memoir | reference | scripture | other
+2. Structure map
+   - parts / chapters / sections; the natural arc (fiction) OR subject hierarchy (nonfiction)
+   - rough importance weight per section
+3. Core concepts
+   - main ideas, recurring themes, key terms, the central questions the work explores
+4. Entity & relationship map
+   - major characters / people / organizations / places
+   - relationships AND how they evolve across the work (progression, not just presence)
+5. Progression
+   - fiction: plot movements, conflicts, turning points, reveals
+   - nonfiction/scholarly: thesis, supporting arguments, evidence, counterarguments, implications
+6. Overview suggestion bank
+   - several ready-made overview plans ("angles"): as a story / major themes /
+     character relationships / chapter-by-chapter / for a first-time reader / like a
+     lecture — and for scholarly works: by subject / key arguments / methods & evidence
+```
 
-### Two tiers of suggestion
+The SIP is **hidden book intelligence**. The reader never sees its raw form; it powers the
+prompt prefill, the angle chips, and the type-aware default.
 
-- **Tier 1 — instant, free (no API call):** assemble an outline directly from the stored
-  map fields. Fast; shown immediately when the window opens so the field is never empty
-  of guidance. Good enough as a starting ghost.
-- **Tier 2 — richer, on demand (one Gemini call):** when the reader taps **✨ Suggest**
-  (or after scope change), send the map's scope data to Gemini and ask it to write a
-  fuller, readable outline of what an overview *could* cover — "better, fuller outlines of
-  the chapter" in the reader's words. This is a small, cheap call (outline only, not the
-  full script).
+### Build it mostly from what ingestion ALREADY extracts
 
-The suggestion is always presented as a ghost (not committed). The reader decides whether
-it becomes real.
+Much of this is already produced for the visual system and just needs reframing:
+
+- **Entities** ← `visualLore` already extracts recurring people / places / objects /
+  factions / concepts. Reuse as the entity map; add relationship *evolution*.
+- **Themes & threads** ← `narrativeBlueprint` already has central themes and
+  setup→payoff threads. Reuse for core concepts and progression.
+- **Arc / structure** ← `arcShape` + the parsed chapter structure. Reuse directly.
+- **Per-chapter understanding** ← the chapter analysis step. **This is where ingestion
+  must be enriched:** capture a short *teaching summary* per chapter (what it's about,
+  key developments, which relationships/concepts move) — NOT emotional/visual vectors and
+  NOT the opening line.
+
+What is genuinely new (a small added delta, not a second heavy pass):
+- **Work-type classification** (one cheap call, or inferred from existing signals).
+- **Relationship progression** (how entities change) — one consolidation call over the
+  already-extracted entities + chapter teaching summaries.
+- **Subject hierarchy** for nonfiction/scholarly works.
+- **Suggestion bank** — assembled from the above (mostly free; optionally one call).
+
+### Cost & timing (honest)
+
+Ingestion is already the most expensive, slowest step. So:
+- **Reuse first:** derive the SIP from already-gathered ingestion artifacts; add only a
+  small number of consolidation calls, not a full from-scratch multi-pass pipeline.
+- **Enrich the existing per-chapter step** to also emit a teaching summary, rather than
+  adding a separate chapter pass.
+- **Lazy backfill:** books analyzed before the SIP existed generate their SIP **on first
+  Audio Overview open**, then cache it. New imports build it during analysis.
+- Cache the SIP like other ingestion artifacts; never regenerate unless re-analyzed.
+
+### How the SIP drives the prompt field (replaces the old "suggestion generator")
+
+- **On window open (instant, no call):** select the best suggestion-bank plan for the
+  current scope + work type and **prefill the field** with it.
+- **Angle chips (instant, no call):** swap the field to a different suggestion-bank plan.
+- **✨ Suggest fuller (one cheap call):** expand the current plan into a richer one,
+  rewriting the same field.
+
+No raw fragments, ever. The field always holds discovered meaning.
 
 ---
 
@@ -252,9 +312,10 @@ it becomes real.
                             │
                             ▼
 1. Resolve source context
-   - gather scope outline from SemanticMap + structure (NOT full verbatim prose by
-     default — the map is the grounding; this controls cost and quality)
-   - if the reader trimmed/edited the outline, use exactly what they left
+   - gather grounding from the SOURCE INTELLIGENCE PROFILE for the chosen scope
+     (concepts, entities + relationship progression, subject hierarchy / arc) — NOT
+     chapter opening lines, NOT full verbatim prose by default
+   - the field text (SIP-prefilled or reader-edited) is the primary instruction
                             │
                             ▼
 2. Compose the SUMMARIZER prompt (shaped by the reader's inputs)
@@ -281,34 +342,56 @@ it becomes real.
    - mount in the audio player; reader listens, scrubs, adjusts speed
 ```
 
-### Why grounding on the map (not full prose) by default
+### Why grounding on the SIP (not raw prose) by default
 
 - **Cost & token limits:** a whole-book overview can't fit the entire book in one Gemini
-  call for long books; the map is a compact, faithful grounding.
-- **Quality:** the map already represents Lumina's structured understanding — exactly the
-  scaffold a good overview needs.
-- **Option:** for single-chapter scope, the chapter's actual text MAY be included
-  (it fits), improving fidelity. Decide per-scope: chapter scope → include chapter text;
-  whole-book scope → map outline only.
+  call; the SIP is a compact, faithful, teaching-oriented grounding.
+- **Quality:** the SIP is discovered meaning (concepts, relationships, progression) —
+  exactly the scaffold a good explanation needs, far better than chapter openings.
+- **Option:** for single-chapter scope, the chapter's actual text MAY be added on top of
+  the SIP (it fits), improving fidelity. Whole-book scope → SIP only.
 
 ---
 
 ## DATA MODEL
 
-Reuse the existing `AudioArtifact` type, adding (or reusing) a discriminator so overviews
-are not confused with narration segments.
+### AudioArtifact (already implemented in v1)
+
+Overviews reuse `AudioArtifact` with `scope: "overview"` and `provider: "gemini"`, plus
+`overviewMinutes`, `overviewPrompt`, `overviewScript`. (Shipped.)
+
+### SourceIntelligenceProfile (NEW — the ingestion artifact)
 
 ```
-AudioArtifact {
-  ...existing fields (id, bookId, audio data/url, duration, voice, alignment, etc.)
-  kind: "narration" | "overview"      // overview = generated explanation
-  // Overview-specific (optional):
-  overviewScope?: { type: "whole" | "chapter" | "selection"; chapterIds?: string[] }
-  overviewMinutes?: number            // requested target
-  overviewPrompt?: string             // the user's prompt, or "" for default
-  overviewScript?: string             // the generated script (for transcript display)
+SourceIntelligenceProfile {
+  bookId: string
+  workType: "fiction" | "nonfiction" | "scholarly" | "manual" | "memoir" | "reference" | "scripture" | "other"
+  identity: { title; author; genre?; era? }
+  structure: {
+    kind: "narrative" | "subjectHierarchy"
+    sections: Array<{ id; title; importance: number; teachingSummary: string }>
+  }
+  concepts: { mainIdeas: string[]; themes: string[]; keyTerms: string[]; questions: string[] }
+  entities: Array<{
+    name; type: "character"|"person"|"org"|"place"|"concept"
+    role: string
+    relationships: Array<{ to: string; nature: string; evolution: string }>
+  }>
+  progression: string[]            // plot movements OR argument/evidence flow
+  suggestionBank: Array<{          // ready-made overview plans ("angles")
+    id; label; workTypes: string[]; planText: string   // planText = the prompt prefill
+  }>
+  builtAt: string
 }
 ```
+
+Persist alongside the semantic map (SQLite `source_profiles` table on desktop; IndexedDB
+store on web). Built during analysis for new imports; lazily built on first Audio Overview
+open for older books, then cached.
+
+Per-chapter `teachingSummary` is the enrichment to the existing chapter-analysis step
+(what the chapter is about + key developments + which relationships/concepts move) — it
+replaces reliance on chapter opening text.
 
 Persist via the existing audio storage (SQLite `audio_cache` on desktop; IndexedDB on
 web). Overviews are cached like other audio — reopening a book reloads them rather than
@@ -331,38 +414,39 @@ GEMINI_TTS_DEFAULT_VOICE: "Kore",                    // a clear neutral prebuilt
 
 ## IMPLEMENTATION ORDER
 
-### Phase 1 — Window shell + scope/length controls
-- Build the Audio Overview modal reached from the feature drawer entry.
-- Scope selector (whole / current chapter / choose chapters) wired to `activeStructure`.
-- Length stepper (5–35, default 20, 5-min steps) with "~min" label.
-- Voice dropdown reusing Voice Studio presets.
-- Generate button (disabled if no API key / no book), with the "larger generation" note.
+### ✅ Phase 1 — Window + scope/length/voice + Gemini summary→TTS (SHIPPED in v1)
+- Audio Overview window, scope/length/voice controls, generate, saved-overviews library.
+- Gemini summary script → Gemini TTS → WAV → AudioArtifact (scope "overview").
+- v1 used a TOC/first-line outline + a second suggestion box. The remaining phases below
+  REPLACE that weak grounding and that second box.
 
-### Phase 2 — Suggestion generator (ghost outlines)
-- Tier 1: instant outline assembled from the stored map for the chosen scope.
-- Ghost rendering + accept/replace/trim interaction in the prompt field.
-- Tier 2: ✨ Suggest → Gemini outline expansion (cheap, outline-only).
-- Re-suggest on scope change.
+### Phase 2 — Source Intelligence Profile at ingestion (the core refinement)
+- Define `SourceIntelligenceProfile` + storage (desktop table + web store), cached per book.
+- **Enrich the existing per-chapter analysis** to also emit a `teachingSummary`.
+- Build the SIP mostly by reframing existing artifacts (`visualLore` entities,
+  `narrativeBlueprint` themes/threads, `arcShape`, structure) + a small number of added
+  consolidation calls for: work-type classification, relationship progression, subject
+  hierarchy (nonfiction), and the suggestion bank.
+- New imports build the SIP during analysis; older books lazily build on first Audio
+  Overview open, then cache.
 
-### Phase 3 — Summary script generation
-- Default-prompt assembly (role/time spine + outline grounding + length guardrails).
-- Custom-prompt path (reader instruction primary, outline + length still applied).
-- Gemini call that summarizes/explains the scope down to a ~targetWords spoken-style
-  script. Progress reporting. (This is the summarizer step; its output is what gets voiced.)
+### Phase 3 — Prompt field driven by the SIP (replace the second box)
+- Remove the separate suggestion box. **Prefill the single prompt field** with the SIP's
+  best suggestion-bank plan for the current scope + work type.
+- Add **overview-angle chips** that instantly swap the field to other suggestion-bank plans
+  (type-aware: story/themes/relationships/chapter-by-chapter/first-time/lecture; or
+  by-subject/key-arguments/methods for scholarly).
+- **✨ Suggest fuller** rewrites the same field (one cheap call). No raw fragments shown.
 
-### Phase 4 — Voicing (Gemini TTS) + playback
-- New lightweight Gemini-TTS path (separate from audioDirector's ElevenLabs path).
-- Chunk the script under Gemini TTS input limits; synthesize each chunk with the chosen
-  Gemini voice; decode PCM/L16 audio and stitch + encode into one playable file.
-- Persist a single AudioArtifact tagged kind:"overview", provider:"gemini"
-  (audio_cache / IndexedDB); mount in the existing player.
-- Transcript view (show `overviewScript`) as a bonus, since it's already generated.
+### Phase 4 — Type-aware default + SIP grounding in the summarizer
+- Replace the single default spine with **fiction vs nonfiction/scholarly** variants.
+- Ground the summarizer on the SIP (concepts, relationships+progression, subject
+  hierarchy) instead of chapter openings; keep chapter-scope optional prose on top.
 
 ### Phase 5 — Polish
-- Cost/length expectation copy; graceful failure (script ok but TTS fails → keep the
-  script/transcript, let the reader retry voicing).
-- Library of generated overviews per book (list, replay, delete) inside the window.
-- Remember last-used scope/length/voice per book.
+- Graceful failure (script ok but TTS fails → keep transcript, retry voicing).
+- Remember last-used scope/length/voice/angle per book.
+- Optional debug view exposing the raw SIP (developer only, never in the prompt).
 
 ---
 
