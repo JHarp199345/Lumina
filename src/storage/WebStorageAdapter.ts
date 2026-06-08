@@ -298,7 +298,13 @@ export class WebStorageAdapter implements StorageAdapter {
     const resolved = await Promise.all(
       metas.map(async (meta) => {
         const data = await dbGet<Uint8Array>(STORES.AUDIO_BLOBS, meta.id);
-        if (!data) return meta;
+        if (!data) {
+          return {
+            ...meta,
+            status: "failed" as const,
+            error: "Saved audio metadata exists, but the stored audio bytes were not found.",
+          };
+        }
         return { ...meta, filePath: makeAudioBlobUrl(data, meta.mimeType) };
       })
     );

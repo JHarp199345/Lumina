@@ -199,17 +199,23 @@ export default function VoiceStudio() {
   const matchingArtifact = useMemo(() => {
     if (!selectedUnit) return null;
     const textHash = chapterGroupTextHash(selectedUnit);
-    return (
-      artifacts.find(
+    const chapterArtifacts = artifacts
+      .filter(
         (artifact) =>
           artifact.status === "ready" &&
           (artifact.provider ?? "gemini") === "elevenlabs" &&
           (artifact.scope ?? (artifact.segmentId.startsWith("chapter-") ? "chapter" : "segment")) === "chapter" &&
           artifact.segmentId === selectedUnit.id &&
-          (artifact.voiceProviderId ?? artifact.voiceId) === selectedVoice.providerVoiceName &&
-          artifact.stylePresetId === selectedStyle.id &&
           (!textHash || artifact.textHash === textHash)
-      ) ?? null
+      )
+      .sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime());
+    const exactArtifact = chapterArtifacts.find(
+      (artifact) =>
+        (artifact.voiceProviderId ?? artifact.voiceId) === selectedVoice.providerVoiceName &&
+        artifact.stylePresetId === selectedStyle.id
+    );
+    return (
+      exactArtifact ?? chapterArtifacts[0] ?? null
     );
   }, [artifacts, selectedStyle.id, selectedUnit, selectedVoice.id, selectedVoice.providerVoiceName]);
 

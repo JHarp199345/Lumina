@@ -39,7 +39,7 @@ function App() {
     setActiveStructure,
   } = useBookStore();
   const [showOnboarding, setShowOnboarding] = useState(!hasCompletedOnboarding);
-  const { importEpub, importEpubFile, loadLibrary } = useEpubImport();
+  const { importEpub, importEpubFile, loadLibrary, openBook } = useEpubImport();
 
   // Dev-only: ?test=1 auto-loads a bundled test EPUB and skips onboarding so the
   // reader (and highlight selection) can be exercised in preview without a picker.
@@ -83,8 +83,30 @@ function App() {
   // Load library from SQLite on startup
   useEffect(() => {
     diagnosticInfo("library.load.start", "Loading library");
-    loadLibrary();
-  }, [loadLibrary]);
+    let cancelled = false;
+    loadLibrary().then((books) => {
+      if (cancelled || useBookStore.getState().activeBook || books.length === 0) return;
+      const lastBook = [...books].sort((a, b) => {
+        const aTime = new Date(a.lastOpened ?? a.importedAt).getTime();
+        const bTime = new Date(b.lastOpened ?? b.importedAt).getTime();
+        return bTime - aTime;
+      })[0];
+      if (!lastBook) return;
+      diagnosticInfo("library.auto_open.start", "Reopening last active book", {
+        bookId: lastBook.id,
+        title: lastBook.title,
+      });
+      openBook(lastBook).catch((err) => {
+        diagnosticError("library.auto_open.failed", "Could not reopen last active book", {
+          bookId: lastBook.id,
+          error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+        });
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadLibrary, openBook]);
 
   useEffect(() => {
     storage
