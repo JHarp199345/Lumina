@@ -111,9 +111,11 @@ export default function VoiceStudio() {
     setActiveReadAlong,
     setVolume,
     setPlaybackRate,
+    setListenAlongMode,
     queueSegment,
     setError,
   } = useAudioStore();
+  const listenAlongMode = useAudioStore((s) => s.listenAlongMode);
 
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [voices, setVoices] = useState<AudioVoicePreset[]>(() => {
@@ -295,6 +297,7 @@ export default function VoiceStudio() {
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
+      setActiveReadAlong(null);
       return;
     }
     audio.src = activeArtifact.filePath;
@@ -302,6 +305,17 @@ export default function VoiceStudio() {
     audio.playbackRate = playbackRate;
     await audio.play();
     setIsPlaying(true);
+  };
+
+  const stopPlayback = () => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    setIsPlaying(false);
+    setPlaybackPosition(0, duration);
+    setActiveReadAlong(null);
   };
 
   const updateReadAlong = (audio: HTMLAudioElement, artifact: AudioArtifact | null) => {
@@ -338,6 +352,7 @@ export default function VoiceStudio() {
     if (!voice.previewUrl || !audioRef.current) return;
     const audio = audioRef.current;
     audio.pause();
+    setActiveReadAlong(null);
     audio.src = voice.previewUrl;
     audio.volume = volume;
     audio.playbackRate = 1;
@@ -401,6 +416,10 @@ export default function VoiceStudio() {
         onTimeUpdate={(event) => {
           const audio = event.currentTarget;
           updateReadAlong(audio, activeArtifact);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          setActiveReadAlong(null);
         }}
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
@@ -553,6 +572,35 @@ export default function VoiceStudio() {
           />
         </div>
 
+        <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-ink-faint">Listen Along</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+                {listenAlongMode
+                  ? "Continuous-scroll listening is selected."
+                  : "Paged read-along will turn pages while narration plays."}
+              </p>
+            </div>
+            <button
+              onClick={() => setListenAlongMode(!listenAlongMode)}
+              className={`relative mt-1 h-6 w-11 rounded-full border transition-colors ${
+                listenAlongMode
+                  ? "border-lumina-gold/45 bg-lumina-gold/24"
+                  : "border-hair bg-ink/[0.05]"
+              }`}
+              aria-pressed={listenAlongMode}
+              aria-label="Toggle listen along mode"
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-ink-soft transition-transform ${
+                  listenAlongMode ? "translate-x-5" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
         <div className="rounded-xl border border-lumina-gold/24 bg-lumina-gold/[0.045] p-3">
           <div className="mb-3 flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -586,6 +634,13 @@ export default function VoiceStudio() {
           </div>
 
           <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              onClick={stopPlayback}
+              disabled={!activeArtifact && !isPlaying}
+              className="rounded-lg border border-hair bg-ink/[0.03] px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-40"
+            >
+              Stop
+            </button>
             <button
               onClick={() => runGenerate("streamed", true)}
               disabled={isGenerating || !selectedUnit}

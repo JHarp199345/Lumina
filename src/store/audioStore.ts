@@ -26,6 +26,7 @@ interface AudioStore {
   activeSpanText: string;
   volume: number;
   playbackRate: number;
+  listenAlongMode: boolean;
   generationProgress: string;
   error: string | null;
 
@@ -44,6 +45,7 @@ interface AudioStore {
   setActiveReadAlong: (wordPosition: number | null, spanText?: string) => void;
   setVolume: (volume: number) => void;
   setPlaybackRate: (playbackRate: number) => void;
+  setListenAlongMode: (listenAlongMode: boolean) => void;
   queueSegment: (segmentId: string) => void;
   dequeueSegment: () => string | null;
   setError: (error: string | null) => void;
@@ -67,6 +69,7 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
   activeSpanText: "",
   volume: 1,
   playbackRate: 1,
+  listenAlongMode: false,
   generationProgress: "",
   error: null,
 
@@ -83,6 +86,7 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
       duration: 0,
       activeWordPosition: null,
       activeSpanText: "",
+      listenAlongMode: false,
       generationProgress: "",
       error: null,
     }),
@@ -99,6 +103,7 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
       duration: 0,
       activeWordPosition: null,
       activeSpanText: "",
+      listenAlongMode: false,
       generationProgress: "",
       error: null,
     }),
@@ -119,6 +124,7 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
   setActiveReadAlong: (activeWordPosition, activeSpanText = "") => set({ activeWordPosition, activeSpanText }),
   setVolume: (volume) => set({ volume: Math.min(1, Math.max(0, volume)) }),
   setPlaybackRate: (playbackRate) => set({ playbackRate: Math.min(2, Math.max(0.5, playbackRate)) }),
+  setListenAlongMode: (listenAlongMode) => set({ listenAlongMode }),
   queueSegment: (segmentId) =>
     set((state) => ({
       queue: state.queue.includes(segmentId) ? state.queue : [...state.queue, segmentId],

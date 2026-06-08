@@ -7,6 +7,7 @@ import { useUiStore } from "@/store/uiStore";
 import { useAudioStore } from "@/store/audioStore";
 import { parseChapterDisplay } from "@/utils/titleUtils";
 import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
+import type { Chapter } from "@/types";
 
 const DEFAULT_WORDS_PER_PAGE = 220;
 
@@ -142,6 +143,38 @@ function pageIndexForChapterOffset(pages: PageSegment[] | undefined, offset: num
   return index >= 0 ? index : pages.length - 1;
 }
 
+function pageIndexForChapterWordOffset(pages: PageSegment[] | undefined, offset: number): number {
+  if (!pages || pages.length === 0) return 0;
+  const safeOffset = Math.max(0, offset);
+  const index = pages.findIndex((page) => safeOffset >= page.startWordOffset && safeOffset < page.endWordOffset);
+  return index >= 0 ? index : pages.length - 1;
+}
+
+function locateWordPosition(
+  chapters: Chapter[],
+  pagesByChapter: PageSegment[][],
+  wordPosition: number
+): { chapterIndex: number; pageIndex: number } | null {
+  if (chapters.length === 0) return null;
+  let wordsBeforeChapter = 0;
+  const safePosition = Math.max(0, wordPosition);
+
+  for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex += 1) {
+    const chapter = chapters[chapterIndex];
+    const chapterEnd = wordsBeforeChapter + Math.max(1, chapter.wordCount);
+    if (safePosition < chapterEnd || chapterIndex === chapters.length - 1) {
+      const wordOffset = safePosition - wordsBeforeChapter;
+      return {
+        chapterIndex,
+        pageIndex: pageIndexForChapterWordOffset(pagesByChapter[chapterIndex], wordOffset),
+      };
+    }
+    wordsBeforeChapter = chapterEnd;
+  }
+
+  return null;
+}
+
 function ReadAlongParagraph({
   paragraph,
   paragraphIndex,
@@ -176,6 +209,7 @@ function ReadAlongParagraph({
         return (
           <span
             key={`${index}-${absoluteWord}`}
+            data-readalong-active={active ? "true" : undefined}
             className={
               active
                 ? "rounded-[0.22em] bg-lumina-gold/34 px-[0.08em] text-ink shadow-[0_0_18px_rgba(210,170,80,0.34)]"
@@ -209,6 +243,8 @@ export default function StructuredTextRenderer({
   } = useReaderStore();
   const { fontSize, lineHeight } = useSettingsStore();
   const activeWordPosition = useAudioStore((s) => s.activeWordPosition);
+  const isAudioPlaying = useAudioStore((s) => s.isPlaying);
+  const listenAlongMode = useAudioStore((s) => s.listenAlongMode);
   const isFocused = useUiStore((s) => s.focusMode === "reader");
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -364,6 +400,33 @@ export default function StructuredTextRenderer({
     [activeBook?.coverImage, activeStructure, chapterPages, saveLocation]
   );
 
+  useEffect(() => {
+    if (!activeStructure || !isAudioPlaying || activeWordPosition === null) return;
+    const target = locateWordPosition(activeStructure.chapters, chapterPageSegments, activeWordPosition);
+    if (!target) return;
+    if (listenAlongMode) {
+      if (target.chapterIndex !== currentChapterIndex) goTo(target.chapterIndex, 0);
+      return;
+    }
+    if (target.chapterIndex === currentChapterIndex && target.pageIndex === pageIndex) return;
+    goTo(target.chapterIndex, target.pageIndex);
+  }, [
+    activeStructure,
+    activeWordPosition,
+    chapterPageSegments,
+    currentChapterIndex,
+    goTo,
+    isAudioPlaying,
+    listenAlongMode,
+    pageIndex,
+  ]);
+
+  useEffect(() => {
+    if (!listenAlongMode || !isAudioPlaying || activeWordPosition === null) return;
+    const activeEl = contentRef.current?.querySelector('[data-readalong-active="true"]');
+    activeEl?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [activeWordPosition, isAudioPlaying, listenAlongMode]);
+
   const nextPage = useCallback(() => {
     if (!activeStructure) return;
     if (currentChapterIndex < 0) {
@@ -484,7 +547,9 @@ export default function StructuredTextRenderer({
   const isCover = currentChapterIndex < 0;
   const currentText = isCover
     ? ""
-    : chapterPages[currentChapterIndex]?.[pageIndex] ?? activeStructure.chapters[currentChapterIndex]?.rawText ?? "";
+    : listenAlongMode
+      ? activeStructure.chapters[currentChapterIndex]?.rawText ?? ""
+      : chapterPages[currentChapterIndex]?.[pageIndex] ?? activeStructure.chapters[currentChapterIndex]?.rawText ?? "";
   const wordsBeforeCurrentChapter =
     currentChapterIndex < 0
       ? 0
@@ -492,7 +557,9 @@ export default function StructuredTextRenderer({
   const currentPageStartWord =
     currentChapterIndex < 0
       ? 0
-      : wordsBeforeCurrentChapter + (currentPageSegment?.startWordOffset ?? 0);
+      : listenAlongMode
+        ? wordsBeforeCurrentChapter
+        : wordsBeforeCurrentChapter + (currentPageSegment?.startWordOffset ?? 0);
   const paragraphWordCursor = { current: 0 };
 
   return (
@@ -561,7 +628,9 @@ export default function StructuredTextRenderer({
               {activeBook.title}
             </p>
             <p className="text-[10px] uppercase tracking-[0.16em] text-ink-faint">
-              {pageIndex + 1} / {Math.max(1, chapterPages[currentChapterIndex]?.length ?? 1)}
+              {listenAlongMode
+                ? "Listen Along"
+                : `${pageIndex + 1} / ${Math.max(1, chapterPages[currentChapterIndex]?.length ?? 1)}`}
             </p>
           </div>
           <div
