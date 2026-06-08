@@ -23,6 +23,8 @@ import {
   WandSparkles,
   Brain,
   Headphones,
+  AudioLines,
+  Presentation,
 } from "lucide-react";
 import { useDrawerStore } from "@/store/drawerStore";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -86,6 +88,12 @@ export default function AnnotationsDrawer() {
             {view === "voice-studio" && (
               <VoiceStudioView onBack={() => setView("menu")} onClose={close} />
             )}
+            {view === "audio-overview" && (
+              <AudioOverviewView onBack={() => setView("menu")} onClose={close} />
+            )}
+            {view === "presentation-studio" && (
+              <PresentationStudioView onBack={() => setView("menu")} onClose={close} />
+            )}
           </motion.aside>
         </>
       )}
@@ -136,7 +144,16 @@ function MenuView({
   onPick,
   onClose,
 }: {
-  onPick: (v: "glossary" | "notepad" | "lens-studio" | "study-guide" | "voice-studio") => void;
+  onPick: (
+    v:
+      | "glossary"
+      | "notepad"
+      | "lens-studio"
+      | "study-guide"
+      | "voice-studio"
+      | "audio-overview"
+      | "presentation-studio"
+  ) => void;
   onClose: () => void;
 }) {
   const { activeBook } = useBookStore();
@@ -183,6 +200,20 @@ function MenuView({
           count={0}
           onClick={() => onPick("voice-studio")}
         />
+        <HubButton
+          icon={<AudioLines size={18} />}
+          label="Audio Overview"
+          sub="Guided summaries and chapter briefings"
+          count={0}
+          onClick={() => onPick("audio-overview")}
+        />
+        <HubButton
+          icon={<Presentation size={18} />}
+          label="Presentation Studio"
+          sub="Slides from the book, guide, and notes"
+          count={0}
+          onClick={() => onPick("presentation-studio")}
+        />
       </div>
       <div className="mt-auto px-4 py-4">
         <p className="text-[11px] leading-relaxed text-ink-faint">
@@ -218,6 +249,73 @@ function VoiceStudioView({ onBack, onClose }: { onBack: () => void; onClose: () 
       <DrawerHeader title="Voice Studio" onBack={onBack} onClose={onClose} />
       <VoiceStudio />
     </>
+  );
+}
+
+function AudioOverviewView({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+  return (
+    <>
+      <DrawerHeader title="Audio Overview" onBack={onBack} onClose={onClose} />
+      <UnderConstructionView
+        icon={<AudioLines size={28} />}
+        label="Audio Overview"
+        text="This will create guided audio briefings that understand the book chapter by chapter, then connect those chapters into larger arcs instead of flattening everything into one summary."
+        points={["Chapter-by-chapter breakdowns", "Arc and theme overviews", "Saved overview audio"]}
+      />
+    </>
+  );
+}
+
+function PresentationStudioView({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+  return (
+    <>
+      <DrawerHeader title="Presentation Studio" onBack={onBack} onClose={onClose} />
+      <UnderConstructionView
+        icon={<Presentation size={28} />}
+        label="Presentation Studio"
+        text="This will turn study guides, highlights, notes, quizzes, flashcards, and chapter structure into readable slide decks that can zoom from one chapter to the whole book."
+        points={["Chapter decks", "Whole-book decks", "Export-ready outlines"]}
+      />
+    </>
+  );
+}
+
+function UnderConstructionView({
+  icon,
+  label,
+  text,
+  points,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  text: string;
+  points: string[];
+}) {
+  return (
+    <div className="flex flex-1 flex-col p-4">
+      <div className="rounded-2xl border border-lumina-gold/25 bg-lumina-gold/[0.05] p-4 shadow-inner shadow-white/[0.02]">
+        <div className="flex items-center gap-3">
+          <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-lumina-gold/25 bg-lumina-gold/[0.08] text-lumina-gold">
+            {icon}
+          </span>
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-lumina-gold/75">Under Construction</p>
+            <h3 className="text-base font-semibold text-ink/90">{label}</h3>
+          </div>
+        </div>
+        <p className="mt-4 text-sm leading-relaxed text-ink-soft">{text}</p>
+        <div className="mt-4 grid gap-2">
+          {points.map((point) => (
+            <div key={point} className="rounded-lg border border-hair bg-ink/[0.025] px-3 py-2 text-xs text-ink-faint">
+              {point}
+            </div>
+          ))}
+        </div>
+      </div>
+      <p className="mt-4 text-[11px] leading-relaxed text-ink-faint">
+        This endpoint is reserved in the drawer so the feature map can grow without moving the reader's controls around later.
+      </p>
+    </div>
   );
 }
 
