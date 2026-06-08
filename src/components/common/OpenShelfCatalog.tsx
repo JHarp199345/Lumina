@@ -209,7 +209,11 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
       setStatus(`Imported ${book.title}.`);
       window.setTimeout(onClose, 900);
     } catch (err) {
-      setStatus(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+      startBrowserDownload(epubUrls[0], book.title);
+      setStatus(
+        `Automatic import failed: ${err instanceof Error ? err.message : String(err)}. ` +
+          "A browser download was started instead. After it finishes, use Open Book to import the EPUB."
+      );
     }
   };
 
@@ -229,7 +233,7 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
             <p className="text-xs text-ink-faint">
               {totalCount
                 ? `${books.length.toLocaleString()} of ${totalCount.toLocaleString()} loaded`
-                : "Public-domain books ready to import."}
+                : "Public-domain books ready to download."}
             </p>
           </div>
         </div>
@@ -331,7 +335,7 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
             )}
             {!nextUrl && visibleBooks.length > 0 && (
               <p className="px-2 py-3 text-center text-[11px] text-ink-faint">
-                End of this shelf.
+                End of this shelf. Some Gutenberg downloads may need to be imported from the browser's Downloads folder.
               </p>
             )}
           </div>
@@ -432,6 +436,18 @@ async function downloadFirstWorkingEpub(
     }
   }
   throw new Error(`No EPUB format could be imported. ${failures[0] ?? ""}`.trim());
+}
+
+function startBrowserDownload(url: string | undefined, title: string): void {
+  if (!url) return;
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeFileName(title)}.epub`;
+  link.rel = "noopener";
+  link.target = "_blank";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function pickEpubUrls(book: GutendexBook): string[] {
