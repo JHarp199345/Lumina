@@ -45,6 +45,12 @@ export interface StorageAdapter {
   storeEpub(source: File | string, bookId: string, fileName: string): Promise<string>;
 
   /**
+   * Persist already-read EPUB bytes. Web imports use this to avoid reading a
+   * selected file twice on slow/mobile browsers. Native adapters may omit it.
+   */
+  storeEpubBytes?(bytes: Uint8Array, bookId: string, fileName: string): Promise<string>;
+
+  /**
    * Return raw bytes for a book's EPUB file.
    * Accepts whatever was returned by storeEpub as book.filePath.
    */

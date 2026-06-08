@@ -24,6 +24,23 @@ function describeError(err: unknown): string {
   }
 }
 
+async function optionalStep<T>(
+  label: string,
+  action: () => Promise<T>,
+  onProgress?: (message: string) => void
+): Promise<T | undefined> {
+  onProgress?.(label);
+  try {
+    const result = await action();
+    onProgress?.(`Done: ${label}`);
+    return result;
+  } catch (err) {
+    console.warn(`[Import] Optional step skipped: ${label}`, err);
+    onProgress?.(`Skipped: ${label}`);
+    return undefined;
+  }
+}
+
 // A structure parsed before paragraph-preserving extraction has rawText with no
 // paragraph breaks at all. A real multi-paragraph book always has some "\n\n";
 // if a substantial book has none, the stored structure is stale → re-parse.
@@ -98,10 +115,12 @@ export function useEpubImport() {
         : (picked as string).split("/").pop() || "book.epub";
 
     const storedPath = await runStep("Copying book into Lumina…", () =>
-      storage.storeEpub(picked, structure.bookId, fileName)
+      picked instanceof File && storage.storeEpubBytes
+        ? storage.storeEpubBytes(bytes, structure.bookId, fileName)
+        : storage.storeEpub(picked, structure.bookId, fileName)
     );
 
-    const coverImage = await runStep("Extracting cover image…", () => extractCoverImage(zip));
+    const coverImage = await optionalStep("Extracting cover image…", () => extractCoverImage(zip), onProgress);
 
     const book: Book = {
       id: structure.bookId,

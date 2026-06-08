@@ -131,6 +131,11 @@ export class WebStorageAdapter implements StorageAdapter {
     return `idb://${bookId}`;
   }
 
+  async storeEpubBytes(bytes: Uint8Array, bookId: string, _fileName: string): Promise<string> {
+    await dbPut(STORES.EPUBS, bytes, bookId);
+    return `idb://${bookId}`;
+  }
+
   async getEpubBytes(book: Book): Promise<Uint8Array> {
     // filePath is either "idb://<bookId>" (web-stored) or a native path (Tauri)
     const key = book.filePath.startsWith("idb://")

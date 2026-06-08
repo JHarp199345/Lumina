@@ -875,6 +875,7 @@ function generateId(seed: string): string {
 // ─── Cover Extraction ─────────────────────────────────────────────────────────
 
 export async function extractCoverImage(zip: JSZip): Promise<string | undefined> {
+  const MAX_COVER_BYTES = 2_500_000;
   const bytesToDataUrl = (bytes: Uint8Array, mimeType: string) => {
     let binary = "";
     const chunkSize = 0x8000;
@@ -897,7 +898,11 @@ export async function extractCoverImage(zip: JSZip): Promise<string | undefined>
   const readImageAsDataUrl = async (path: string, fallbackMime = "image/jpeg") => {
     const file = zip.file(normalizePath(path));
     if (!file) return undefined;
+    const estimatedSize = (file as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize;
+    if (estimatedSize && estimatedSize > MAX_COVER_BYTES) return undefined;
+    await yieldToUi();
     const bytes = await file.async("uint8array");
+    if (bytes.length > MAX_COVER_BYTES) return undefined;
     return bytesToDataUrl(bytes, imageMimeType(path, fallbackMime));
   };
 
