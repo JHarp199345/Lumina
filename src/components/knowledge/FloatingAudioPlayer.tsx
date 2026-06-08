@@ -31,6 +31,7 @@ export default function FloatingAudioPlayer() {
     artifacts,
     activeAudioId,
     isPlaying,
+    isGenerating,
     currentTime,
     duration,
     volume,
@@ -151,6 +152,14 @@ export default function FloatingAudioPlayer() {
     localStorage.removeItem(AUDIO_SESSION_KEY);
   };
 
+  const handleEnded = () => {
+    if (activeArtifact?.mode === "streamed" && isGenerating) {
+      setIsPlaying(true);
+      return;
+    }
+    stopPlayback();
+  };
+
   const onPointerMove = (event: PointerEvent) => {
     const start = dragStartRef.current;
     if (!start) return;
@@ -184,8 +193,9 @@ export default function FloatingAudioPlayer() {
         ref={audioRef}
         onTimeUpdate={(event) => updateReadAlong(event.currentTarget)}
         onLoadedMetadata={(event) => setPlaybackPosition(event.currentTarget.currentTime, event.currentTarget.duration)}
-        onEnded={stopPlayback}
+        onEnded={handleEnded}
         onPause={() => {
+          if (activeArtifact?.mode === "streamed" && isGenerating) return;
           if (audioRef.current?.ended) return;
           setIsPlaying(false);
         }}

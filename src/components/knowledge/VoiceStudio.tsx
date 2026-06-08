@@ -301,6 +301,17 @@ export default function VoiceStudio() {
         style: selectedStyle,
         mode,
         onProgress: setProgress,
+        onChunk:
+          mode === "streamed"
+            ? async ({ artifact: partialArtifact, data, chunkIndex, totalChunks }) => {
+                setProgress(`Saving streamed audio chunk ${chunkIndex + 1} of ${totalChunks}`);
+                const filePath = await storage.saveAudioArtifact(partialArtifact, data);
+                const playableArtifact: AudioArtifact = { ...partialArtifact, filePath };
+                addArtifact(playableArtifact);
+                setActiveAudio(playableArtifact.id);
+                setIsPlaying(true);
+              }
+            : undefined,
       });
       setProgress("Saving audio");
       const filePath = await storage.saveAudioArtifact(generated.artifact, generated.data);

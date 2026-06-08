@@ -124,6 +124,12 @@ interface AudioTextChunk {
 }
 
 type AudioGenerationProgress = (message: string) => void;
+type AudioGenerationChunk = (payload: {
+  artifact: Omit<AudioArtifact, "filePath">;
+  data: Uint8Array;
+  chunkIndex: number;
+  totalChunks: number;
+}) => void | Promise<void>;
 
 export function getSegmentAudioText(segment: StudySegment, structure: BookStructure): SegmentAudioText {
   const chapter = structure.chapters.find((item) => item.index === segment.chapterIndex);
@@ -526,6 +532,7 @@ export async function generateChapterGroupAudio({
   style,
   mode = "saved",
   onProgress,
+  onChunk,
 }: {
   unit: ChapterAudioUnit;
   structure: BookStructure;
@@ -534,6 +541,7 @@ export async function generateChapterGroupAudio({
   style: AudioStylePreset;
   mode?: AudioGenerationMode;
   onProgress?: AudioGenerationProgress;
+  onChunk?: AudioGenerationChunk;
 }): Promise<{ artifact: Omit<AudioArtifact, "filePath">; data: Uint8Array }> {
   const { text, absoluteStartWord, absoluteEndWord } = getChapterGroupAudioText(unit.chapters, structure);
   if (text.split(/\s+/).filter(Boolean).length < 40) {
@@ -542,10 +550,37 @@ export async function generateChapterGroupAudio({
 
   const textHash = hashText(text);
   const promptHash = hashText(`${text}|${style.direction}|${voice.providerVoiceName}|${ELEVENLABS_MODEL_ID}|${mode}`);
+  const generatedAt = new Date().toISOString();
+  const artifactId = `audio-${structure.bookId}-${unit.id}-${voice.id}-${style.id}-${mode}-${Date.now()}`;
   const chunks = splitAudioText(text);
   const audioChunks: Uint8Array[] = [];
   const alignment: AudioAlignmentSpan[] = [];
   let audioOffsetMs = 0;
+
+  const buildArtifact = (status: AudioArtifact["status"]): Omit<AudioArtifact, "filePath"> => ({
+    id: artifactId,
+    bookId: structure.bookId,
+    segmentId: unit.id,
+    chapterIndex: unit.startChapterIndex,
+    segmentTitle: unit.title,
+    voiceId: voice.id,
+    provider: "elevenlabs",
+    scope: "chapter",
+    voiceProviderId: voice.providerVoiceName,
+    modelId: ELEVENLABS_MODEL_ID,
+    mode,
+    stylePresetId: style.id,
+    textHash,
+    promptHash,
+    textStartPosition: absoluteStartWord,
+    textEndPosition: absoluteEndWord,
+    alignment: [...alignment],
+    durationSeconds: audioOffsetMs > 0 ? audioOffsetMs / 1000 : undefined,
+    mimeType: "audio/mpeg",
+    generatedAt,
+    generationApi: `elevenlabs:${ELEVENLABS_MODEL_ID}`,
+    status,
+  });
 
   for (let index = 0; index < chunks.length; index += 1) {
     const chunk = chunks[index];
@@ -569,35 +604,20 @@ export async function generateChapterGroupAudio({
         ? shiftedAlignment.reduce((max, span) => Math.max(max, span.endMs), audioOffsetMs) - audioOffsetMs
         : alignmentDurationMs(rawAlignment);
     audioOffsetMs += Math.max(0, chunkDurationMs);
+    if (mode === "streamed" && onChunk) {
+      await onChunk({
+        artifact: buildArtifact("ready"),
+        data: concatBytes(audioChunks),
+        chunkIndex: index,
+        totalChunks: chunks.length,
+      });
+    }
   }
 
-  const generatedAt = new Date().toISOString();
   const bytes = concatBytes(audioChunks);
 
   return {
-    artifact: {
-      id: `audio-${structure.bookId}-${unit.id}-${voice.id}-${style.id}-${mode}-${Date.now()}`,
-      bookId: structure.bookId,
-      segmentId: unit.id,
-      chapterIndex: unit.startChapterIndex,
-      segmentTitle: unit.title,
-      voiceId: voice.id,
-      provider: "elevenlabs",
-      scope: "chapter",
-      voiceProviderId: voice.providerVoiceName,
-      modelId: ELEVENLABS_MODEL_ID,
-      mode,
-      stylePresetId: style.id,
-      textHash,
-      promptHash,
-      textStartPosition: absoluteStartWord,
-      textEndPosition: absoluteEndWord,
-      alignment,
-      mimeType: "audio/mpeg",
-      generatedAt,
-      generationApi: `elevenlabs:${ELEVENLABS_MODEL_ID}`,
-      status: "ready",
-    },
+    artifact: buildArtifact("ready"),
     data: bytes,
   };
 }
