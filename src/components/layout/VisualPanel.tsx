@@ -747,7 +747,7 @@ function ImageGalleryModal({
             onClick={onAnalyze}
             disabled={isAnalyzing}
             className="inline-flex min-h-14 items-center gap-2.5 rounded-full border border-lumina-gold/38 bg-sky-50/[0.06] px-7 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-lumina-gold/90 shadow-[0_12px_38px_rgba(0,0,0,0.38)] backdrop-blur-md transition-colors hover:border-lumina-gold/60 hover:bg-sky-50/[0.09] hover:text-lumina-gold disabled:cursor-default disabled:opacity-70"
-            aria-label={activeSemanticMap ? "Re-analyze this book" : "Analyze this book"}
+            aria-label={activeSemanticMap ? "Refresh the visual plan" : "Analyze this book"}
           >
             {isAnalyzing ? (
               <Loader size={15} className="animate-spin" />
@@ -756,8 +756,13 @@ function ImageGalleryModal({
             ) : (
               <Sparkles size={15} />
             )}
-            {isAnalyzing ? "Analyzing" : activeSemanticMap ? "Re-Analyze This Book" : "Analyze This Book"}
+            {isAnalyzing ? "Analyzing" : activeSemanticMap ? "Refresh Visual Plan" : "Analyze This Book"}
           </button>
+          {!isAnalyzing && activeSemanticMap && (
+            <p className="max-w-[min(420px,82vw)] text-center text-[11px] leading-relaxed text-ink-faint">
+              Rebuilds the visual scaffold. The slider below erases generated images.
+            </p>
+          )}
           {isAnalyzing && (
             <div className="w-[min(420px,80vw)] rounded-full border border-hair bg-black/28 p-1 backdrop-blur-sm">
               <div
@@ -816,7 +821,7 @@ function SlideToRegenerate({ onConfirm }: { onConfirm: () => void | Promise<void
     >
       <div className="pointer-events-none absolute inset-[3px] rounded-full border border-white/[0.055] bg-gradient-to-r from-sky-100/[0.045] via-sky-100/[0.075] to-sky-100/[0.045]" />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-12 text-center text-[11px] uppercase tracking-[0.16em] text-ink-faint">
-        {confirmed ? "Repainting from your spot…" : "Slide to regenerate all images"}
+        {confirmed ? "Repainting from your spot…" : "Slide to erase generated images"}
       </div>
       <motion.div
         drag={confirmed ? false : "x"}
@@ -834,7 +839,7 @@ function SlideToRegenerate({ onConfirm }: { onConfirm: () => void | Promise<void
           }
         }}
         className="absolute top-1 flex h-10 w-10 cursor-grab items-center justify-center rounded-full border border-lumina-gold/45 bg-lumina-gold/78 text-[#071525] shadow-[0_8px_22px_rgba(0,0,0,0.35)] backdrop-blur-sm active:cursor-grabbing"
-        aria-label="Slide to regenerate all images"
+        aria-label="Slide to erase generated images and regenerate from reading anchors"
       >
         <RefreshCw size={15} />
       </motion.div>

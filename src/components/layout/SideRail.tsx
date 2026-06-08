@@ -11,6 +11,7 @@ interface SideRailProps {
   onImport: () => void;
   onLibraryOpen: () => void;
   isTablet?: boolean;
+  isPhone?: boolean;
   tocOpen?: boolean;
   onTocToggle?: () => void;
   onSettingsOpen: () => void;
@@ -20,6 +21,7 @@ export default function SideRail({
   onImport,
   onLibraryOpen,
   isTablet,
+  isPhone,
   tocOpen,
   onTocToggle,
   onSettingsOpen,
@@ -43,9 +45,15 @@ export default function SideRail({
   };
 
   return (
-    <aside className="relative w-16 flex-shrink-0 flex flex-col items-center border-r border-hair bg-panel py-3">
+    <aside
+      className={
+        isPhone
+          ? "absolute left-2 top-1/2 z-50 flex w-12 -translate-y-1/2 flex-col items-center rounded-full border border-white/10 bg-sky-100/[0.075] py-2 shadow-[0_12px_34px_rgba(0,0,0,0.38)] backdrop-blur-xl"
+          : "relative flex w-16 flex-shrink-0 flex-col items-center border-r border-hair bg-panel py-3"
+      }
+    >
       {/* Reading progress bar — left edge, full height, fills as reader advances */}
-      <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-white/4">
+      <div className={isPhone ? "hidden" : "absolute left-0 top-0 bottom-0 w-0.5 bg-white/4"}>
         <div
           className="w-full bg-lumina-gold/35 transition-all duration-1000 ease-out"
           style={{ height: `${Math.min(100, Math.max(0, percentComplete))}%` }}

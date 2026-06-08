@@ -14,6 +14,7 @@ import TopNav from "@/components/layout/TopNav";
 import SideRail from "@/components/layout/SideRail";
 import PanelContainer from "@/components/layout/PanelContainer";
 import TabletPanelContainer from "@/components/layout/TabletPanelContainer";
+import PhonePanelContainer from "@/components/layout/PhonePanelContainer";
 import TocDrawer from "@/components/layout/TocDrawer";
 import HighlightLayer from "@/components/reader/HighlightLayer";
 import LensStyleBridge from "@/components/reader/LensStyleBridge";
@@ -61,7 +62,7 @@ function App() {
     })();
   }, [importEpubFile]);
   const { startOrchestration, reAnalyzeBook } = useBookOrchestration();
-  const { isTablet, isPortrait } = useDeviceLayout();
+  const { isTablet, isPhone, isPortrait } = useDeviceLayout();
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [importProgress, setImportProgress] = useState("");
@@ -313,6 +314,7 @@ function App() {
           onImport={handleImport}
           onLibraryOpen={() => setShowLibrary(true)}
           isTablet={isTablet}
+          isPhone={isPhone}
           tocOpen={tabletTocOpen}
           onTocToggle={() => setTabletTocOpen((v) => !v)}
           onSettingsOpen={() => setShowSettings(true)}
@@ -321,12 +323,14 @@ function App() {
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <TopNav
             onImport={handleImport}
-            isTablet={isTablet}
+            isTablet={isTablet || isPhone}
             tocOpen={tabletTocOpen}
             onTocToggle={() => setTabletTocOpen((v) => !v)}
           />
 
-          {isTablet ? (
+          {isPhone ? (
+            <PhonePanelContainer onImport={handleImport} />
+          ) : isTablet ? (
             <TabletPanelContainer
               isPortrait={isPortrait}
               onImport={handleImport}
