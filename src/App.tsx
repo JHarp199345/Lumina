@@ -19,6 +19,7 @@ import HighlightLayer from "@/components/reader/HighlightLayer";
 import LensStyleBridge from "@/components/reader/LensStyleBridge";
 import SelectionActionBar from "@/components/reader/SelectionActionBar";
 import AnnotationsDrawer from "@/components/knowledge/AnnotationsDrawer";
+import FloatingAudioPlayer from "@/components/knowledge/FloatingAudioPlayer";
 import SunburstNote from "@/components/knowledge/SunburstNote";
 import SeedPicker from "@/components/visual/SeedPicker";
 import OnboardingModal from "@/components/common/OnboardingModal";
@@ -327,6 +328,7 @@ function App() {
       <LensStyleBridge />
       <SelectionActionBar />
       <AnnotationsDrawer />
+      <FloatingAudioPlayer />
       <SunburstNote />
 
       <AnimatePresence>

@@ -82,7 +82,7 @@ export default function VoiceStudio() {
   const { activeBook, activeStructure } = useBookStore();
   const currentChapterIndex = useReaderStore((s) => s.currentChapterIndex);
   const { saveElevenLabsKey } = useApiKeys();
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const {
     bookId,
@@ -273,14 +273,7 @@ export default function VoiceStudio() {
       addArtifact(artifact);
       setActiveAudio(artifact.id);
       if (mode === "streamed") {
-        setTimeout(() => {
-          const audio = audioRef.current;
-          if (!audio) return;
-          audio.src = artifact.filePath;
-          audio.volume = volume;
-          audio.playbackRate = playbackRate;
-          audio.play().then(() => setIsPlaying(true)).catch(() => {});
-        }, 0);
+        setIsPlaying(true);
       }
     } catch (err) {
       console.error("[VoiceStudio] Audio generation failed:", err);
@@ -292,48 +285,21 @@ export default function VoiceStudio() {
   };
 
   const playOrPause = async () => {
-    const audio = audioRef.current;
-    if (!audio || !activeArtifact) return;
+    if (!activeArtifact) return;
     if (isPlaying) {
-      audio.pause();
       setIsPlaying(false);
       setActiveReadAlong(null);
       return;
     }
-    audio.src = activeArtifact.filePath;
-    audio.volume = volume;
-    audio.playbackRate = playbackRate;
-    await audio.play();
+    setActiveAudio(activeArtifact.id);
     setIsPlaying(true);
   };
 
   const stopPlayback = () => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-    }
     setIsPlaying(false);
     setPlaybackPosition(0, duration);
     setActiveReadAlong(null);
-  };
-
-  const updateReadAlong = (audio: HTMLAudioElement, artifact: AudioArtifact | null) => {
-    setPlaybackPosition(audio.currentTime, audio.duration);
-    if (!artifact?.alignment?.length) {
-      setActiveReadAlong(null);
-      return;
-    }
-    const nowMs = audio.currentTime * 1000;
-    const span =
-      artifact.alignment.find((item) => nowMs >= item.startMs && nowMs <= item.endMs) ??
-      artifact.alignment.find((item) => item.startMs > nowMs) ??
-      null;
-    if (!span) {
-      setActiveReadAlong(null);
-      return;
-    }
-    setActiveReadAlong(span.absoluteWordStart, span.text);
+    setActiveAudio(null);
   };
 
   const queueNext = () => {
@@ -349,15 +315,14 @@ export default function VoiceStudio() {
   };
 
   const playVoicePreview = async (voice: AudioVoicePreset) => {
-    if (!voice.previewUrl || !audioRef.current) return;
-    const audio = audioRef.current;
-    audio.pause();
+    if (!voice.previewUrl) return;
+    previewAudioRef.current?.pause();
+    const audio = new Audio(voice.previewUrl);
+    previewAudioRef.current = audio;
     setActiveReadAlong(null);
-    audio.src = voice.previewUrl;
     audio.volume = volume;
     audio.playbackRate = 1;
     await audio.play();
-    setIsPlaying(true);
   };
 
   const saveInlineVoiceKey = async () => {
@@ -411,26 +376,6 @@ export default function VoiceStudio() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <audio
-        ref={audioRef}
-        onTimeUpdate={(event) => {
-          const audio = event.currentTarget;
-          updateReadAlong(audio, activeArtifact);
-        }}
-        onPause={() => {
-          setIsPlaying(false);
-          setActiveReadAlong(null);
-        }}
-        onLoadedMetadata={(event) => {
-          const audio = event.currentTarget;
-          setPlaybackPosition(audio.currentTime, audio.duration);
-        }}
-        onEnded={() => {
-          setIsPlaying(false);
-          setActiveReadAlong(null);
-        }}
-      />
-
       <div className="border-b border-hair px-3 py-3">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-lumina-gold/75">Voice Studio</p>
         <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
