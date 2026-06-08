@@ -20,6 +20,7 @@ const ELEVEN_BASE = "https://api.elevenlabs.io/v1";
 export const ELEVENLABS_KEY_NAME = "lumina_elevenlabs_key";
 export const ELEVENLABS_VOICE_CACHE_KEY = "lumina.elevenlabs.voices";
 export const ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
+const ELEVENLABS_SAFE_TEXT_LIMIT = 9000;
 
 export const VOICE_PRESETS: AudioVoicePreset[] = [
   {
@@ -116,6 +117,14 @@ export interface ChapterAudioUnit {
   wordCount: number;
 }
 
+interface AudioTextChunk {
+  text: string;
+  startChar: number;
+  wordOffset: number;
+}
+
+type AudioGenerationProgress = (message: string) => void;
+
 export function getSegmentAudioText(segment: StudySegment, structure: BookStructure): SegmentAudioText {
   const chapter = structure.chapters.find((item) => item.index === segment.chapterIndex);
   if (!chapter?.rawText) return { text: "", absoluteStartWord: segment.approxWordStart, absoluteEndWord: segment.approxWordEnd };
@@ -176,6 +185,80 @@ function base64ToBytes(base64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return merged;
+}
+
+function countWords(value: string): number {
+  return value.split(/\s+/).filter(Boolean).length;
+}
+
+function splitAudioText(text: string, limit = ELEVENLABS_SAFE_TEXT_LIMIT): AudioTextChunk[] {
+  const cleanText = text.replace(/\s+/g, " ").trim();
+  if (cleanText.length <= limit) return [{ text: cleanText, startChar: 0, wordOffset: 0 }];
+
+  const chunks: AudioTextChunk[] = [];
+  let start = 0;
+  while (start < cleanText.length) {
+    let end = Math.min(cleanText.length, start + limit);
+    if (end < cleanText.length) {
+      const window = cleanText.slice(start, end);
+      const sentenceBreak = Math.max(
+        window.lastIndexOf(". "),
+        window.lastIndexOf("! "),
+        window.lastIndexOf("? "),
+        window.lastIndexOf("; ")
+      );
+      const paragraphBreak = window.lastIndexOf("\n\n");
+      const whitespaceBreak = window.lastIndexOf(" ");
+      const bestBreak = Math.max(sentenceBreak, paragraphBreak);
+      if (bestBreak > limit * 0.45) end = start + bestBreak + 1;
+      else if (whitespaceBreak > limit * 0.45) end = start + whitespaceBreak;
+    }
+
+    const chunkText = cleanText.slice(start, end).trim();
+    if (chunkText) {
+      chunks.push({
+        text: chunkText,
+        startChar: start,
+        wordOffset: countWords(cleanText.slice(0, start)),
+      });
+    }
+
+    start = end;
+    while (start < cleanText.length && /\s/.test(cleanText[start])) start += 1;
+  }
+  return chunks;
+}
+
+function offsetAlignmentSpans(
+  spans: AudioAlignmentSpan[],
+  chunk: AudioTextChunk,
+  audioOffsetMs: number
+): AudioAlignmentSpan[] {
+  return spans.map((span) => ({
+    ...span,
+    startMs: span.startMs + audioOffsetMs,
+    endMs: span.endMs + audioOffsetMs,
+    charStart: span.charStart + chunk.startChar,
+    charEnd: span.charEnd + chunk.startChar,
+    wordStart: span.wordStart + chunk.wordOffset,
+    wordEnd: span.wordEnd + chunk.wordOffset,
+  }));
+}
+
+function alignmentDurationMs(alignment: ElevenAlignment | undefined): number {
+  const ends = alignment?.character_end_times_seconds ?? [];
+  return Math.max(0, Math.round((ends[ends.length - 1] ?? 0) * 1000));
 }
 
 function buildVoiceDescription(voice: ElevenVoice): string {
@@ -442,6 +525,7 @@ export async function generateChapterGroupAudio({
   voice,
   style,
   mode = "saved",
+  onProgress,
 }: {
   unit: ChapterAudioUnit;
   structure: BookStructure;
@@ -449,6 +533,7 @@ export async function generateChapterGroupAudio({
   voice: AudioVoicePreset;
   style: AudioStylePreset;
   mode?: AudioGenerationMode;
+  onProgress?: AudioGenerationProgress;
 }): Promise<{ artifact: Omit<AudioArtifact, "filePath">; data: Uint8Array }> {
   const { text, absoluteStartWord, absoluteEndWord } = getChapterGroupAudioText(unit.chapters, structure);
   if (text.split(/\s+/).filter(Boolean).length < 40) {
@@ -457,13 +542,37 @@ export async function generateChapterGroupAudio({
 
   const textHash = hashText(text);
   const promptHash = hashText(`${text}|${style.direction}|${voice.providerVoiceName}|${ELEVENLABS_MODEL_ID}|${mode}`);
-  const data = await callElevenLabsTts({ apiKey, voice, text, style, mode });
-  if (!data.audio_base64) throw new Error("ElevenLabs response did not include audio data.");
+  const chunks = splitAudioText(text);
+  const audioChunks: Uint8Array[] = [];
+  const alignment: AudioAlignmentSpan[] = [];
+  let audioOffsetMs = 0;
 
-  const rawAlignment = data.normalized_alignment ?? data.alignment;
-  const alignment = buildAlignmentSpans(text, rawAlignment, absoluteStartWord);
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    onProgress?.(
+      chunks.length === 1
+        ? mode === "streamed"
+          ? "Streaming narration"
+          : "Generating narration"
+        : `${mode === "streamed" ? "Streaming" : "Generating"} audio chunk ${index + 1} of ${chunks.length}`
+    );
+    const data = await callElevenLabsTts({ apiKey, voice, text: chunk.text, style, mode });
+    if (!data.audio_base64) throw new Error("ElevenLabs response did not include audio data.");
+
+    const rawAlignment = data.normalized_alignment ?? data.alignment;
+    const chunkAlignment = buildAlignmentSpans(chunk.text, rawAlignment, absoluteStartWord + chunk.wordOffset);
+    const shiftedAlignment = offsetAlignmentSpans(chunkAlignment, chunk, audioOffsetMs);
+    alignment.push(...shiftedAlignment);
+    audioChunks.push(base64ToBytes(data.audio_base64));
+    const chunkDurationMs =
+      shiftedAlignment.length > 0
+        ? shiftedAlignment.reduce((max, span) => Math.max(max, span.endMs), audioOffsetMs) - audioOffsetMs
+        : alignmentDurationMs(rawAlignment);
+    audioOffsetMs += Math.max(0, chunkDurationMs);
+  }
+
   const generatedAt = new Date().toISOString();
-  const bytes = base64ToBytes(data.audio_base64);
+  const bytes = concatBytes(audioChunks);
 
   return {
     artifact: {

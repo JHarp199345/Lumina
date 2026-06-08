@@ -300,6 +300,7 @@ export default function VoiceStudio() {
         voice: selectedVoice,
         style: selectedStyle,
         mode,
+        onProgress: setProgress,
       });
       setProgress("Saving audio");
       const filePath = await storage.saveAudioArtifact(generated.artifact, generated.data);
