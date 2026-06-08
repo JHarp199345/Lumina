@@ -89,6 +89,18 @@ interface ElevenTtsResponse {
   normalized_alignment?: ElevenAlignment;
 }
 
+type ElevenErrorDetail =
+  | string
+  | {
+      status?: string;
+      message?: string;
+    };
+
+interface ElevenErrorResponse {
+  detail?: ElevenErrorDetail;
+  message?: string;
+}
+
 export interface SegmentAudioText {
   text: string;
   absoluteStartWord: number;
@@ -171,12 +183,12 @@ function buildVoiceDescription(voice: ElevenVoice): string {
   return voice.description || labelText || voice.category || "ElevenLabs voice";
 }
 
-export async function fetchElevenLabsVoices(apiKey: string): Promise<AudioVoicePreset[]> {
+export async function fetchElevenLabsVoices(apiKey: string, cache = true): Promise<AudioVoicePreset[]> {
   const response = await fetch(`${ELEVEN_BASE}/voices`, {
     method: "GET",
     headers: { "xi-api-key": apiKey },
   });
-  if (!response.ok) throw new Error(`ElevenLabs voices error ${response.status}`);
+  if (!response.ok) throw new Error(await formatElevenLabsError(response, "voices"));
   const data = (await response.json()) as ElevenVoicesResponse;
   const voices = (data.voices ?? []).map<AudioVoicePreset>((voice) => ({
     id: voice.voice_id,
@@ -189,8 +201,28 @@ export async function fetchElevenLabsVoices(apiKey: string): Promise<AudioVoiceP
     previewUrl: voice.preview_url,
   }));
   if (voices.length === 0) throw new Error("No ElevenLabs voices were returned.");
-  localStorage.setItem(ELEVENLABS_VOICE_CACHE_KEY, JSON.stringify(voices));
+  if (cache) cacheElevenLabsVoices(voices);
   return voices;
+}
+
+export function cacheElevenLabsVoices(voices: AudioVoicePreset[]): void {
+  localStorage.setItem(ELEVENLABS_VOICE_CACHE_KEY, JSON.stringify(voices));
+}
+
+async function formatElevenLabsError(response: Response, label: string): Promise<string> {
+  let message = "";
+  try {
+    const text = await response.text();
+    if (text) {
+      const parsed = JSON.parse(text) as ElevenErrorResponse;
+      if (typeof parsed.detail === "string") message = parsed.detail;
+      else message = parsed.detail?.message ?? parsed.detail?.status ?? parsed.message ?? text;
+    }
+  } catch {
+    message = "";
+  }
+  const suffix = message ? `: ${message}` : "";
+  return `ElevenLabs ${label} error ${response.status}${suffix}`;
 }
 
 export function loadCachedElevenLabsVoices(): AudioVoicePreset[] {
@@ -283,7 +315,7 @@ async function callElevenLabsTts({
   mode: AudioGenerationMode;
 }): Promise<ElevenTtsResponse> {
   const suffix = mode === "streamed" ? "stream/with-timestamps" : "with-timestamps";
-  const url = `${ELEVEN_BASE}/text-to-speech/${voice.providerVoiceName}/${suffix}`;
+  const url = `${ELEVEN_BASE}/text-to-speech/${voice.providerVoiceName}/${suffix}?output_format=mp3_44100_128`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -293,12 +325,24 @@ async function callElevenLabsTts({
     body: JSON.stringify({
       text,
       model_id: ELEVENLABS_MODEL_ID,
-      output_format: "mp3_44100_128",
       voice_settings: voiceSettings(style),
     }),
   });
-  if (!response.ok) throw new Error(`ElevenLabs TTS error ${response.status}`);
+  if (!response.ok) throw new Error(await formatElevenLabsError(response, "TTS"));
   return (await response.json()) as ElevenTtsResponse;
+}
+
+export async function validateElevenLabsTtsAccess(
+  apiKey: string,
+  voice: AudioVoicePreset
+): Promise<void> {
+  await callElevenLabsTts({
+    apiKey,
+    voice,
+    text: "Lumina voice test.",
+    style: AUDIO_STYLE_PRESETS[0],
+    mode: "saved",
+  });
 }
 
 export async function generateSegmentAudio({

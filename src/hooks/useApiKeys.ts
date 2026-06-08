@@ -1,7 +1,12 @@
 import { useCallback, useState } from "react";
 import { storage } from "@/storage";
 import { useSettingsStore } from "@/store/settingsStore";
-import { ELEVENLABS_KEY_NAME, fetchElevenLabsVoices } from "@/pipeline/audioDirector";
+import {
+  cacheElevenLabsVoices,
+  ELEVENLABS_KEY_NAME,
+  fetchElevenLabsVoices,
+  validateElevenLabsTtsAccess,
+} from "@/pipeline/audioDirector";
 
 const GOOGLE_KEY_NAME = "lumina_google_ai_key";
 const FAL_KEY_NAME = "lumina_fal_key";
@@ -51,7 +56,9 @@ export function useApiKeys() {
     if (normalizedKey.length < 20 || /\s/.test(normalizedKey)) {
       throw new Error("That ElevenLabs key looks incomplete.");
     }
-    await fetchElevenLabsVoices(normalizedKey);
+    const voices = await fetchElevenLabsVoices(normalizedKey, false);
+    await validateElevenLabsTtsAccess(normalizedKey, voices[0]);
+    cacheElevenLabsVoices(voices);
     await storage.saveApiKey(ELEVENLABS_KEY_NAME, normalizedKey);
   }, []);
 
