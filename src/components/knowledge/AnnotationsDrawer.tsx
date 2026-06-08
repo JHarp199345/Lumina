@@ -39,6 +39,7 @@ import type { Highlight, Note } from "@/types";
 import LensStudio from "@/components/knowledge/LensStudio";
 import StudyGuide from "@/components/knowledge/StudyGuide";
 import VoiceStudio from "@/components/knowledge/VoiceStudio";
+import AudioOverview from "@/components/knowledge/AudioOverview";
 
 const LENS_EDGE: Record<string, string> = {
   yellow: "border-l-[#d8b24e]",
@@ -256,12 +257,7 @@ function AudioOverviewView({ onBack, onClose }: { onBack: () => void; onClose: (
   return (
     <>
       <DrawerHeader title="Audio Overview" onBack={onBack} onClose={onClose} />
-      <UnderConstructionView
-        icon={<AudioLines size={28} />}
-        label="Audio Overview"
-        text="This will create guided audio briefings that understand the book chapter by chapter, then connect those chapters into larger arcs instead of flattening everything into one summary."
-        points={["Chapter-by-chapter breakdowns", "Arc and theme overviews", "Saved overview audio"]}
-      />
+      <AudioOverview />
     </>
   );
 }

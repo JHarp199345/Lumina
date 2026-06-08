@@ -672,7 +672,7 @@ export interface StudyFlashcard {
 export type AudioArtifactStatus = "queued" | "generating" | "ready" | "failed";
 export type AudioProvider = "gemini" | "elevenlabs";
 export type AudioGenerationMode = "saved" | "streamed";
-export type AudioArtifactScope = "segment" | "chapter";
+export type AudioArtifactScope = "segment" | "chapter" | "overview";
 
 export interface AudioVoicePreset {
   id: string;
@@ -716,6 +716,10 @@ export interface AudioArtifact {
   generationApi: string;
   status: AudioArtifactStatus;
   error?: string;
+  // Audio Overview (Gemini summary → Gemini TTS) — present when scope === "overview".
+  overviewMinutes?: number;   // requested target length
+  overviewPrompt?: string;    // reader's prompt, or "" when the default was used
+  overviewScript?: string;    // the generated summary script that was voiced (transcript)
 }
 
 export interface AudioAlignmentSpan {

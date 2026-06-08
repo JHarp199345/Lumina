@@ -22,6 +22,15 @@ export const LUMINA_CONFIG = {
   GEMINI_TTS_MODEL: "gemini-2.5-flash-preview-tts",
   IMAGEN_MODEL: "imagen-3.0-generate-002",
 
+  // Audio Overview (Gemini summary script → Gemini TTS)
+  AUDIO_OVERVIEW_WPM: 140,            // spoken words per minute (calm explanatory pace)
+  AUDIO_OVERVIEW_DEFAULT_MIN: 20,
+  AUDIO_OVERVIEW_MIN: 5,
+  AUDIO_OVERVIEW_MAX: 35,
+  AUDIO_OVERVIEW_STEP: 5,
+  AUDIO_OVERVIEW_TTS_CHUNK_CHARS: 1800,   // per Gemini TTS request
+  AUDIO_OVERVIEW_DEFAULT_VOICE: "Kore",
+
   // Storage
   IMAGE_CACHE_DIR: "lumina/cache/images",
   AUDIO_CACHE_DIR: "lumina/cache/audio",
