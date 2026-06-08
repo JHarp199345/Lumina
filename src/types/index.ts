@@ -674,6 +674,61 @@ export type AudioProvider = "gemini" | "elevenlabs";
 export type AudioGenerationMode = "saved" | "streamed";
 export type AudioArtifactScope = "segment" | "chapter" | "overview";
 
+// ─── Source Intelligence Profile (Audio Overview, PLANvii) ──────────────────────
+// Hidden, teaching-oriented profile of a work, built in the single enriched ingestion
+// pass (lazy backfill for older books). Powers Audio Overview ghost-text suggestions
+// and the type-aware default prompt.
+
+export type WorkType =
+  | "fiction"
+  | "nonfiction"
+  | "scholarly"
+  | "manual"
+  | "memoir"
+  | "reference"
+  | "scripture"
+  | "other";
+
+export interface SourceProfileSection {
+  id: string;
+  title: string;
+  importance: number;        // 0–1
+  teachingSummary: string;   // what it's about + key developments (not the opening line)
+}
+
+export interface SourceProfileRelationship {
+  to: string;
+  nature: string;
+  evolution: string;         // how it changes across the work
+}
+
+export interface SourceProfileEntity {
+  name: string;
+  type: "character" | "person" | "org" | "place" | "concept";
+  role: string;
+  relationships: SourceProfileRelationship[];
+}
+
+export interface SourceProfileSuggestion {
+  id: string;
+  label: string;             // angle chip label, e.g. "As a story"
+  workTypes: WorkType[];     // which work types this angle suits
+  planText: string;          // the ghost-text prompt this angle proposes
+}
+
+export interface SourceIntelligenceProfile {
+  bookId: string;
+  builtAt: string;
+  workType: WorkType;
+  identity: { title: string; author: string; genre?: string; era?: string };
+  structureKind: "narrative" | "subjectHierarchy";
+  sections: SourceProfileSection[];
+  concepts: { mainIdeas: string[]; themes: string[]; keyTerms: string[]; questions: string[] };
+  entities: SourceProfileEntity[];
+  progression: string[];     // plot movements OR argument/evidence flow
+  suggestionBank: SourceProfileSuggestion[];
+}
+
 export interface AudioVoicePreset {
   id: string;
   displayName: string;

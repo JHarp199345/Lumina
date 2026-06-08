@@ -15,6 +15,7 @@ import type {
   BookStructure,
   ReadingProgress,
   SemanticMap,
+  SourceIntelligenceProfile,
   StyleSeedId,
   Highlight,
   HighlightColor,
@@ -59,6 +60,9 @@ import {
   dbSaveSemanticMap,
   dbLoadSemanticMap,
   dbDeleteSemanticMap,
+  dbSaveSourceProfile,
+  dbLoadSourceProfile,
+  dbDeleteSourceProfile,
   dbSaveStudyGuide,
   dbLoadStudyGuide,
   dbDeleteStudyGuide,
@@ -183,6 +187,20 @@ export class TauriStorageAdapter implements StorageAdapter {
 
   async deleteSemanticMap(bookId: string): Promise<void> {
     await dbDeleteSemanticMap(bookId);
+  }
+
+  // ── Source Intelligence Profile ────────────────────────────────────────────
+
+  async saveSourceProfile(profile: SourceIntelligenceProfile): Promise<void> {
+    await dbSaveSourceProfile(profile);
+  }
+
+  async loadSourceProfile(bookId: string): Promise<SourceIntelligenceProfile | null> {
+    return dbLoadSourceProfile(bookId);
+  }
+
+  async deleteSourceProfile(bookId: string): Promise<void> {
+    await dbDeleteSourceProfile(bookId);
   }
 
   // ── Study guide ──────────────────────────────────────────────────────────

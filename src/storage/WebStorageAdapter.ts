@@ -17,6 +17,7 @@ import type {
   BookStructure,
   ReadingProgress,
   SemanticMap,
+  SourceIntelligenceProfile,
   StyleSeedId,
   Highlight,
   HighlightColor,
@@ -239,6 +240,20 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async deleteSemanticMap(bookId: string): Promise<void> {
     await dbDelete(STORES.SEMANTIC_MAPS, bookId);
+  }
+
+  // ── Source Intelligence Profile ────────────────────────────────────────────
+
+  async saveSourceProfile(profile: SourceIntelligenceProfile): Promise<void> {
+    await dbPut(STORES.SOURCE_PROFILES, profile, profile.bookId);
+  }
+
+  async loadSourceProfile(bookId: string): Promise<SourceIntelligenceProfile | null> {
+    return (await dbGet<SourceIntelligenceProfile>(STORES.SOURCE_PROFILES, bookId)) ?? null;
+  }
+
+  async deleteSourceProfile(bookId: string): Promise<void> {
+    await dbDelete(STORES.SOURCE_PROFILES, bookId);
   }
 
   // ── Study guide ──────────────────────────────────────────────────────────

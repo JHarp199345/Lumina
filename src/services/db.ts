@@ -14,6 +14,7 @@ import type {
   Highlight,
   Note,
   SemanticMap,
+  SourceIntelligenceProfile,
   CachedImage,
   StyleSeedId,
   StudyGuide,
@@ -106,6 +107,14 @@ async function initSchema(db: Database): Promise<void> {
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN storyboard TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN visual_lore TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN narrative_blueprint TEXT`).catch(() => {});
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS source_profiles (
+      book_id TEXT PRIMARY KEY,
+      profile_json TEXT NOT NULL,
+      built_at TEXT NOT NULL
+    );
+  `);
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS study_guides (
@@ -230,6 +239,7 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM highlights WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM source_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quiz_attempts WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
@@ -488,6 +498,36 @@ export async function dbLoadStudyGuide(bookId: string): Promise<StudyGuide | nul
 export async function dbDeleteStudyGuide(bookId: string): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1`, [bookId]);
+}
+
+// ─── Source Intelligence Profile ────────────────────────────────────────────────
+
+export async function dbSaveSourceProfile(profile: SourceIntelligenceProfile): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO source_profiles (book_id, profile_json, built_at)
+     VALUES ($1, $2, $3)`,
+    [profile.bookId, JSON.stringify(profile), profile.builtAt]
+  );
+}
+
+export async function dbLoadSourceProfile(bookId: string): Promise<SourceIntelligenceProfile | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT profile_json FROM source_profiles WHERE book_id = $1`,
+    [bookId]
+  );
+  if (rows.length === 0) return null;
+  try {
+    return JSON.parse(String(rows[0].profile_json)) as SourceIntelligenceProfile;
+  } catch {
+    return null;
+  }
+}
+
+export async function dbDeleteSourceProfile(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM source_profiles WHERE book_id = $1`, [bookId]);
 }
 
 export async function dbSaveStudyQuiz(quiz: StudyQuiz): Promise<void> {

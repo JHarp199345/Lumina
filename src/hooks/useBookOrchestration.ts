@@ -289,6 +289,26 @@ export function useBookOrchestration() {
 
         setActiveSemanticMap(semanticMap);
 
+        // Pre-warm the Source Intelligence Profile for Audio Overview in the same
+        // ingestion run (one extra consolidation call). Best-effort and fully
+        // detached — it must never affect analysis success. Older books build it
+        // lazily on first Audio Overview open instead.
+        void (async () => {
+          try {
+            const apiKey = await storage.loadApiKey("lumina_google_ai_key");
+            if (!apiKey) return;
+            const existing = await storage.loadSourceProfile(semanticMap.bookId).catch(() => null);
+            if (existing) return;
+            const { buildSourceProfile } = await import("@/pipeline/sourceProfile");
+            const profile = await buildSourceProfile(structure, semanticMap, apiKey);
+            await storage.saveSourceProfile(profile).catch(() => {});
+          } catch (err) {
+            diagnosticWarn("source_profile.prewarm_failed", "SIP pre-warm failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })();
+
         console.log(
           `[Orchestration] Analysis complete: arc=${semanticMap.arcShape}, ` +
             `scenes=${semanticMap.scenes.length}, golden=${semanticMap.goldenNumber}`

@@ -17,13 +17,13 @@ import { LUMINA_CONFIG } from "@/config";
 import {
   GEMINI_VOICES,
   GOOGLE_KEY_NAME,
-  buildScopeOutline,
   generateAudioOverview,
   scopeLabel,
   suggestOutline,
   type OverviewScope,
 } from "@/pipeline/audioOverview";
-import type { AudioArtifact } from "@/types";
+import { buildSourceProfile } from "@/pipeline/sourceProfile";
+import type { AudioArtifact, SourceIntelligenceProfile, SourceProfileSuggestion } from "@/types";
 
 export default function AudioOverview() {
   const { activeBook, activeStructure, activeSemanticMap } = useBookStore();
@@ -49,10 +49,19 @@ export default function AudioOverview() {
   const [chosenChapterIds, setChosenChapterIds] = useState<Set<string>>(new Set());
   const [minutes, setMinutes] = useState<number>(LUMINA_CONFIG.AUDIO_OVERVIEW_DEFAULT_MIN);
   const [voiceId, setVoiceId] = useState<string>(LUMINA_CONFIG.AUDIO_OVERVIEW_DEFAULT_VOICE);
-  const [prompt, setPrompt] = useState("");
-  const [suggestion, setSuggestion] = useState("");
+  const [prompt, setPrompt] = useState("");           // the real, accepted/typed text
+  const [ghost, setGhost] = useState("");             // greyed proposed plan (Smart Compose)
+  const [selectedAngleId, setSelectedAngleId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<SourceIntelligenceProfile | null>(null);
+  const [profileBuilding, setProfileBuilding] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [hasKey, setHasKey] = useState(true);
+
+  const showGhost = prompt.trim().length === 0 && ghost.trim().length > 0;
+  const planFor = (id: string | null): string => {
+    const bank = profile?.suggestionBank ?? [];
+    return (bank.find((s) => s.id === id) ?? bank[0])?.planText ?? "";
+  };
 
   const scope: OverviewScope = useMemo(
     () => ({
@@ -89,14 +98,53 @@ export default function AudioOverview() {
     };
   }, []);
 
-  // Recompute the instant (Tier-1) ghost outline whenever scope/book changes.
+  // Load the Source Intelligence Profile for this book; lazily build + cache it if
+  // missing (one enriched call that reuses the existing analysis). Older books that
+  // were analyzed before the SIP existed build it here on first open.
   useEffect(() => {
-    if (!activeStructure) {
-      setSuggestion("");
+    let cancelled = false;
+    if (!activeBook || !activeStructure) {
+      setProfile(null);
+      setGhost("");
       return;
     }
-    setSuggestion(buildScopeOutline(scope, activeStructure, activeSemanticMap));
-  }, [scope, activeStructure, activeSemanticMap]);
+    (async () => {
+      const existing = await storage.loadSourceProfile(activeBook.id).catch(() => null);
+      if (cancelled) return;
+      if (existing) {
+        setProfile(existing);
+        return;
+      }
+      // No profile yet — build it if we have analysis + a key.
+      const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
+      if (cancelled) return;
+      if (!apiKey || !activeSemanticMap) return; // nothing to build from yet
+      setProfileBuilding(true);
+      try {
+        const built = await buildSourceProfile(activeStructure, activeSemanticMap, apiKey);
+        if (cancelled) return;
+        await storage.saveSourceProfile(built).catch(() => {});
+        setProfile(built);
+      } catch (err) {
+        console.warn("[AudioOverview] SIP build failed:", err);
+      } finally {
+        if (!cancelled) setProfileBuilding(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBook, activeStructure, activeSemanticMap]);
+
+  // Seed the ghost from the profile's best suggestion when it arrives / scope changes.
+  useEffect(() => {
+    if (!profile) {
+      setGhost("");
+      return;
+    }
+    setGhost(planFor(selectedAngleId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile, selectedAngleId, scopeType]);
 
   const overviewArtifacts = useMemo(
     () =>
@@ -106,6 +154,17 @@ export default function AudioOverview() {
     [artifacts]
   );
   const activeArtifact = artifacts.find((a) => a.id === activeAudioId) ?? null;
+
+  const acceptGhost = () => {
+    if (showGhost) setPrompt(ghost);
+  };
+
+  const applyAngle = (id: string) => {
+    setSelectedAngleId(id);
+    const plan = planFor(id);
+    if (prompt.trim()) setPrompt(plan); // already editing → replace outright
+    else setGhost(plan);                // empty → swap the ghost (Tab/⇥ to accept)
+  };
 
   const requestFullerSuggestion = async () => {
     if (!activeStructure) return;
@@ -117,7 +176,10 @@ export default function AudioOverview() {
     setIsSuggesting(true);
     try {
       const fuller = await suggestOutline(scope, activeStructure, activeSemanticMap, apiKey);
-      if (fuller) setSuggestion(fuller);
+      if (fuller) {
+        if (prompt.trim()) setPrompt(fuller);
+        else setGhost(fuller);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate a suggestion.");
     } finally {
@@ -140,11 +202,15 @@ export default function AudioOverview() {
     setIsGenerating(true);
     setProgress("Summarizing the material…");
     try {
+      // A visible ghost the reader didn't dismiss counts as the instruction;
+      // a truly empty field falls back to the type-aware default.
+      const effectivePrompt = prompt.trim() ? prompt.trim() : ghost.trim();
       const { script, audio } = await generateAudioOverview({
         scope,
         structure: activeStructure,
         semanticMap: activeSemanticMap,
-        userPrompt: prompt,
+        profile,
+        userPrompt: effectivePrompt,
         minutes,
         apiKey,
         voiceName: voiceId,
@@ -174,7 +240,7 @@ export default function AudioOverview() {
         generationApi: "gemini-tts",
         status: "ready",
         overviewMinutes: minutes,
-        overviewPrompt: prompt.trim(),
+        overviewPrompt: effectivePrompt,
         overviewScript: script,
       };
       const filePath = await storage.saveAudioArtifact(meta, audio.data);
@@ -302,7 +368,7 @@ export default function AudioOverview() {
           </p>
         </div>
 
-        {/* Prompt + ghost suggestion */}
+        {/* Prompt — single field with inline ghost suggestion (Smart Compose) */}
         <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-[10px] uppercase tracking-[0.14em] text-ink-faint">
@@ -310,7 +376,7 @@ export default function AudioOverview() {
             </p>
             <button
               onClick={requestFullerSuggestion}
-              disabled={isSuggesting}
+              disabled={isSuggesting || !profile}
               className="flex items-center gap-1 rounded border border-hair px-2 py-1 text-[10px] text-lumina-gold/75 transition-colors hover:text-lumina-gold disabled:opacity-40"
             >
               <Wand2 size={10} className={isSuggesting ? "animate-pulse" : ""} />
@@ -318,30 +384,70 @@ export default function AudioOverview() {
             </button>
           </div>
 
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Leave empty for a full guided overview…"
-            rows={4}
-            className="w-full resize-none rounded-lg border border-hair bg-surface-dark px-3 py-2 text-xs leading-relaxed text-ink-soft placeholder:text-ink-faint focus:outline-none"
-          />
-
-          {prompt.trim().length === 0 && suggestion && (
-            <div className="mt-2 rounded-lg border border-dashed border-lumina-gold/25 bg-lumina-gold/[0.04] p-2.5">
-              <p className="mb-1 text-[10px] uppercase tracking-[0.14em] text-lumina-gold/60">
-                Suggested outline (from this book)
-              </p>
-              <p className="max-h-32 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-ink-faint scrollbar-thin">
-                {suggestion}
-              </p>
-              <button
-                onClick={() => setPrompt(suggestion)}
-                className="mt-2 rounded-md border border-lumina-gold/30 bg-lumina-gold/10 px-2.5 py-1 text-[10px] font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/16"
-              >
-                Use this outline
-              </button>
+          {/* Overview-angle chips (swap which discovered plan is ghosted) */}
+          {(profile?.suggestionBank?.length ?? 0) > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {profile!.suggestionBank.map((s: SourceProfileSuggestion) => (
+                <button
+                  key={s.id}
+                  onClick={() => applyAngle(s.id)}
+                  className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
+                    selectedAngleId === s.id
+                      ? "border-lumina-gold/45 bg-lumina-gold/[0.12] text-lumina-gold"
+                      : "border-hair bg-ink/[0.02] text-ink-faint hover:text-ink-soft"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
             </div>
           )}
+
+          {/* Ghost overlay: greyed plan behind a transparent textarea, shown only
+              when the field is empty. Tab (desktop) or the ⇥ chip (touch) accepts. */}
+          <div className="relative">
+            {showGhost && (
+              <div
+                aria-hidden
+                onClick={acceptGhost}
+                className="pointer-events-auto absolute inset-0 cursor-pointer overflow-y-auto whitespace-pre-wrap rounded-lg px-3 py-2 text-xs leading-relaxed text-ink-faint/55 scrollbar-thin"
+              >
+                {ghost}
+              </div>
+            )}
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Tab" && showGhost) {
+                  e.preventDefault();
+                  acceptGhost();
+                }
+              }}
+              rows={4}
+              className={`relative w-full resize-none rounded-lg border border-hair bg-surface-dark/60 px-3 py-2 text-xs leading-relaxed text-ink-soft placeholder:text-ink-faint focus:outline-none ${
+                showGhost ? "bg-transparent" : ""
+              }`}
+            />
+          </div>
+
+          <div className="mt-1.5 flex items-center justify-between">
+            <p className="text-[10px] text-ink-faint">
+              {profileBuilding
+                ? "Reading the book's intelligence…"
+                : showGhost
+                  ? "Tab to accept · type to write your own"
+                  : "Clear the field for a full guided overview."}
+            </p>
+            {showGhost && (
+              <button
+                onClick={acceptGhost}
+                className="rounded-md border border-lumina-gold/30 bg-lumina-gold/10 px-2 py-0.5 text-[10px] font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/16"
+              >
+                ⇥ accept
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Voice */}

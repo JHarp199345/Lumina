@@ -15,6 +15,7 @@ import type {
   BookStructure,
   ReadingProgress,
   SemanticMap,
+  SourceIntelligenceProfile,
   StyleSeedId,
   Highlight,
   HighlightColor,
@@ -87,6 +88,12 @@ export interface StorageAdapter {
   saveSemanticMap(map: SemanticMap): Promise<void>;
   loadSemanticMap(bookId: string): Promise<SemanticMap | null>;
   deleteSemanticMap(bookId: string): Promise<void>;
+
+  // ── Source Intelligence Profile (Audio Overview) ───────────────────────────
+
+  saveSourceProfile(profile: SourceIntelligenceProfile): Promise<void>;
+  loadSourceProfile(bookId: string): Promise<SourceIntelligenceProfile | null>;
+  deleteSourceProfile(bookId: string): Promise<void>;
 
   // ── Study guide ───────────────────────────────────────────────────────────
 

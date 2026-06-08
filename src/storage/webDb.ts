@@ -6,9 +6,10 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 export const STORES = {
+  SOURCE_PROFILES: "source_profiles", // SourceIntelligenceProfile, keyed by bookId
   BOOKS:         "books",           // keyed by book.id
   BOOK_STRUCTURES: "book_structures", // BookStructure snapshots, keyed by bookId
   EPUBS:         "epubs",           // ArrayBuffer EPUB blobs, keyed by bookId
@@ -61,6 +62,7 @@ export function openDb(): Promise<IDBDatabase> {
       noteStore?.createIndex("bookId", "bookId", { unique: false });
 
       ensure(STORES.SEMANTIC_MAPS);                    // explicit key on put()
+      ensure(STORES.SOURCE_PROFILES);                  // explicit key on put() (bookId)
       ensure(STORES.STUDY_GUIDES);                     // explicit key on put() (bookId)
 
       const studyQuizzes = ensure(STORES.STUDY_QUIZZES, { keyPath: "id" });

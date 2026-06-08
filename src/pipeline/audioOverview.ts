@@ -15,7 +15,8 @@
  */
 
 import { LUMINA_CONFIG } from "@/config";
-import type { BookStructure, Chapter, SemanticMap } from "@/types";
+import { profileGroundingText, defaultSpineForType } from "@/pipeline/sourceProfile";
+import type { BookStructure, Chapter, SemanticMap, SourceIntelligenceProfile } from "@/types";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export const GOOGLE_KEY_NAME = "lumina_google_ai_key";
@@ -164,19 +165,38 @@ export interface ScriptArgs {
   userPrompt: string;   // "" → use the default expert prompt
   minutes: number;
   apiKey: string;
+  /** Source Intelligence Profile — when present, grounds the summary on discovered
+   *  meaning (concepts, relationship evolution, progression) and uses the type-aware
+   *  default. Falls back to the semantic-map outline when absent. */
+  profile?: SourceIntelligenceProfile | null;
   onProgress?: (msg: string) => void;
 }
 
 export async function generateOverviewScript(args: ScriptArgs): Promise<string> {
-  const { scope, structure, semanticMap, userPrompt, minutes, apiKey, onProgress } = args;
+  const { scope, structure, semanticMap, userPrompt, minutes, apiKey, profile, onProgress } = args;
   onProgress?.("Summarizing the material…");
 
   const targetWords = Math.round(minutes * LUMINA_CONFIG.AUDIO_OVERVIEW_WPM);
-  const context = buildSourceContext(scope, structure, semanticMap);
+
+  // Grounding: prefer the SIP (discovered meaning); for chapter scope add real prose.
+  let context: string;
+  if (profile) {
+    context = profileGroundingText(profile);
+    if (scope.type !== "whole") {
+      const prose = buildSourceContext(scope, structure, semanticMap);
+      if (prose) context += `\n\nRelevant passages:\n${prose}`;
+    }
+  } else {
+    context = buildSourceContext(scope, structure, semanticMap);
+  }
+
+  const defaultSpine = profile
+    ? defaultSpineForType(profile.workType, minutes, targetWords)
+    : `You are a subject-matter expert and an excellent teacher. Give a clear, structured breakdown of the material: explain it, teach it, simplify the hard parts, and expand on what matters. Open by framing what this material is and why it matters, develop the key ideas in a logical order, and close with the throughline a listener should walk away understanding.`;
 
   const instruction = userPrompt.trim()
     ? `Follow the reader's instruction as the primary guide:\n"${userPrompt.trim()}"`
-    : `You are a subject-matter expert and an excellent teacher. Give a clear, structured breakdown of the material: explain it, teach it, simplify the hard parts, and expand on what matters. Open by framing what this material is and why it matters, develop the key ideas in a logical order, and close with the throughline a listener should walk away understanding.`;
+    : defaultSpine;
 
   const prompt = `${instruction}
 
