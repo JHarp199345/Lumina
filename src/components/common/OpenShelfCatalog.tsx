@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Download, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, BookOpen, Download, FolderOpen, Search, SlidersHorizontal } from "lucide-react";
 import { useEpubImport } from "@/hooks/useEpubImport";
 
 interface GutendexBook {
@@ -17,6 +17,7 @@ type SortMode = "popular" | "title-asc" | "title-desc" | "year-asc" | "year-desc
 interface OpenShelfCatalogProps {
   onBack: () => void;
   onClose: () => void;
+  onImport: () => void;
 }
 
 const GENRES = [
@@ -59,7 +60,7 @@ interface CatalogCacheEntry {
 
 const catalogCache = new Map<string, CatalogCacheEntry>();
 
-export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogProps) {
+export default function OpenShelfCatalog({ onBack, onClose, onImport }: OpenShelfCatalogProps) {
   const { importEpubFile } = useEpubImport();
   const [query, setQuery] = useState("");
   const [genre, setGenre] = useState("");
@@ -70,6 +71,7 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [status, setStatus] = useState("");
+  const [showImportPulse, setShowImportPulse] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestKey = useMemo(() => `${query.trim().toLowerCase()}|${genre}|${sort}`, [query, genre, sort]);
@@ -203,6 +205,7 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
     }
 
     setStatus(`Downloading ${book.title}…`);
+    setShowImportPulse(false);
     try {
       const file = await downloadFirstWorkingEpub(book, epubUrls, setStatus);
       await importEpubFile(file, setStatus);
@@ -210,10 +213,9 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
       window.setTimeout(onClose, 900);
     } catch (err) {
       startBrowserDownload(epubUrls[0], book.title);
-      setStatus(
-        `Automatic import failed: ${err instanceof Error ? err.message : String(err)}. ` +
-          "A browser download was started instead. After it finishes, use Open Book to import the EPUB."
-      );
+      console.warn("[OpenShelf] Automatic import failed; browser download fallback started.", err);
+      setStatus("");
+      setShowImportPulse(true);
     }
   };
 
@@ -288,6 +290,20 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
       {status && (
         <div className="mx-4 mt-3 rounded-lg border border-hair bg-black/20 px-3 py-2">
           <p className="break-words text-xs text-ink-soft">{status}</p>
+        </div>
+      )}
+
+      {showImportPulse && (
+        <div className="mx-4 mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={onImport}
+            className="flex h-12 w-12 animate-pulse items-center justify-center rounded-full border border-lumina-gold/50 bg-lumina-gold/16 text-lumina-gold shadow-[0_0_32px_rgba(196,163,74,0.28)] transition-colors hover:bg-lumina-gold/22"
+            aria-label="Open downloaded EPUB"
+            title="Open downloaded EPUB"
+          >
+            <FolderOpen size={20} />
+          </button>
         </div>
       )}
 

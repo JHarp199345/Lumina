@@ -59,6 +59,7 @@ export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
           <OpenShelfCatalog
             onBack={() => setView("library")}
             onClose={onClose}
+            onImport={onImport}
           />
         ) : (
           <>
