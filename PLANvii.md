@@ -99,12 +99,12 @@ reader/drawer.
 │  WHAT SHOULD IT COVER?                   ✨ Suggest fuller │
 │  ( As a story )( Themes )( Relationships )( Chapter…)( ▸ ) │  ← angle chips
 │  ┌─────────────────────────────────────────────────────┐  │
-│  │ Explain how Hari Seldon's psychohistory unfolds      │  │  ← field PREFILLED
-│  │ across the Foundation, the tension between the        │  │    with discovered
-│  │ Encyclopedists and the traders, and how the plan      │  │    meaning (editable
-│  │ keeps re-shaping politics long after Seldon's death.  │  │    real text)
+│  │ Explain how Hari Seldon's psychohistory unfolds      │  │  ← GHOST text (grey),
+│  │ across the Foundation, the tension between the        │  │    discovered from the
+│  │ Encyclopedists and the traders…                       │  │    SIP. Tab / tap ⇥
+│  │                                          [ ⇥ accept ] │  │    to make it real.
 │  └─────────────────────────────────────────────────────┘  │
-│  Clear the field for a full guided overview.              │
+│  Tab to accept · type to write your own.                  │
 ├───────────────────────────────────────────────────────────┤
 │  Voice: [ Kore ▾ ]                ~larger generation ⓘ    │
 │                              [  Generate Overview  ]       │
@@ -143,34 +143,39 @@ targetWords = minutes * AUDIO_OVERVIEW_WPM
 
 ### 3. The prompt field — PREFILLED from the Source Intelligence Profile
 
-This is the heart of the feature, and it is a single field. There is **no second
-suggestion box**. The prompt field is **prefilled with a real, discovered overview plan**
-drawn from the book's **Source Intelligence Profile** (SIP — see its own section below).
-The reader reads it, edits it, or replaces it. It is normal editable text from the first
-moment — not a separate "ghost" the reader must accept into the box.
+This is the heart of the feature, and it is a single field with **inline ghost-text
+suggestions** — the Gmail Smart Compose pattern. There is **no second suggestion box**.
 
-**What goes in the box is discovered meaning, never raw fragments.**
+**The ghost-text model.**
+When the field is empty (or the reader pauses), a **greyed suggestion** appears inline in
+the field — a discovered overview plan drawn from the book's **Source Intelligence
+Profile** (SIP). It is not yet real text; it is a proposal.
+- **Accept:** press **Tab** (desktop) or tap the **⇥ accept** affordance (touch) → the
+  grey ghost becomes real, editable text the reader can then trim.
+- **Ignore / replace:** start typing → the ghost dismisses and the reader's words stand.
+- **Generate as-is:** if the reader accepts the ghost and generates, that plan is used; if
+  they generate with an empty field (never accepting), the hidden type-aware default runs.
+
+**What the ghost says is discovered meaning, never raw fragments.**
 Not: *"Opens: 'His name was Gaal Dornick…'"*
-But: *"Explain how Hari Seldon's psychohistory project unfolds across the Foundation,
-the tension between the Encyclopedists and the traders, and how Seldon's plan keeps
-re-shaping the politics generations after his death."*
-The prefill is generated from the SIP's concepts, entity relationships, and progression —
-the things a smart narrator should know — not from chapter opening lines.
+But: *"Explain how Hari Seldon's psychohistory project unfolds across the Foundation, the
+tension between the Encyclopedists and the traders, and how the plan keeps re-shaping
+politics generations after his death."*
+The ghost is generated from the SIP's concepts, entity relationships, and progression.
 
-**Behavior:**
-- **On open:** the field is prefilled with the SIP's *best suggested overview plan* for the
-  current scope and detected work type.
-- **Overview-angle chips** above the field instantly rewrite the field with a different
-  discovered plan — e.g. "As a story", "Major themes", "Character relationships",
-  "Chapter-by-chapter", "For a first-time reader", "Like a lecture". (For scholarly works
-  the angles shift to "By subject", "Key arguments", "Methods & evidence", etc.) These come
-  from the SIP's **suggestion bank**.
-- **✨ Suggest fuller** rewrites the *same field* in place with a richer SIP-derived plan
-  (one cheap Gemini call). It never opens a second box.
-- The reader can **edit or fully replace** the text; whatever is in the field at generate
-  time is respected as primary.
-- If the reader **clears the field entirely**, the hidden **default prompt** (type-aware,
-  below) is used.
+**Switching what the ghost proposes.**
+- **Overview-angle chips** above the field change which SIP suggestion-bank plan is being
+  ghosted — "As a story", "Major themes", "Character relationships", "Chapter-by-chapter",
+  "For a first-time reader", "Like a lecture" (scholarly: "By subject", "Key arguments",
+  "Methods & evidence"). Tapping a chip swaps the ghost; Tab still accepts.
+- **✨ Suggest fuller** replaces the current ghost with a richer SIP-derived plan (one
+  cheap Gemini call). Still ghost text in the same field — never a second box.
+
+> Implementation reality: a plain `<textarea>` cannot render greyed inline text. The ghost
+> needs an overlay technique — the suggestion drawn in a dimmed layer behind a transparent
+> input, with Tab (keydown) accepting it. **Touch has no Tab key**, and the primary device
+> is a tablet, so a visible **⇥ accept** affordance (or tapping the ghost itself) is
+> required, not optional. Build and tune this overlay in isolation first.
 
 > Raw ingestion fragments (chapter opening text, selected snippets) are NOT shown here.
 > If surfaced at all, they belong in a developer/debug view, never the generation prompt.
@@ -282,26 +287,32 @@ What is genuinely new (a small added delta, not a second heavy pass):
 - **Subject hierarchy** for nonfiction/scholarly works.
 - **Suggestion bank** — assembled from the above (mostly free; optionally one call).
 
-### Cost & timing (honest)
+### Cost & timing (honest) — ONE enriched pass, not a second pass
 
-Ingestion is already the most expensive, slowest step. So:
-- **Reuse first:** derive the SIP from already-gathered ingestion artifacts; add only a
-  small number of consolidation calls, not a full from-scratch multi-pass pipeline.
-- **Enrich the existing per-chapter step** to also emit a teaching summary, rather than
-  adding a separate chapter pass.
-- **Lazy backfill:** books analyzed before the SIP existed generate their SIP **on first
-  Audio Overview open**, then cache it. New imports build it during analysis.
+The rule, set by the reader: **do not add another ingestion pass.** Since most of this is
+already pulled during analysis, ingestion simply **asks for more in the same run.**
+
+- **One pass:** the existing analysis pass is enriched to also extract the SIP material.
+  Most of it is reframing artifacts already produced in that pass (`visualLore`,
+  `narrativeBlueprint`, `arcShape`, structure); the genuinely new fields (work-type,
+  relationship evolution, subject hierarchy, suggestion bank) are gathered in the same
+  run, ideally folded into existing structured calls rather than added as standalone ones.
+- **Enrich the existing per-chapter step** to also emit a `teachingSummary` — no separate
+  chapter pass.
+- **Lazy backfill (one-time, older books only):** books analyzed before the SIP existed
+  build it once on first Audio Overview open, then cache. New imports get it during the
+  single enriched analysis pass.
 - Cache the SIP like other ingestion artifacts; never regenerate unless re-analyzed.
 
 ### How the SIP drives the prompt field (replaces the old "suggestion generator")
 
-- **On window open (instant, no call):** select the best suggestion-bank plan for the
-  current scope + work type and **prefill the field** with it.
-- **Angle chips (instant, no call):** swap the field to a different suggestion-bank plan.
-- **✨ Suggest fuller (one cheap call):** expand the current plan into a richer one,
-  rewriting the same field.
+- **On window open (instant, no call):** the best suggestion-bank plan for the current
+  scope + work type appears as **inline ghost text**; Tab / tap ⇥ accepts it.
+- **Angle chips (instant, no call):** swap the ghost to a different suggestion-bank plan.
+- **✨ Suggest fuller (one cheap call):** replace the ghost with a richer plan.
 
-No raw fragments, ever. The field always holds discovered meaning.
+No raw fragments, ever. The ghost always holds discovered meaning, and nothing becomes
+real text until the reader accepts it (Tab/tap) or types their own.
 
 ---
 
@@ -430,13 +441,14 @@ GEMINI_TTS_DEFAULT_VOICE: "Kore",                    // a clear neutral prebuilt
 - New imports build the SIP during analysis; older books lazily build on first Audio
   Overview open, then cache.
 
-### Phase 3 — Prompt field driven by the SIP (replace the second box)
-- Remove the separate suggestion box. **Prefill the single prompt field** with the SIP's
-  best suggestion-bank plan for the current scope + work type.
-- Add **overview-angle chips** that instantly swap the field to other suggestion-bank plans
-  (type-aware: story/themes/relationships/chapter-by-chapter/first-time/lecture; or
-  by-subject/key-arguments/methods for scholarly).
-- **✨ Suggest fuller** rewrites the same field (one cheap call). No raw fragments shown.
+### Phase 3 — Ghost-text prompt field driven by the SIP (replace the second box)
+- Remove the separate suggestion box. Build the **inline ghost-text overlay** (Gmail
+  Smart Compose style): SIP plan shown greyed in the field; **Tab** accepts (desktop);
+  a visible **⇥ accept** affordance / tap-the-ghost accepts (tablet — required, no Tab key).
+- Typing dismisses the ghost; accepted text is editable/trimmable.
+- **Overview-angle chips** swap which SIP plan is ghosted (type-aware).
+- **✨ Suggest fuller** swaps in a richer ghost (one cheap call). No raw fragments shown.
+- Tune the overlay in isolation first (textareas can't render inline grey text).
 
 ### Phase 4 — Type-aware default + SIP grounding in the summarizer
 - Replace the single default spine with **fiction vs nonfiction/scholarly** variants.
