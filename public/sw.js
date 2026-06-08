@@ -9,7 +9,7 @@
  * Books and generated images are stored in IndexedDB by the app — NOT here.
  */
 
-const CACHE_VERSION = "lumina-v2";
+const CACHE_VERSION = "lumina-v3";
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
 const scoped = (path) => `${SCOPE_PATH}${path}`.replace(/\/{2,}/g, "/");
 
@@ -70,7 +70,28 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets (JS, CSS, images, fonts): cache-first.
+  // JS/CSS app bundles: network-first so deployed updates actually land.
+  // If the tablet is offline, fall back to the cached copy.
+  if (
+    request.destination === "script" ||
+    request.destination === "style" ||
+    url.pathname.includes("/assets/")
+  ) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // Other static assets (images, fonts, icons): cache-first.
   // On cache miss, fetch from network and add to cache for next time.
   event.respondWith(
     caches.match(request).then(
