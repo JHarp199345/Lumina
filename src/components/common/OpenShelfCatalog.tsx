@@ -196,24 +196,15 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
   }, [books, sort]);
 
   const importBook = async (book: GutendexBook) => {
-    const epubUrl = pickEpubUrl(book);
-    if (!epubUrl) {
+    const epubUrls = pickEpubUrls(book);
+    if (epubUrls.length === 0) {
       setStatus("No EPUB download is available for that book.");
       return;
     }
 
     setStatus(`Downloading ${book.title}…`);
     try {
-      const response = await fetch(epubUrl, {
-        credentials: "omit",
-        referrerPolicy: "no-referrer",
-      });
-      if (!response.ok) throw new Error(`Download returned ${response.status}`);
-      const blob = await response.blob();
-      await assertLooksLikeEpub(blob);
-      const file = new File([blob], `${safeFileName(book.title)}.epub`, {
-        type: "application/epub+zip",
-      });
+      const file = await downloadFirstWorkingEpub(book, epubUrls, setStatus);
       await importEpubFile(file, setStatus);
       setStatus(`Imported ${book.title}.`);
       window.setTimeout(onClose, 900);
@@ -412,21 +403,58 @@ function filterFallbackBooks(query: string, genre: string, sort: SortMode): Gute
   return copy;
 }
 
-function pickEpubUrl(book: GutendexBook): string | null {
+async function downloadFirstWorkingEpub(
+  book: GutendexBook,
+  urls: string[],
+  onProgress: (message: string) => void
+): Promise<File> {
+  const failures: string[] = [];
+  for (let index = 0; index < urls.length; index += 1) {
+    const url = urls[index];
+    try {
+      onProgress(
+        urls.length > 1
+          ? `Downloading ${book.title}… format ${index + 1} of ${urls.length}`
+          : `Downloading ${book.title}…`
+      );
+      const response = await fetch(url, {
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+      });
+      if (!response.ok) throw new Error(`Download returned ${response.status}`);
+      const blob = await response.blob();
+      await assertLooksLikeEpub(blob);
+      return new File([blob], `${safeFileName(book.title)}.epub`, {
+        type: "application/epub+zip",
+      });
+    } catch (err) {
+      failures.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  throw new Error(`No EPUB format could be imported. ${failures[0] ?? ""}`.trim());
+}
+
+function pickEpubUrls(book: GutendexBook): string[] {
   const epubEntries = Object.entries(book.formats)
     .filter(([type, url]) => type.toLowerCase().includes("epub") && Boolean(url))
     .map(([type, url]) => ({ type: type.toLowerCase(), url: normalizeDownloadUrl(url) }));
 
   const exact = epubEntries.filter((entry) => entry.type.includes("application/epub+zip"));
   const candidates = exact.length > 0 ? exact : epubEntries;
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) return [];
 
-  return (
-    candidates.find((entry) => /\.epub3?\.images($|\?)/i.test(entry.url))?.url ??
-    candidates.find((entry) => !/\.noimages($|\?)/i.test(entry.url))?.url ??
-    candidates[0]?.url ??
-    null
-  );
+  const score = (url: string) => {
+    if (/\.epub\.images($|\?)/i.test(url)) return 0;
+    if (/\.epub($|\?)/i.test(url)) return 1;
+    if (/\.epub\.noimages($|\?)/i.test(url)) return 2;
+    if (/\.epub3\.images($|\?)/i.test(url)) return 3;
+    if (/\.epub3($|\?)/i.test(url)) return 4;
+    if (/epub/i.test(url)) return 5;
+    return 9;
+  };
+
+  return [...new Set(candidates.map((entry) => entry.url))]
+    .sort((a, b) => score(a) - score(b));
 }
 
 function normalizeDownloadUrl(url: string): string {
