@@ -221,10 +221,38 @@ export default function VoiceStudio() {
 
   const activeArtifact = artifacts.find((artifact) => artifact.id === activeAudioId) ?? matchingArtifact;
 
+  const findVoiceIdForArtifact = (artifact: AudioArtifact) =>
+    voices.find((voice) => voice.id === artifact.voiceId)?.id ??
+    voices.find((voice) => voice.providerVoiceName === artifact.voiceProviderId)?.id ??
+    voices.find((voice) => voice.id === artifact.voiceProviderId)?.id ??
+    null;
+
+  const selectAudioArtifact = (artifact: AudioArtifact) => {
+    const artifactVoiceId = findVoiceIdForArtifact(artifact);
+    if (artifactVoiceId && selectedVoiceId !== artifactVoiceId) {
+      setVoice(artifactVoiceId);
+    }
+    if (artifact.stylePresetId && selectedStylePresetId !== artifact.stylePresetId) {
+      setStylePreset(artifact.stylePresetId);
+    }
+    setActiveAudio(artifact.id);
+  };
+
   useEffect(() => {
     if (!matchingArtifact || activeAudioId) return;
     setActiveAudio(matchingArtifact.id);
   }, [activeAudioId, matchingArtifact, setActiveAudio]);
+
+  useEffect(() => {
+    if (!activeArtifact) return;
+    const artifactVoiceId = findVoiceIdForArtifact(activeArtifact);
+    if (artifactVoiceId && selectedVoiceId !== artifactVoiceId) {
+      setVoice(artifactVoiceId);
+    }
+    if (activeArtifact.stylePresetId && selectedStylePresetId !== activeArtifact.stylePresetId) {
+      setStylePreset(activeArtifact.stylePresetId);
+    }
+  }, [activeArtifact, selectedStylePresetId, selectedVoiceId, setStylePreset, setVoice, voices]);
 
   const refreshVoices = async () => {
     const apiKey = await storage.loadApiKey(ELEVENLABS_KEY_NAME);
@@ -252,7 +280,7 @@ export default function VoiceStudio() {
       return;
     }
     if (matchingArtifact && !force) {
-      setActiveAudio(matchingArtifact.id);
+      selectAudioArtifact(matchingArtifact);
       return;
     }
     const apiKey = await storage.loadApiKey(ELEVENLABS_KEY_NAME);
@@ -662,7 +690,7 @@ export default function VoiceStudio() {
               {artifacts.map((artifact) => (
                 <button
                   key={artifact.id}
-                  onClick={() => setActiveAudio(artifact.id)}
+                  onClick={() => selectAudioArtifact(artifact)}
                   className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
                     activeAudioId === artifact.id
                       ? "border-lumina-gold/40 bg-lumina-gold/[0.07]"
