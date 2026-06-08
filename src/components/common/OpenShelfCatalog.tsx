@@ -32,6 +32,19 @@ const GENRES = [
   "History",
 ];
 
+const FALLBACK_BOOKS: GutendexBook[] = [
+  fallbackBook(1342, "Pride and Prejudice", "Austen, Jane", 1775, 1817, ["Fiction", "Love stories"], 0),
+  fallbackBook(84, "Frankenstein; Or, The Modern Prometheus", "Shelley, Mary Wollstonecraft", 1797, 1851, ["Gothic fiction", "Science fiction"], 0),
+  fallbackBook(2701, "Moby Dick; Or, The Whale", "Melville, Herman", 1819, 1891, ["Adventure", "Fiction"], 0),
+  fallbackBook(11, "Alice's Adventures in Wonderland", "Carroll, Lewis", 1832, 1898, ["Fantasy", "Children's stories"], 0),
+  fallbackBook(1661, "The Adventures of Sherlock Holmes", "Doyle, Arthur Conan", 1859, 1930, ["Mystery", "Detective fiction"], 0),
+  fallbackBook(345, "Dracula", "Stoker, Bram", 1847, 1912, ["Gothic fiction", "Horror"], 0),
+  fallbackBook(98, "A Tale of Two Cities", "Dickens, Charles", 1812, 1870, ["History", "Fiction"], 0),
+  fallbackBook(174, "The Picture of Dorian Gray", "Wilde, Oscar", 1854, 1900, ["Philosophy", "Fiction"], 0),
+  fallbackBook(5200, "Metamorphosis", "Kafka, Franz", 1883, 1924, ["Fiction"], 0),
+  fallbackBook(2600, "War and Peace", "Tolstoy, Leo", 1828, 1910, ["History", "Fiction"], 0),
+];
+
 interface CatalogPage {
   count: number;
   next: string | null;
@@ -79,22 +92,30 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
       setTotalCount(0);
       try {
         const response = await fetch(buildCatalogUrl(query, genre, sort), {
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
           signal: controller.signal,
         });
         if (!response.ok) throw new Error(`Catalog returned ${response.status}`);
         const data = await response.json() as CatalogPage;
         const results = data.results ?? [];
         setBooks(results);
-        setNextUrl(data.next ?? null);
+        setNextUrl(normalizeCatalogUrl(data.next));
         setTotalCount(data.count ?? results.length);
         catalogCache.set(requestKey, {
           books: results,
-          nextUrl: data.next ?? null,
+          nextUrl: normalizeCatalogUrl(data.next),
           count: data.count ?? results.length,
         });
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
-          setStatus(`Catalog failed: ${err instanceof Error ? err.message : String(err)}`);
+          const fallback = filterFallbackBooks(query, genre, sort);
+          setBooks(fallback);
+          setNextUrl(null);
+          setTotalCount(fallback.length);
+          setStatus(
+            `Live catalog failed: ${err instanceof Error ? err.message : String(err)}. Showing a small Gutenberg fallback shelf.`
+          );
         }
       } finally {
         setIsLoading(false);
@@ -111,7 +132,10 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
     if (!nextUrl || isLoading || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const response = await fetch(nextUrl);
+      const response = await fetch(nextUrl, {
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+      });
       if (!response.ok) throw new Error(`Catalog returned ${response.status}`);
       const data = await response.json() as CatalogPage;
       const incoming = data.results ?? [];
@@ -120,12 +144,12 @@ export default function OpenShelfCatalog({ onBack, onClose }: OpenShelfCatalogPr
         const merged = [...current, ...incoming.filter((book) => !seen.has(book.id))];
         catalogCache.set(requestKey, {
           books: merged,
-          nextUrl: data.next ?? null,
+          nextUrl: normalizeCatalogUrl(data.next),
           count: data.count ?? totalCount,
         });
         return merged;
       });
-      setNextUrl(data.next ?? null);
+      setNextUrl(normalizeCatalogUrl(data.next));
       setTotalCount(data.count ?? totalCount);
     } catch (err) {
       setStatus(`More books failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -335,6 +359,57 @@ function buildCatalogUrl(query: string, genre: string, sort: SortMode): string {
   // is applied to loaded pages client-side so the first screen still arrives fast.
   params.set("sort", sort === "popular" ? "popular" : "ascending");
   return `https://gutendex.com/books?${params.toString()}`;
+}
+
+function normalizeCatalogUrl(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:") parsed.protocol = "https:";
+    return parsed.toString();
+  } catch {
+    return url.replace(/^http:\/\//i, "https://");
+  }
+}
+
+function fallbackBook(
+  id: number,
+  title: string,
+  author: string,
+  birthYear: number | null,
+  deathYear: number | null,
+  subjects: string[],
+  downloadCount: number
+): GutendexBook {
+  return {
+    id,
+    title,
+    authors: [{ name: author, birth_year: birthYear, death_year: deathYear }],
+    subjects,
+    languages: ["en"],
+    download_count: downloadCount,
+    formats: {
+      "application/epub+zip": `https://www.gutenberg.org/ebooks/${id}.epub.images`,
+    },
+  };
+}
+
+function filterFallbackBooks(query: string, genre: string, sort: SortMode): GutendexBook[] {
+  const q = query.trim().toLowerCase();
+  const filtered = FALLBACK_BOOKS.filter((book) => {
+    const haystack = `${book.title} ${authorLine(book)} ${book.subjects.join(" ")}`.toLowerCase();
+    const matchesQuery = !q || haystack.includes(q);
+    const matchesGenre =
+      !genre || book.subjects.some((subject) => subject.toLowerCase().includes(genre.toLowerCase()));
+    return matchesQuery && matchesGenre;
+  });
+
+  const copy = [...filtered];
+  if (sort === "title-asc") copy.sort((a, b) => a.title.localeCompare(b.title));
+  if (sort === "title-desc") copy.sort((a, b) => b.title.localeCompare(a.title));
+  if (sort === "year-asc") copy.sort((a, b) => publicationYear(a) - publicationYear(b));
+  if (sort === "year-desc") copy.sort((a, b) => publicationYear(b) - publicationYear(a));
+  return copy;
 }
 
 function pickEpubUrl(book: GutendexBook): string | null {
