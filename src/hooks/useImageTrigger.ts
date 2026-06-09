@@ -27,6 +27,12 @@ import {
   hasPositionedImages,
   resolveImageWordPosition,
 } from "@/utils/imagePosition";
+import {
+  findImageForVisualSlot,
+  segmentScenesOnePerSlot,
+  slotHasQueuedOrCachedImage,
+  visualSlotKeyForScene,
+} from "@/utils/sceneDedup";
 import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import type { IdentifiedScene, CachedImage } from "@/types";
 
@@ -87,7 +93,8 @@ export function useImageTrigger() {
     if (!activeSemanticMap || !imageGenerationEnabled || !activeBook) return;
 
     const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
-    const scenes = scenePositions(activeSemanticMap.scenes, getSceneWordPosition);
+    const canonicalScenes = segmentScenesOnePerSlot(activeSemanticMap.scenes, chapters);
+    const scenes = scenePositions(canonicalScenes, getSceneWordPosition);
     const cachedImages = Object.values(imageCache);
     const current = useImageStore.getState().currentImage;
 
@@ -206,14 +213,26 @@ export function useImageTrigger() {
     const passedGeneratableScenes = generatableScenes.filter(({ position }) => position <= wordPosition);
     const governingPlannedScene = passedGeneratableScenes[passedGeneratableScenes.length - 1] ?? null;
 
+    const governingSlotKey = governingPlannedScene
+      ? visualSlotKeyForScene(governingPlannedScene.scene, chapters)
+      : null;
+
     if (
       governingPlannedScene &&
-      !getCachedImageAtPosition(governingPlannedScene.position, chapters)
+      governingSlotKey &&
+      !slotHasQueuedOrCachedImage(
+        governingSlotKey,
+        cachedImages,
+        canonicalScenes,
+        chapters,
+        queue
+      )
     ) {
       enqueue({
         sceneId: governingPlannedScene.scene.id,
         bookId: activeSemanticMap.bookId,
         wordPosition: governingPlannedScene.position,
+        visualSlotKey: governingSlotKey,
         priority: 0,
         status: "pending",
         description:
@@ -237,7 +256,13 @@ export function useImageTrigger() {
     // Read-ahead only after meaningful forward reading — never on idle ticks, cache updates, or jumps.
     if (hasAdvancedForward && !isNavigationJump) {
       for (const { scene, position: scenePos } of generatableScenes) {
-        if (getCachedImageAtPosition(scenePos, chapters)) continue;
+        const slotKey = visualSlotKeyForScene(scene, chapters);
+        if (
+          !slotKey ||
+          slotHasQueuedOrCachedImage(slotKey, cachedImages, canonicalScenes, chapters, queue)
+        ) {
+          continue;
+        }
 
         const distance = scenePos - wordPosition;
 
@@ -246,6 +271,7 @@ export function useImageTrigger() {
             sceneId: scene.id,
             bookId: activeSemanticMap.bookId,
             wordPosition: scenePos,
+            visualSlotKey: slotKey,
             priority: distance,
             status: "pending",
             description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
@@ -270,6 +296,7 @@ export function useImageTrigger() {
     setCurrentImage,
     setCurrentThemes,
     getCachedImageAtPosition,
+    queue,
     navigationJumpUntil,
     regenerateCooldownUntil,
     pruneQueueOutsideWindow,
@@ -314,29 +341,38 @@ export function useImageTrigger() {
       return;
     }
 
-    const existingMemoryImage = getCachedImageAtPosition(scenePosition, chapters);
-    if (existingMemoryImage) {
-      updateQueueItemStatus(next.sceneId, "complete");
-      return;
-    }
+    const slotKey = visualSlotKeyForScene(scene, chapters) ?? next.visualSlotKey ?? null;
+    const mapScenes = segmentScenesOnePerSlot(semanticMap.scenes, chapters);
 
-    const persistedImages = await storage.loadImages(next.bookId).catch(() => [] as CachedImage[]);
-    const existingPersistedImage = findImageAtPosition(
-      persistedImages,
-      scenePosition,
-      chapters,
-      undefined,
-      LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE
-    );
-    if (existingPersistedImage) {
-      addToCache(existingPersistedImage);
-      updateQueueItemStatus(next.sceneId, "complete");
-      diagnosticInfo("image.generation.persisted_cache", "Using persisted image instead of regenerating", {
-        sceneId: scene.id,
-        bookId: next.bookId,
-        wordPosition: scenePosition,
-      });
-      return;
+    if (slotKey) {
+      const existingMemoryImage = findImageForVisualSlot(
+        slotKey,
+        Object.values(useImageStore.getState().imageCache),
+        mapScenes,
+        chapters
+      );
+      if (existingMemoryImage) {
+        updateQueueItemStatus(next.sceneId, "complete");
+        return;
+      }
+
+      const persistedImages = await storage.loadImages(next.bookId).catch(() => [] as CachedImage[]);
+      const existingPersistedImage = findImageForVisualSlot(
+        slotKey,
+        persistedImages,
+        mapScenes,
+        chapters
+      );
+      if (existingPersistedImage) {
+        addToCache(existingPersistedImage);
+        updateQueueItemStatus(next.sceneId, "complete");
+        diagnosticInfo("image.generation.persisted_cache", "Using persisted image for EPUB section slot", {
+          sceneId: scene.id,
+          bookId: next.bookId,
+          visualSlotKey: slotKey,
+        });
+        return;
+      }
     }
 
     const styleSeed = activeStyleSeed ? getStyleSeedById(activeStyleSeed) : null;

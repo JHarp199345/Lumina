@@ -25,7 +25,7 @@ import type {
 import { LUMINA_CONFIG } from "@/config";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
-import { buildChapterVisualPlan } from "@/utils/sceneDedup";
+import { buildVisualSlotPlan, visualSlotKey } from "@/utils/sceneDedup";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -108,9 +108,8 @@ export async function analyzeBook(
     analysisStructure
   );
 
-  // One visual slot per reading chapter — opening/inflection beats claim their
-  // chapter; everything else gets a single planned anchor in that section.
-  const chapterPlan = buildChapterVisualPlan(
+  // One visual slot per EPUB HTML section — never multiple scenes on the same file.
+  const chapterPlan = buildVisualSlotPlan(
     analysisStructure,
     macroArc,
     annotatedScenes,
@@ -248,7 +247,7 @@ async function identifyScenes(
   onProgress?: AnalysisProgressReporter
 ): Promise<IdentifiedScene[]> {
   const scenes: IdentifiedScene[] = [];
-  const usedChapterIds = new Set<string>();
+  const usedSlotKeys = new Set<string>();
   const totalScenes = macroArc.inflectionPoints.length + (structure.chapters[0] ? 1 : 0);
 
   // Opening atmosphere — always first
@@ -267,14 +266,14 @@ async function identifyScenes(
       return buildFallbackScene(openingChapter, structure, "opening");
     });
     scenes.push(scene);
-    usedChapterIds.add(openingChapter.id);
+    usedSlotKeys.add(visualSlotKey(openingChapter));
   }
 
-  // One scene per inflection point — never stack a second beat on the same chapter.
+  // One scene per inflection — never a second beat on the same EPUB HTML section.
   for (let i = 0; i < macroArc.inflectionPoints.length; i++) {
     const point = macroArc.inflectionPoints[i];
     const chapter = structure.chapters[point.approximateChapterIndex];
-    if (!chapter || usedChapterIds.has(chapter.id)) continue;
+    if (!chapter || usedSlotKeys.has(visualSlotKey(chapter))) continue;
     onProgress?.({
       phase: "scenes",
       message: `Finding key scene ${i + 1} of ${macroArc.inflectionPoints.length}…`,
@@ -289,7 +288,7 @@ async function identifyScenes(
       return buildFallbackScene(chapter, structure, point.id, point);
     });
     scenes.push(scene);
-    usedChapterIds.add(chapter.id);
+    usedSlotKeys.add(visualSlotKey(chapter));
   }
 
   return scenes;

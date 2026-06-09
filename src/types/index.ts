@@ -554,6 +554,8 @@ export interface GenerationQueueItem {
   sceneId: string;
   bookId: string;
   wordPosition?: number;
+  /** EPUB section key (spine + href) — one generation per slot. */
+  visualSlotKey?: string;
   priority: number;
   status: GenerationStatus;
   description: string;

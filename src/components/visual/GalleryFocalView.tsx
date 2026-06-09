@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import ModalPortal from "@/components/common/ModalPortal";
 import { animate, AnimatePresence, motion, useMotionValue } from "framer-motion";
 import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, RefreshCw, Check, AlertTriangle } from "lucide-react";
 import { isTauri } from "@/utils/runtime";
@@ -19,7 +20,7 @@ import { toAssetUrl } from "@/utils/tauriBridge";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useBookStore } from "@/store/bookStore";
 import { getImageForScene } from "@/utils/imagePosition";
-import { segmentScenesOnePerChapter } from "@/utils/sceneDedup";
+import { segmentScenesOnePerSlot } from "@/utils/sceneDedup";
 import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
 function displaySrc(src: string): string {
@@ -73,18 +74,24 @@ export default function GalleryFocalView({
   // Every planned moment, in reading order — generated and not-yet-generated.
   const chapters = useBookStore((state) => state.activeStructure?.chapters ?? []);
   const items: GalleryItem[] = useMemo(() => {
-    const scenes = segmentScenesOnePerChapter(activeSemanticMap?.scenes ?? [], chapters);
+    const allScenes = activeSemanticMap?.scenes ?? [];
+    const scenes = segmentScenesOnePerSlot(allScenes, chapters);
     const beats = activeSemanticMap?.storyboard?.beats ?? [];
     const cached = Object.values(imageCache);
     return scenes.map((scene) => ({
       scene,
-      image: getImageForScene(scene, cached, chapters),
+      image: getImageForScene(scene, cached, chapters, allScenes),
       beat: beats.find((b) => b.sceneId === scene.id),
     }));
   }, [activeSemanticMap, imageCache, chapters]);
 
   const startIndex = Math.max(0, items.findIndex((it) => it.scene.id === startSceneId));
   const [index, setIndex] = useState(startIndex < 0 ? 0 : startIndex);
+
+  useEffect(() => {
+    const next = Math.max(0, items.findIndex((it) => it.scene.id === startSceneId));
+    setIndex(next < 0 ? 0 : next);
+  }, [startSceneId, items]);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [showBookMenu, setShowBookMenu] = useState(false);
   const selectedThumbRef = useRef<HTMLButtonElement>(null);
@@ -132,23 +139,24 @@ export default function GalleryFocalView({
     selectedThumbRef.current?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
   }, [index]);
 
-  if (items.length === 0) return null;
   const current = items[index];
-  const caption =
-    current.scene.directorBrief?.blocking?.focalPoint ||
-    current.scene.symbolicMotifs?.slice(0, 3).join(" · ") ||
-    current.scene.emotionalVector?.slice(0, 2).join(" · ") ||
-    "";
-  const beatLabel = current.beat?.beatType?.replace(/_/g, " ") ?? "scene";
-  const currentGenerating = generatingId === current.scene.id;
+  const caption = current
+    ? current.scene.directorBrief?.blocking?.focalPoint ||
+      current.scene.symbolicMotifs?.slice(0, 3).join(" · ") ||
+      current.scene.emotionalVector?.slice(0, 2).join(" · ") ||
+      ""
+    : "";
+  const beatLabel = current?.beat?.beatType?.replace(/_/g, " ") ?? "scene";
+  const currentGenerating = current ? generatingId === current.scene.id : false;
 
   return (
+    <ModalPortal>
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       // Dim "gallery room" surround — kept dark in both themes so the art reads.
-      className="fixed inset-0 z-[60] flex flex-col bg-[#08070a]/96 backdrop-blur-xl"
+      className="fixed inset-0 z-[88] flex flex-col bg-[#08070a]/96 backdrop-blur-xl"
       onClick={onClose}
     >
       {/* Top bar */}
@@ -275,7 +283,20 @@ export default function GalleryFocalView({
 
       {/* Hero: the piece on the wall ─ matte frame + soft shadow, no lamp */}
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-6" onClick={(e) => e.stopPropagation()}>
-        {items.length > 1 && (
+        {items.length === 0 ? (
+          <div className="max-w-md text-center">
+            <Sparkles size={24} className="mx-auto text-lumina-gold/45" />
+            <p className="mt-4 text-sm text-white/50">No visual plan yet.</p>
+            <p className="mt-2 text-xs text-white/35">Run analysis to map the book&apos;s visual moments.</p>
+            <button
+              onClick={onAnalyze}
+              disabled={isAnalyzing}
+              className="mt-5 rounded-full border border-lumina-gold/35 px-5 py-2 text-[11px] uppercase tracking-[0.16em] text-lumina-gold/80 transition-colors hover:border-lumina-gold/55"
+            >
+              {isAnalyzing ? "Analyzing…" : "Analyze This Book"}
+            </button>
+          </div>
+        ) : items.length > 1 && (
           <>
             <button
               onClick={() => setIndex((i) => clamp(i - 1))}
@@ -296,6 +317,7 @@ export default function GalleryFocalView({
           </>
         )}
 
+        {current && (
         <motion.div
           key={current.scene.id}
           initial={{ opacity: 0, scale: 0.985 }}
@@ -353,9 +375,11 @@ export default function GalleryFocalView({
             )}
           </div>
         </motion.div>
+        )}
       </div>
 
       {/* Filmstrip — every planned moment; placeholders included */}
+      {items.length > 0 && (
       <div className="flex-shrink-0 overflow-x-auto px-5 py-4 scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         <div className="mx-auto flex w-max items-center gap-3">
           {items.map((it, i) => {
@@ -390,7 +414,9 @@ export default function GalleryFocalView({
           })}
         </div>
       </div>
+      )}
     </motion.div>
+    </ModalPortal>
   );
 }
 

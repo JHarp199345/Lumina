@@ -347,11 +347,13 @@ function chaptersFromNavSlices(
   }
 
   const seenFullFileHref = new Set<string>();
+  const spineIndexByHref = new Map<string, number>();
   const candidates: NavChapterCandidate[] = [];
 
   for (let i = 0; i < sorted.length; i++) {
     const slice = sorted[i];
     const href = slice.href;
+    const fileHref = href.split("#")[0] || href;
     const usesAnchors = hrefUsesAnchors.get(href) ?? false;
 
     if (!usesAnchors) {
@@ -360,7 +362,12 @@ function chaptersFromNavSlices(
     }
 
     const html = rawTexts.get(href) || "";
-    const spineIndex = spine.findIndex((s) => s.href === href);
+    const spineIndex =
+      spineIndexByHref.get(fileHref) ??
+      spine.findIndex((s) => (s.href.split("#")[0] || s.href) === fileHref);
+    if (spineIndex >= 0) {
+      spineIndexByHref.set(fileHref, spineIndex);
+    }
 
     let endFragment: string | null = null;
     if (usesAnchors) {
@@ -397,7 +404,10 @@ function chaptersFromNavSlices(
     title: chapter.title,
     wordCount: chapter.wordCount,
     href: chapter.href,
-    spineIndex: chapter.spineIndex >= 0 ? chapter.spineIndex : index,
+    spineIndex:
+      chapter.spineIndex >= 0
+        ? chapter.spineIndex
+        : (spineIndexByHref.get((chapter.href.split("#")[0] || chapter.href)) ?? 0),
     startCfi: "",
     endCfi: "",
     sections: buildSections(chapter.rawText || "", chapter.id, index),

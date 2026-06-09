@@ -25,6 +25,11 @@ import {
   getDisplayImage,
   hydrateImageWordPositions,
 } from "@/utils/imagePosition";
+import {
+  findImageForVisualSlot,
+  segmentScenesOnePerSlot,
+  visualSlotKeyForScene,
+} from "@/utils/sceneDedup";
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
 import { LUMINA_CONFIG } from "@/config";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
@@ -384,34 +389,48 @@ export function useBookOrchestration() {
 
       const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
       const scenePosition = computeSceneWordPosition(scene, chapters);
-      const { getCachedImageAtPosition } = useImageStore.getState();
+      const semanticMap = useBookStore.getState().activeSemanticMap;
+      const mapScenes = segmentScenesOnePerSlot(semanticMap?.scenes ?? [scene], chapters);
+      const slotKey = visualSlotKeyForScene(scene, chapters);
+      const { imageCache } = useImageStore.getState();
 
-      const cached = getCachedImageAtPosition(scenePosition, chapters);
-      if (cached) {
-        if (shouldDisplay) {
-          setCurrentImage(cached);
-          setCurrentThemes(cached.emotionalThemes);
+      if (slotKey) {
+        const cached = findImageForVisualSlot(
+          slotKey,
+          Object.values(imageCache),
+          mapScenes,
+          chapters
+        );
+        if (cached) {
+          if (shouldDisplay) {
+            setCurrentImage(cached);
+            setCurrentThemes(cached.emotionalThemes);
+          }
+          return;
         }
-        return;
       }
 
       const persistedImages = await storage.loadImages(semanticBookId).catch(() => [] as CachedImage[]);
-      const persisted = findImageAtPosition(
-        persistedImages,
-        scenePosition,
-        chapters,
-        undefined,
-        LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE
-      );
+      const persisted =
+        slotKey
+          ? findImageForVisualSlot(slotKey, persistedImages, mapScenes, chapters)
+          : findImageAtPosition(
+              persistedImages,
+              scenePosition,
+              chapters,
+              undefined,
+              LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE
+            );
       if (persisted) {
         addToCache(persisted);
         if (shouldDisplay) {
           setCurrentImage(persisted);
           setCurrentThemes(persisted.emotionalThemes);
         }
-        diagnosticInfo("image.scene.persisted_cache", "Using persisted image instead of regenerating", {
+        diagnosticInfo("image.scene.persisted_cache", "Using persisted image for EPUB section slot", {
           sceneId: scene.id,
           bookId: semanticBookId,
+          visualSlotKey: slotKey,
         });
         return;
       }

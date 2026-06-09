@@ -94,6 +94,16 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       if (existing?.status === "generating" || existing?.status === "complete") {
         return state;
       }
+
+      if (item.visualSlotKey) {
+        const slotBusy = state.queue.some(
+          (q) =>
+            q.visualSlotKey === item.visualSlotKey &&
+            (q.status === "pending" || q.status === "generating")
+        );
+        if (slotBusy) return state;
+      }
+
       const queue = existing
         ? state.queue.map((q) =>
             q.sceneId === item.sceneId && q.status === "pending"

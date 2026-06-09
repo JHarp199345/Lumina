@@ -7,6 +7,7 @@
 
 import type { CachedImage, Chapter, IdentifiedScene } from "@/types";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { findImageForVisualSlot, visualSlotKeyForScene } from "@/utils/sceneDedup";
 
 export function resolveImageWordPosition(
   image: CachedImage,
@@ -117,9 +118,18 @@ export function findImageAtPosition(
 export function getImageForScene(
   scene: IdentifiedScene,
   images: Iterable<CachedImage>,
-  _chapters?: Chapter[]
+  chapters: Chapter[] = [],
+  scenes: IdentifiedScene[] = []
 ): CachedImage | undefined {
-  return Array.from(images).find((image) => image.sceneId === scene.id);
+  const list = Array.from(images);
+  const direct = list.find((image) => image.sceneId === scene.id);
+  if (direct) return direct;
+
+  if (chapters.length === 0 || scenes.length === 0) return undefined;
+
+  const slotKey = visualSlotKeyForScene(scene, chapters);
+  if (!slotKey) return undefined;
+  return findImageForVisualSlot(slotKey, list, scenes, chapters);
 }
 
 export function hydrateImageWordPositions(

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion";
-import { Sparkles, RefreshCw, Loader, MapPin, X, LayoutGrid, CornerUpLeft, Check, AlertTriangle } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Sparkles, RefreshCw, Loader, MapPin, X, LayoutGrid, CornerUpLeft, Check, AlertTriangle, PanelBottom } from "lucide-react";
 import { useImageStore } from "@/store/imageStore";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
@@ -19,8 +19,12 @@ import GalleryFocalView from "@/components/visual/GalleryFocalView";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { getImageForScene } from "@/utils/imagePosition";
-import { segmentScenesOnePerChapter } from "@/utils/sceneDedup";
-import type { CachedImage, SemanticMap, VisualBeat } from "@/types";
+import {
+  segmentScenesOnePerSlot,
+  slotHasQueuedOrCachedImage,
+  visualSlotKeyForScene,
+} from "@/utils/sceneDedup";
+import type { CachedImage, SemanticMap } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
 // Determines the precise ambient state when no image is being displayed.
@@ -85,8 +89,9 @@ export default function VisualPanel() {
   const { isTablet } = useDeviceLayout();
   const { regenerateAllImages } = useBookOrchestration();
   const [showRegenerate, setShowRegenerate] = useState(false);
-  const [showGallery, setShowGallery] = useState(false);
   const [showFocal, setShowFocal] = useState(false);
+  const [focalStartSceneId, setFocalStartSceneId] = useState<string | undefined>();
+  const [showPlanStrip, setShowPlanStrip] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
   const [returnCfi, setReturnCfi] = useState<string | null>(null);
@@ -117,12 +122,23 @@ export default function VisualPanel() {
     if (!isTablet && currentImage) setShowRegenerate(true);
   }, [isTablet, currentImage]);
 
+  const openGallery = useCallback((sceneId?: string) => {
+    setFocalStartSceneId(sceneId ?? currentImage?.sceneId);
+    setShowFocal(true);
+  }, [currentImage?.sceneId]);
+
+  useEffect(() => {
+    if (analysisOutcome?.kind === "done") {
+      setShowPlanStrip(true);
+    }
+  }, [analysisOutcome?.kind]);
+
   // Clicking the image opens the gallery focal view (the art experience).
   const handleImageClick = useCallback((e: React.MouseEvent) => {
-    if (!currentImage) return;
+    if (!activeSemanticMap) return;
     e.stopPropagation();
-    setShowFocal(true);
-  }, [currentImage]);
+    openGallery();
+  }, [activeSemanticMap, openGallery]);
 
   const rememberReadingSpot = useCallback(() => {
     if (currentCfi) setReturnCfi(currentCfi);
@@ -161,6 +177,20 @@ export default function VisualPanel() {
     const scene = activeSemanticMap.scenes.find((s) => s.id === sceneId);
     if (!scene) return;
     const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
+    const canonicalScenes = segmentScenesOnePerSlot(activeSemanticMap.scenes, chapters);
+    const slotKey = visualSlotKeyForScene(scene, chapters);
+    if (
+      slotKey &&
+      slotHasQueuedOrCachedImage(
+        slotKey,
+        Object.values(useImageStore.getState().imageCache),
+        canonicalScenes,
+        chapters,
+        useImageStore.getState().queue
+      )
+    ) {
+      return;
+    }
     const googleKey = await storage.loadApiKey("lumina_google_ai_key");
     const falKey = await storage.loadApiKey("lumina_fal_key");
     const styleSeed = getStyleSeedById(activeStyleSeed);
@@ -256,14 +286,27 @@ export default function VisualPanel() {
         </span>
         <div className="flex-1" />
         {activeBook && activeSemanticMap && (
-          <button
-            onClick={() => setShowGallery(true)}
-            className="flex items-center justify-center min-w-[28px] min-h-[28px] rounded text-ink-faint hover:text-ink-soft transition-colors"
-            title="Visual story & controls"
-            aria-label="Open visual story"
-          >
-            <LayoutGrid size={14} />
-          </button>
+          <>
+            <button
+              onClick={() => setShowPlanStrip((open) => !open)}
+              className={`flex min-h-[28px] min-w-[28px] items-center justify-center rounded transition-colors ${
+                showPlanStrip ? "text-lumina-gold" : "text-ink-faint hover:text-ink-soft"
+              }`}
+              title="Visual plan strip"
+              aria-label="Toggle visual plan strip"
+              aria-pressed={showPlanStrip}
+            >
+              <PanelBottom size={14} />
+            </button>
+            <button
+              onClick={() => openGallery()}
+              className="flex min-h-[28px] min-w-[28px] items-center justify-center rounded text-ink-faint transition-colors hover:text-ink-soft"
+              title="Open gallery"
+              aria-label="Open gallery"
+            >
+              <LayoutGrid size={14} />
+            </button>
+          </>
         )}
       </div>
 
@@ -273,7 +316,7 @@ export default function VisualPanel() {
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
         {...(isTablet ? longPress : {})}
-        onClick={currentImage ? handleImageClick : undefined}
+        onClick={activeSemanticMap ? handleImageClick : undefined}
       >
         {!activeBook ? (
           <AmbientSceneLayer phase="empty" />
@@ -381,6 +424,19 @@ export default function VisualPanel() {
           </button>
         )}
 
+        {/* Solo plan filmstrip — dismissible overlay, not a separate page */}
+        <AnimatePresence>
+          {showPlanStrip && activeSemanticMap && (
+            <VisualPlanFilmstrip
+              activeSemanticMap={activeSemanticMap}
+              imageCache={imageCache}
+              currentSceneId={currentImage?.sceneId}
+              onSelectScene={(sceneId) => openGallery(sceneId)}
+              onDismiss={() => setShowPlanStrip(false)}
+            />
+          )}
+        </AnimatePresence>
+
         {/* Regenerating overlay */}
         <AnimatePresence>
           {isRegenerating && (
@@ -455,29 +511,13 @@ export default function VisualPanel() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showGallery && (
-          <ImageGalleryModal
-            imageCache={imageCache}
-            currentSceneId={currentImage?.sceneId}
-            activeSemanticMap={activeSemanticMap}
-            isAnalyzing={isAnalyzing}
-            analysisProgress={analysisProgress}
-            analysisProgressDetail={analysisProgressDetail}
-            onAnalyze={() => setAnalysisRequested(true)}
-            onRegenerateAll={regenerateAllImages}
-            onClose={() => setShowGallery(false)}
-          />
-        )}
-      </AnimatePresence>
-
       {/* Gallery focal view — the "piece on the wall" experience */}
       <AnimatePresence>
         {showFocal && (
           <GalleryFocalView
             activeSemanticMap={activeSemanticMap}
             imageCache={imageCache}
-            startSceneId={currentImage?.sceneId}
+            startSceneId={focalStartSceneId ?? currentImage?.sceneId}
             isAnalyzing={isAnalyzing}
             analysisProgress={analysisProgressDetail?.message || analysisProgress}
             analysisPercent={analysisProgressDetail?.percent}
@@ -586,310 +626,83 @@ function getDisplayImageSrc(src: string): string {
   return isTauri && !isDisplayUrl ? toAssetUrl(src) : src;
 }
 
-function ImageGalleryModal({
+/** Dismissible solo filmstrip — informational overlay on the visual panel, not a page. */
+function VisualPlanFilmstrip({
+  activeSemanticMap,
   imageCache,
   currentSceneId,
-  activeSemanticMap,
-  isAnalyzing,
-  analysisProgress,
-  analysisProgressDetail,
-  onAnalyze,
-  onRegenerateAll,
-  onClose,
+  onSelectScene,
+  onDismiss,
 }: {
+  activeSemanticMap: SemanticMap;
   imageCache: Record<string, CachedImage>;
   currentSceneId?: string;
-  activeSemanticMap: SemanticMap | null;
-  isAnalyzing: boolean;
-  analysisProgress: string;
-  analysisProgressDetail: ReturnType<typeof useBookStore.getState>["analysisProgressDetail"];
-  onAnalyze: () => void;
-  onRegenerateAll: () => void | Promise<void>;
-  onClose: () => void;
+  onSelectScene: (sceneId: string) => void;
+  onDismiss: () => void;
 }) {
-  const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
   const chapters = useBookStore((state) => state.activeStructure?.chapters ?? []);
-  const scenes = segmentScenesOnePerChapter(activeSemanticMap?.scenes ?? [], chapters);
-  const beats: VisualBeat[] =
-    activeSemanticMap?.storyboard?.beats?.filter((beat) =>
-      scenes.some((scene) => scene.id === beat.sceneId)
-    ) ??
-    scenes.map((scene, index) => ({
-      id: `fallback_${scene.id}`,
-      sceneId: scene.id,
-      beatIndex: index,
-      beatType: index === 0 ? "opening" : "setup",
-      origin: scene.inflectionPointId === "reader_selected" ? "reader_selection" : "arc",
-      generationIntent:
-        scene.inflectionPointId === "reader_selected"
-          ? "reader_requested"
-          : scene.inflectionPointId.startsWith("planned_")
-            ? "planned_only"
-            : "default",
-      arcPosition: scenes.length > 1 ? index / (scenes.length - 1) : 0,
-      readerTriggerWord: scene.anchor?.wordOffset ?? 0,
-      emotionalPurpose: "Planned visual moment.",
-      pacingNote: "Supports the book's visual rhythm.",
-      visualDensity: "moderate",
-    }));
-  const timeline = beats.map((beat) => {
-    const scene = scenes.find((item) => item.id === beat.sceneId);
-    return {
-      beat,
-      scene,
-      image: scene ? getImageForScene(scene, Object.values(imageCache), chapters) : undefined,
-    };
-  });
-  const generatedCount = timeline.filter((item) => item.image).length;
+  const allScenes = activeSemanticMap.scenes;
+  const scenes = segmentScenesOnePerSlot(allScenes, chapters);
+  const cached = Object.values(imageCache);
+  const generatedCount = scenes.filter((scene) =>
+    getImageForScene(scene, cached, chapters, allScenes)
+  ).length;
 
-  const goToScene = (sceneId: string) => {
-    const scene = activeSemanticMap?.scenes.find((item) => item.id === sceneId);
-    if (!scene) return;
-    const win = window as Window & {
-      luminaNavigateToScene?: (target: string, wordOffset?: number) => void;
-      luminaNavigate?: (target: string) => void;
-    };
-    const target = scene.anchor?.href || scene.chapterId;
-    if (win.luminaNavigateToScene) {
-      win.luminaNavigateToScene(target, scene.anchor?.wordOffset ?? 0);
-    } else {
-      win.luminaNavigate?.(target);
-    }
-    onClose();
-  };
+  if (scenes.length === 0) return null;
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 backdrop-blur-md"
-      onClick={onClose}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10 }}
+      transition={{ duration: 0.18 }}
+      className="absolute inset-x-0 bottom-0 z-20 border-t border-white/12 bg-[#06111d]/90 px-3 py-2.5 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+      onClick={(e) => e.stopPropagation()}
     >
-      <motion.div
-        initial={{ opacity: 0, y: 12, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 8, scale: 0.98 }}
-        transition={{ duration: 0.16 }}
-        className="flex w-full max-w-5xl flex-col items-center gap-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="relative flex max-h-[72vh] w-full flex-col overflow-hidden rounded-lg border border-hair bg-reader/95 shadow-2xl">
-          <div className="flex items-center justify-between border-b border-hair px-4 py-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-faint">
-                Visual Story
-              </p>
-              <p className="mt-1 text-xs text-ink-faint">
-                {generatedCount} generated · {Math.max(0, timeline.length - generatedCount)} planned
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex rounded-md border border-hair bg-black/18 p-1">
-                {(["horizontal", "vertical"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setOrientation(mode)}
-                    className={`rounded px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] transition-colors ${
-                      orientation === mode
-                        ? "bg-ink/10 text-ink-soft"
-                        : "text-ink-faint hover:text-ink-soft"
-                    }`}
-                    aria-label={`Show ${mode} visual story`}
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={onClose}
-                className="flex min-h-10 min-w-10 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-ink/[0.06] hover:text-ink"
-                aria-label="Close visual story"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-
-          {timeline.length === 0 ? (
-            <div className="flex min-h-64 flex-1 items-center justify-center px-6 text-center">
-              <p className="text-sm text-ink-faint">No visual story planned yet.</p>
-            </div>
-          ) : (
-            <div
-              className={
-                orientation === "horizontal"
-                  ? "flex min-h-0 flex-1 gap-4 overflow-x-auto px-4 py-5"
-                  : "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5"
-              }
-            >
-              {timeline.map(({ beat, scene, image }, index) => {
-                const sceneId = scene?.id ?? beat.sceneId;
-                const isCurrent = sceneId === currentSceneId;
-                const isReaderRequested = beat.origin === "reader_selection";
-                const isPlannedOnly = beat.generationIntent === "planned_only";
-                const cardClass =
-                  orientation === "horizontal"
-                    ? "w-[280px] flex-shrink-0"
-                    : "w-full";
-                return (
-                  <button
-                    key={`${beat.id}-${image?.generatedAt ?? "planned"}`}
-                    onClick={() => scene && goToScene(scene.id)}
-                    disabled={!scene}
-                    className={`group ${cardClass} overflow-hidden rounded-md border text-left transition-colors ${
-                      isCurrent
-                        ? "border-lumina-gold/55 bg-lumina-gold/8"
-                        : "border-hair bg-ink/[0.04] hover:border-hair"
-                    }`}
-                  >
-                    <div className={orientation === "horizontal" ? "" : "flex gap-3"}>
-                      <div
-                        className={
-                          orientation === "horizontal"
-                            ? "aspect-video w-full overflow-hidden bg-black/30"
-                            : "h-24 w-36 flex-shrink-0 overflow-hidden bg-black/30"
-                        }
-                      >
-                        {image ? (
-                          <img
-                            src={getDisplayImageSrc(image.filePath)}
-                            alt="Generated visual story scene"
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-                            draggable={false}
-                          />
-                        ) : (
-                          <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-panel">
-                            <Sparkles size={15} className="text-lumina-gold/35" />
-                            <span className="text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-                              Planned
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1 space-y-1.5 p-3">
-                        <div className="flex items-center gap-1.5">
-                          <p className="truncate text-[10px] uppercase tracking-[0.16em] text-lumina-gold/55">
-                            {beat.beatType.replace(/_/g, " ") || `Image ${index + 1}`}
-                          </p>
-                          {isReaderRequested && (
-                            <span className="rounded border border-hair px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-ink-faint">
-                              Reader
-                            </span>
-                          )}
-                        </div>
-                        <p className="line-clamp-2 text-xs leading-snug text-ink-soft">
-                          {scene?.directorBrief?.blocking?.focalPoint ||
-                            scene?.symbolicMotifs.slice(0, 2).join(" + ") ||
-                            beat.emotionalPurpose}
-                        </p>
-                        <p className="text-[10px] text-ink-faint">
-                          {image
-                            ? "Tap to visit source passage"
-                            : isPlannedOnly
-                              ? "Mapped for the visual story"
-                              : "Will generate near this passage"}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="fixed bottom-[16vh] left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
-          <button
-            onClick={onAnalyze}
-            disabled={isAnalyzing}
-            className="inline-flex min-h-14 items-center gap-2.5 rounded-full border border-lumina-gold/38 bg-sky-50/[0.06] px-7 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-lumina-gold/90 shadow-[0_12px_38px_rgba(0,0,0,0.38)] backdrop-blur-md transition-colors hover:border-lumina-gold/60 hover:bg-sky-50/[0.09] hover:text-lumina-gold disabled:cursor-default disabled:opacity-70"
-            aria-label={activeSemanticMap ? "Refresh the visual plan" : "Analyze this book"}
-          >
-            {isAnalyzing ? (
-              <Loader size={15} className="animate-spin" />
-            ) : activeSemanticMap ? (
-              <RefreshCw size={15} />
-            ) : (
-              <Sparkles size={15} />
-            )}
-            {isAnalyzing ? "Analyzing" : activeSemanticMap ? "Refresh Visual Plan" : "Analyze This Book"}
-          </button>
-          {!isAnalyzing && activeSemanticMap && (
-            <p className="max-w-[min(420px,82vw)] text-center text-[11px] leading-relaxed text-ink-faint">
-              Rebuilds the visual scaffold. The slider below erases generated images.
-            </p>
-          )}
-        </div>
-
-        {/* Slide-to-confirm wipe + repaint. Only offered when images exist. */}
-        {!isAnalyzing && generatedCount > 0 && (
-          <div className="fixed bottom-4 left-1/2 z-[60] flex -translate-x-1/2 justify-center px-4">
-            <SlideToRegenerate
-              onConfirm={async () => {
-                await onRegenerateAll();
-                onClose();
-              }}
-            />
-          </div>
-        )}
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// Slide-to-confirm control — drag the handle fully right to fire a destructive
-// wipe + repaint. The deliberate gesture prevents accidental triggers.
-function SlideToRegenerate({ onConfirm }: { onConfirm: () => void | Promise<void> }) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const x = useMotionValue(0);
-  const [maxX, setMaxX] = useState(0);
-  const [confirmed, setConfirmed] = useState(false);
-
-  const HANDLE = 40; // px
-  const PADDING = 4; // px on each side
-
-  useEffect(() => {
-    const measure = () => {
-      if (trackRef.current) {
-        setMaxX(Math.max(0, trackRef.current.offsetWidth - HANDLE - PADDING * 2));
-      }
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, []);
-
-  return (
-    <div
-      ref={trackRef}
-      className="relative h-12 w-[min(420px,82vw)] select-none overflow-hidden rounded-full border border-hair bg-sky-50/[0.055] shadow-[0_12px_38px_rgba(0,0,0,0.34)] backdrop-blur-md"
-    >
-      <div className="pointer-events-none absolute inset-[3px] rounded-full border border-white/[0.055] bg-gradient-to-r from-sky-100/[0.045] via-sky-100/[0.075] to-sky-100/[0.045]" />
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-12 text-center text-[11px] uppercase tracking-[0.16em] text-ink-faint">
-        {confirmed ? "Repainting from your spot…" : "Slide to erase generated images"}
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-white/42">
+          {generatedCount} generated · {scenes.length - generatedCount} planned — tap to open gallery
+        </p>
+        <button
+          onClick={onDismiss}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white/75"
+          aria-label="Dismiss visual plan strip"
+        >
+          <X size={14} />
+        </button>
       </div>
-      <motion.div
-        drag={confirmed ? false : "x"}
-        dragConstraints={{ left: 0, right: maxX }}
-        dragElastic={0}
-        dragMomentum={false}
-        style={{ x, left: PADDING }}
-        onDragEnd={() => {
-          if (x.get() >= maxX - 6) {
-            setConfirmed(true);
-            animate(x, maxX, { type: "spring", stiffness: 420, damping: 38 });
-            void onConfirm();
-          } else {
-            animate(x, 0, { type: "spring", stiffness: 420, damping: 38 });
-          }
-        }}
-        className="absolute top-1 flex h-10 w-10 cursor-grab items-center justify-center rounded-full border border-lumina-gold/45 bg-lumina-gold/78 text-[#071525] shadow-[0_8px_22px_rgba(0,0,0,0.35)] backdrop-blur-sm active:cursor-grabbing"
-        aria-label="Slide to erase generated images and regenerate from reading anchors"
-      >
-        <RefreshCw size={15} />
-      </motion.div>
-    </div>
+      <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-thin">
+        {scenes.map((scene) => {
+          const image = getImageForScene(scene, cached, chapters, allScenes);
+          const selected = scene.id === currentSceneId;
+          return (
+            <button
+              key={scene.id}
+              onClick={() => onSelectScene(scene.id)}
+              className={`relative h-14 w-20 flex-shrink-0 overflow-hidden rounded-[2px] transition-all ${
+                selected
+                  ? "ring-2 ring-lumina-gold/70 opacity-100"
+                  : "opacity-55 ring-1 ring-white/10 hover:opacity-90"
+              }`}
+              aria-label={image ? "Open generated image in gallery" : "Open planned slot in gallery"}
+            >
+              {image ? (
+                <img
+                  src={getDisplayImageSrc(image.filePath)}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  draggable={false}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-[#100e0b]">
+                  <Sparkles size={13} className="text-lumina-gold/35" />
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </motion.div>
   );
 }
 
