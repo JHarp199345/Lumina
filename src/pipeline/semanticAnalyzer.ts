@@ -7,7 +7,9 @@
  *   Pass 3 — Image description: Gemini generates 2-4 sentence symbolic visual prompt
  */
 
-import { analyzeStoryShape } from "./storyShape";
+import { analyzeStoryShape, type StoryShapeResult } from "./storyShape";
+import { pickSceneAnchor, isGutenbergEdition } from "@/pipeline/gutenbergAnchors";
+import { refreshGutenbergStructureSections } from "@/pipeline/gutenbergAnalysis";
 import { buildVisualStoryboard } from "./visualStoryboard";
 import {
   buildNarrativeBlueprint,
@@ -25,7 +27,7 @@ import type {
 import { LUMINA_CONFIG } from "@/config";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
-import { buildVisualSlotPlan, visualSlotKey } from "@/utils/sceneDedup";
+import { buildVisualSlotPlan } from "@/utils/sceneDedup";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -36,7 +38,7 @@ export async function analyzeBook(
   apiKey: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<SemanticMap> {
-  const analysisStructure = storyOnlyStructure(structure);
+  let analysisStructure = storyOnlyStructure(structure);
   const report = makeProgressReporter(onProgress);
   report({
     phase: "preparing",
@@ -54,11 +56,20 @@ export async function analyzeBook(
     report
   );
 
-  report({
-    phase: "mapping",
-    message: "Mapping the book's emotional arc…",
-    percent: 40,
-  });
+  if (isGutenbergEdition(analysisStructure.editionPipeline)) {
+    analysisStructure = refreshGutenbergStructureSections(analysisStructure);
+    report({
+      phase: "mapping",
+      message: "Mapping emotional turns onto scene breaks and headings…",
+      percent: 40,
+    });
+  } else {
+    report({
+      phase: "mapping",
+      message: "Mapping the book's emotional arc…",
+      percent: 40,
+    });
+  }
 
   // Enrich with dominant emotions and themes via Gemini
   const macroContext = await getMacroContext(analysisStructure, shapeResult.arcShape, apiKey);
@@ -81,7 +92,7 @@ export async function analyzeBook(
   });
 
   // Pass 2: Scene identification at each inflection
-  const scenes = await identifyScenes(analysisStructure, macroArc, apiKey, report);
+  const scenes = await identifyScenes(analysisStructure, macroArc, shapeResult, apiKey, report);
 
   report({
     phase: "prompts",
@@ -108,12 +119,12 @@ export async function analyzeBook(
     analysisStructure
   );
 
-  // One visual slot per EPUB HTML section — never multiple scenes on the same file.
+  // One visual anchor per parser chapter (Gutenberg NCX backbone).
   const chapterPlan = buildVisualSlotPlan(
     analysisStructure,
     macroArc,
     annotatedScenes,
-    buildPlannedChapterScene
+    (chapter, s, arc) => buildPlannedChapterScene(chapter, s, arc, shapeResult)
   );
 
   const plannedScenes = annotateScenesWithThreads(
@@ -160,33 +171,40 @@ export async function analyzeBook(
 function buildPlannedChapterScene(
   chapter: BookStructure["chapters"][0],
   structure: BookStructure,
-  macroArc: MacroArc
+  macroArc: MacroArc,
+  shapeResult: StoryShapeResult
 ): IdentifiedScene {
-  const targetOffset = Math.floor(chapter.wordCount * 0.42);
-  const anchorSection = chapter.sections.reduce((best, section) => {
-    const bestDist = Math.abs((best.startWordOffset ?? 0) - targetOffset);
-    const sectionDist = Math.abs((section.startWordOffset ?? 0) - targetOffset);
-    return sectionDist < bestDist ? section : best;
-  }, chapter.sections[0] ?? { id: chapter.id, startWordOffset: targetOffset });
+  const anchor = pickSceneAnchor(chapter, structure.editionPipeline, {
+    chapterSentiment: shapeResult.sentimentScores[chapter.index],
+    prevSentiment: shapeResult.sentimentScores[chapter.index - 1],
+    nextSentiment: shapeResult.sentimentScores[chapter.index + 1],
+  });
 
-  const scene = buildFallbackScene(chapter, structure, `planned_chapter_${chapter.index}`, {
+  const plannedBeat: InflectionPoint = {
     id: `planned_chapter_${chapter.index}`,
     approximateChapterIndex: chapter.index,
     emotionalShift: macroArc.dominantEmotions.slice(0, 2).join(", ") || "emotional transition",
     significance: 0.35,
     narrativeLabel: chapter.title,
-  });
+  };
+  const scene = buildFallbackScene(
+    chapter,
+    structure,
+    `planned_chapter_${chapter.index}`,
+    plannedBeat,
+    shapeResult
+  );
 
   return {
     ...scene,
     id: `scene_planned_${structure.bookId}_${chapter.id}`,
     inflectionPointId: `planned_chapter_${chapter.index}`,
-    sectionId: anchorSection.id,
+    sectionId: anchor.sectionId,
     anchor: {
       href: chapter.href,
       fragment: chapter.fragment,
       spineIndex: chapter.spineIndex,
-      wordOffset: anchorSection.startWordOffset ?? targetOffset,
+      wordOffset: anchor.wordOffset,
     },
     narrativeWeight: 0.35,
     imageDescription: buildFallbackDescription(scene, macroArc),
@@ -244,6 +262,7 @@ Respond in JSON: { "dominantEmotions": ["...", "..."], "centralThemes": ["...", 
 async function identifyScenes(
   structure: BookStructure,
   macroArc: MacroArc,
+  shapeResult: StoryShapeResult,
   apiKey: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<IdentifiedScene[]> {
@@ -262,19 +281,19 @@ async function identifyScenes(
       total: totalScenes,
       itemLabel: openingChapter.title,
     });
-    const scene = await identifyOpeningScene(openingChapter, structure, apiKey).catch((err) => {
+    const scene = await identifyOpeningScene(openingChapter, structure, shapeResult, apiKey).catch((err) => {
       console.warn("[Semantic] Opening scene identification failed, using fallback:", err);
-      return buildFallbackScene(openingChapter, structure, "opening");
+      return buildFallbackScene(openingChapter, structure, "opening", undefined, shapeResult);
     });
     scenes.push(scene);
-    usedSlotKeys.add(visualSlotKey(openingChapter));
+    usedSlotKeys.add(openingChapter.id);
   }
 
-  // One scene per inflection — never a second beat on the same EPUB HTML section.
+  // One inflection scene per parser chapter.
   for (let i = 0; i < macroArc.inflectionPoints.length; i++) {
     const point = macroArc.inflectionPoints[i];
     const chapter = structure.chapters[point.approximateChapterIndex];
-    if (!chapter || usedSlotKeys.has(visualSlotKey(chapter))) continue;
+    if (!chapter || usedSlotKeys.has(chapter.id)) continue;
     onProgress?.({
       phase: "scenes",
       message: `Finding key scene ${i + 1} of ${macroArc.inflectionPoints.length}…`,
@@ -284,12 +303,12 @@ async function identifyScenes(
       itemLabel: chapter.title,
     });
 
-    const scene = await identifySceneForInflection(chapter, point, structure, apiKey).catch((err) => {
+    const scene = await identifySceneForInflection(chapter, point, structure, shapeResult, apiKey).catch((err) => {
       console.warn("[Semantic] Inflection scene identification failed, using fallback:", err);
-      return buildFallbackScene(chapter, structure, point.id, point);
+      return buildFallbackScene(chapter, structure, point.id, point, shapeResult);
     });
     scenes.push(scene);
-    usedSlotKeys.add(visualSlotKey(chapter));
+    usedSlotKeys.add(chapter.id);
   }
 
   return scenes;
@@ -299,16 +318,17 @@ function buildFallbackScene(
   chapter: BookStructure["chapters"][0],
   structure: BookStructure,
   inflectionPointId: string,
-  inflectionPoint?: InflectionPoint
+  inflectionPoint?: InflectionPoint,
+  shapeResult?: StoryShapeResult
 ): IdentifiedScene {
-  const targetOffset = inflectionPoint
-    ? Math.floor(chapter.wordCount * 0.35)
-    : 0;
-  const anchorSection = chapter.sections.reduce((best, section) => {
-    const bestDist = Math.abs((best.startWordOffset ?? 0) - targetOffset);
-    const sectionDist = Math.abs((section.startWordOffset ?? 0) - targetOffset);
-    return sectionDist < bestDist ? section : best;
-  }, chapter.sections[0] ?? { id: chapter.id, startWordOffset: targetOffset });
+  const anchor = pickSceneAnchor(chapter, structure.editionPipeline, {
+    atOpening: inflectionPointId === "opening",
+    inflectionPoint,
+    chapterSentiment: shapeResult?.sentimentScores[chapter.index],
+    prevSentiment: shapeResult?.sentimentScores[chapter.index - 1],
+    nextSentiment: shapeResult?.sentimentScores[chapter.index + 1],
+    standardRatio: inflectionPoint ? 0.35 : 0,
+  });
 
   const text = (chapter.rawText || "").toLowerCase();
   const emotionalVector = [
@@ -332,13 +352,13 @@ function buildFallbackScene(
         : `scene_${inflectionPointId}_${chapter.id}`,
     inflectionPointId,
     chapterId: chapter.id,
-    sectionId: anchorSection.id,
+    sectionId: anchor.sectionId,
     anchorCfi: "",
     anchor: {
       href: chapter.href,
       fragment: chapter.fragment,
       spineIndex: chapter.spineIndex,
-      wordOffset: anchorSection.startWordOffset ?? targetOffset,
+      wordOffset: anchor.wordOffset,
     },
     emotionalVector,
     symbolicMotifs,
@@ -350,6 +370,7 @@ function buildFallbackScene(
 async function identifyOpeningScene(
   chapter: BookStructure["chapters"][0],
   structure: BookStructure,
+  shapeResult: StoryShapeResult,
   apiKey: string
 ): Promise<IdentifiedScene> {
   const text = truncateText(chapter.rawText || "", 500);
@@ -373,17 +394,23 @@ JSON response:
   const raw = await callGemini(prompt, apiKey, 512);
   const parsed = parseJsonResponse<Partial<IdentifiedScene>>(raw);
 
+  const openingAnchor = pickSceneAnchor(chapter, structure.editionPipeline, {
+    atOpening: true,
+    chapterSentiment: shapeResult.sentimentScores[chapter.index],
+    nextSentiment: shapeResult.sentimentScores[chapter.index + 1],
+  });
+
   return {
     id: `scene_opening_${structure.bookId}_${chapter.id}`,
     inflectionPointId: "opening",
     chapterId: chapter.id,
-    sectionId: chapter.sections[0]?.id ?? chapter.id,
+    sectionId: openingAnchor.sectionId,
     anchorCfi: "",
     anchor: {
       href: chapter.href,
       fragment: chapter.fragment,
       spineIndex: chapter.spineIndex,
-      wordOffset: 0,
+      wordOffset: openingAnchor.wordOffset,
     },
     emotionalVector: (parsed.emotionalVector as string[]) || [],
     symbolicMotifs: (parsed.symbolicMotifs as string[]) || [],
@@ -396,6 +423,7 @@ async function identifySceneForInflection(
   chapter: BookStructure["chapters"][0],
   inflectionPoint: InflectionPoint,
   structure: BookStructure,
+  shapeResult: StoryShapeResult,
   apiKey: string
 ): Promise<IdentifiedScene> {
   const text = truncateText(chapter.rawText || "", 700);
@@ -426,27 +454,25 @@ JSON response:
   const raw = await callGemini(prompt, apiKey, 512);
   const parsed = parseJsonResponse<Partial<IdentifiedScene>>(raw);
 
-  // Anchor to the most emotionally significant section.
-  // Prefer the section at or just past the first third of the chapter —
-  // inflection moments typically build rather than open a chapter.
-  const targetOffset = Math.floor(chapter.wordCount * 0.35);
-  const anchorSection = chapter.sections.reduce((best, s) => {
-    const bDist = Math.abs((best.startWordOffset ?? 0) - targetOffset);
-    const sDist = Math.abs((s.startWordOffset ?? 0) - targetOffset);
-    return sDist < bDist ? s : best;
-  }, chapter.sections[0] ?? { id: chapter.id, startWordOffset: targetOffset });
+  const inflectionAnchor = pickSceneAnchor(chapter, structure.editionPipeline, {
+    inflectionPoint,
+    chapterSentiment: shapeResult.sentimentScores[chapter.index],
+    prevSentiment: shapeResult.sentimentScores[chapter.index - 1],
+    nextSentiment: shapeResult.sentimentScores[chapter.index + 1],
+    standardRatio: 0.35,
+  });
 
   return {
     id: `scene_${inflectionPoint.id}_${chapter.id}`,
     inflectionPointId: inflectionPoint.id,
     chapterId: chapter.id,
-    sectionId: anchorSection.id,
+    sectionId: inflectionAnchor.sectionId,
     anchorCfi: "",
     anchor: {
       href: chapter.href,
       fragment: chapter.fragment,
       spineIndex: chapter.spineIndex,
-      wordOffset: anchorSection.startWordOffset ?? targetOffset,
+      wordOffset: inflectionAnchor.wordOffset,
     },
     emotionalVector: (parsed.emotionalVector as string[]) || [],
     symbolicMotifs: (parsed.symbolicMotifs as string[]) || [],

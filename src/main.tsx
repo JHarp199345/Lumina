@@ -123,7 +123,7 @@ async function ensureFreshBuild(): Promise<void> {
 }
 
 if (!isTauri && import.meta.env.PROD && "serviceWorker" in navigator) {
-  const SW_BUILD = "v7";
+  const SW_BUILD = "v8";
   let refreshing = false;
   let activeRegistration: ServiceWorkerRegistration | null = null;
 

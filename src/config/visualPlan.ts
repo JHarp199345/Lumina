@@ -1,1 +1,1 @@
-export const VISUAL_PLAN_VERSION = 6;
+export const VISUAL_PLAN_VERSION = 8;

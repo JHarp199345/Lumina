@@ -2,8 +2,10 @@
  * Project Gutenberg edition normalization — runs after generic EPUB extraction.
  */
 
-import type { Chapter, Section } from "@/types";
+import type { Chapter } from "@/types";
 import type { EpubImportContext } from "@/pipeline/epubEdition";
+import { countWords } from "@/pipeline/gutenbergBoundaries";
+import { buildGutenbergSections } from "@/pipeline/gutenbergSections";
 
 const GUTENBERG_HTML_MARKERS = [
   /project\s+gutenberg/i,
@@ -34,31 +36,6 @@ const GUTENBERG_BOILERPLATE_START = [
   /^credits?:/i,
   /^transcriber/i,
 ];
-
-function buildSections(text: string, chapterId: string): Section[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const sectionSize = 1200;
-  const sections: Section[] = [];
-
-  for (let i = 0; i < words.length; i += sectionSize) {
-    const sectionWords = words.slice(i, i + sectionSize);
-    const index = Math.floor(i / sectionSize);
-    sections.push({
-      id: `${chapterId}_s${index}`,
-      chapterId,
-      index,
-      wordCount: sectionWords.length,
-      startWordOffset: i,
-      rawText: sectionWords.join(" "),
-    });
-  }
-
-  return sections;
-}
-
-function countWords(text: string): number {
-  return text.split(/\s+/).filter(Boolean).length;
-}
 
 export function detectGutenbergHtml(html: string): boolean {
   const sample = html.slice(0, 12000);
@@ -126,7 +103,7 @@ export function normalizeGutenbergChapters(
         ...chapter,
         rawText,
         wordCount,
-        sections: buildSections(rawText, chapter.id),
+        sections: buildGutenbergSections(rawText, chapter.id),
       };
     })
     .filter((chapter) => chapter.wordCount >= 120)
