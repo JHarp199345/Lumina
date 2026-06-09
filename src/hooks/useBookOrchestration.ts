@@ -115,15 +115,24 @@ export function useBookOrchestration() {
         let { imageCache } = useImageStore.getState();
         const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
         if (Object.keys(imageCache).length === 0) {
-          const dbImages = await storage.loadImages(slice.semanticBookId).catch(() => [] as CachedImage[]);
+          const sceneIdSet = new Set(existingMap.scenes.map((scene) => scene.id));
+          const dbImages = (await storage.loadImages(slice.semanticBookId).catch(() => [] as CachedImage[]))
+            // Only current-generation images enter the cache — orphans from a prior
+            // generation are never loaded, so no view can ever display them.
+            .filter((img) => sceneIdSet.has(img.sceneId));
           const hydrated = hydrateImageWordPositions(dbImages, existingMap.scenes, chapters);
           hydrated.forEach((img) => addToCache(img));
           imageCache = useImageStore.getState().imageCache;
         }
 
         const { wordPosition } = useReaderStore.getState();
-        const cachedImages = Object.values(imageCache);
-        const imageToDisplay = getDisplayImage(cachedImages, wordPosition, chapters);
+        // Scope to the current generation's scenes (single source of truth) so an
+        // orphaned image from a prior generation can never be picked for display.
+        const existingScenesById = new Map(existingMap.scenes.map((scene) => [scene.id, scene]));
+        const cachedImages = Object.values(imageCache).filter((image) =>
+          existingScenesById.has(image.sceneId)
+        );
+        const imageToDisplay = getDisplayImage(cachedImages, wordPosition, chapters, existingScenesById);
 
         if (imageToDisplay) {
           setCurrentImage(imageToDisplay);
@@ -174,8 +183,11 @@ export function useBookOrchestration() {
       if (!semanticMap) return;
 
       const chapters = structure.chapters;
+      const scenesById = new Map(semanticMap.scenes.map((scene) => [scene.id, scene]));
       const persistedImages = await storage.loadImages(slice.semanticBookId).catch(() => [] as CachedImage[]);
-      const hydrated = hydrateImageWordPositions(persistedImages, semanticMap.scenes, chapters);
+      // Only the current generation's images enter the cache / display.
+      const currentGen = persistedImages.filter((image) => scenesById.has(image.sceneId));
+      const hydrated = hydrateImageWordPositions(currentGen, semanticMap.scenes, chapters);
       hydrated.forEach((image) => addToCache(image));
 
       const win = window as Window & { luminaNavigate?: (target: string) => void };
@@ -186,7 +198,7 @@ export function useBookOrchestration() {
       useReaderStore.getState().setWordPosition(0);
       useImageStore.getState().markNavigationJump();
 
-      const imageToDisplay = getDisplayImage(hydrated, 0, chapters);
+      const imageToDisplay = getDisplayImage(hydrated, 0, chapters, scenesById);
       if (imageToDisplay) {
         setCurrentImage(imageToDisplay);
         setCurrentThemes(imageToDisplay.emotionalThemes);

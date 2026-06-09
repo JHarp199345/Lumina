@@ -76,9 +76,26 @@ export function useImageTrigger() {
     if (!activeSemanticMap || !activeBook) return;
 
     const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
-    const cachedImages = Object.values(useImageStore.getState().imageCache);
-    const current = useImageStore.getState().currentImage;
+
+    // SINGLE SOURCE OF TRUTH: only images belonging to the CURRENT generation may
+    // govern the display — the same scene-membership scope the gallery uses. Without
+    // this, an orphaned image from a prior generation (e.g. an expository diagram from
+    // a wrong classification) could win by raw word position and show in the reader
+    // while the gallery showed a different, current image.
+    const currentSceneIds = new Set(activeSemanticMap.scenes.map((scene) => scene.id));
+    const allCached = Object.values(useImageStore.getState().imageCache);
+    const cachedImages = allCached.filter((image) => currentSceneIds.has(image.sceneId));
+
+    let current = useImageStore.getState().currentImage;
     const readerPos = useReaderStore.getState().wordPosition;
+
+    // If the currently displayed image is an orphan from a prior generation, drop it
+    // immediately so it can never linger in any view.
+    if (current && !currentSceneIds.has(current.sceneId)) {
+      setCurrentImage(null);
+      setCurrentThemes([]);
+      current = null;
+    }
 
     const displayImage = getDisplayImage(cachedImages, readerPos, chapters);
     const governingImage = getGoverningImage(cachedImages, readerPos, chapters);

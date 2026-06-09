@@ -33,6 +33,10 @@ export function getGoverningImage(
   let bestPos = -1;
 
   for (const image of images) {
+    // When a current-generation scene map is provided, it is authoritative: an image
+    // whose scene is not in the current generation is an orphan and must never govern
+    // the display (prevents a prior generation's art from leaking into the reader).
+    if (scenesById && !scenesById.has(image.sceneId)) continue;
     const scene = scenesById?.get(image.sceneId);
     const pos = resolveImageWordPosition(image, chapters, scene);
     if (pos < 0) continue;
@@ -56,6 +60,7 @@ export function getPreviewImage(
   let bestPos = Infinity;
 
   for (const image of images) {
+    if (scenesById && !scenesById.has(image.sceneId)) continue;
     const scene = scenesById?.get(image.sceneId);
     const pos = resolveImageWordPosition(image, chapters, scene);
     if (pos < 0 || pos <= wordPosition) continue;

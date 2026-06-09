@@ -331,9 +331,17 @@ export function useEpubImport() {
       if (semanticMap) setActiveSemanticMap(semanticMap);
       if (seedId) setActiveStyleSeed(seedId);
       loadAnnotations(highlights, notes);
-      const hydratedImages = semanticMap && structure
-        ? hydrateImageWordPositions(cachedImages, semanticMap.scenes, structure.chapters)
+      // SINGLE SOURCE OF TRUTH: when a current analysis exists, only its own scenes'
+      // images may enter the cache / display. This prevents an orphaned image from a
+      // prior generation (e.g. an expository diagram from a wrong classification) from
+      // being shown in the reader while the gallery shows a different, current image.
+      const currentSceneIds = semanticMap ? new Set(semanticMap.scenes.map((s) => s.id)) : null;
+      const scopedImages = currentSceneIds
+        ? cachedImages.filter((img) => currentSceneIds.has(img.sceneId))
         : cachedImages;
+      const hydratedImages = semanticMap && structure
+        ? hydrateImageWordPositions(scopedImages, semanticMap.scenes, structure.chapters)
+        : scopedImages;
       hydratedImages.forEach((img) => addToCache(img));
       // Mount this book's Study Guide (PLANv) — opt-in artifact, may be null.
       useStudyStore.getState().mount(book.id, studyGuide);
@@ -351,8 +359,9 @@ export function useEpubImport() {
         const progressPercent = progress?.percentComplete ?? 0;
         const estimatedWordPos = totalWords > 0 ? (totalWords * progressPercent) / 100 : 0;
 
+        const scenesById = semanticMap ? new Map(semanticMap.scenes.map((s) => [s.id, s])) : undefined;
         let imageToDisplay = chapters.length > 0
-          ? getDisplayImage(hydratedImages, estimatedWordPos, chapters)
+          ? getDisplayImage(hydratedImages, estimatedWordPos, chapters, scenesById)
           : null;
 
         // Fallback: no position-matched image — show the most recently generated.
