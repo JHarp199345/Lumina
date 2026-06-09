@@ -47,7 +47,9 @@ export default function LibraryPanel({
   };
 
   const handleDelete = async (bookId: string) => {
-    await storage.deleteAllBookData(bookId);
+    const book = library.find((entry) => entry.id === bookId);
+    if (!book) return;
+    await storage.archiveAndRemoveBook(book);
     removeBook(bookId);
     if (activeBook?.id === bookId) unmountActiveBook();
     setConfirmDelete(null);
@@ -183,7 +185,7 @@ export default function LibraryPanel({
                         onClick={() => handleDelete(book.id)}
                         className="text-xs text-red-300 transition hover:text-red-200"
                       >
-                        Delete
+                        Archive
                       </button>
                       <button
                         type="button"
@@ -198,8 +200,8 @@ export default function LibraryPanel({
                       type="button"
                       onClick={() => setConfirmDelete(book.id)}
                       className="rounded-md p-2 text-ink-faint transition hover:bg-red-400/8 hover:text-red-300"
-                      aria-label={`Remove ${book.title}`}
-                      title="Remove book"
+                      aria-label={`Archive ${book.title}`}
+                      title="Remove from library (artifacts go to Archive)"
                     >
                       <Trash2 size={14} />
                     </button>

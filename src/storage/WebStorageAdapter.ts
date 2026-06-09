@@ -30,6 +30,7 @@ import type {
   StudyFlashcard,
   AudioArtifact,
   PresentationDeck,
+  ArchiveBook,
 } from "@/types";
 import {
   STORES,
@@ -40,6 +41,12 @@ import {
   dbGetByIndex,
   dbDeleteByIndex,
 } from "./webDb";
+import { matchesBookScope } from "./bookScope";
+import {
+  archiveIsEmpty,
+  materializeNoteExcerpts,
+  type ArchiveCategory,
+} from "./archiveOps";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -430,24 +437,216 @@ export class WebStorageAdapter implements StorageAdapter {
     localStorage.removeItem(`lk_${name}`);
   }
 
-  // ── Bulk delete ──────────────────────────────────────────────────────────
+  // ── Archive ──────────────────────────────────────────────────────────────
 
-  async deleteAllBookData(bookId: string): Promise<void> {
+  private async _saveArchiveEntry(
+    bookId: string,
+    title: string,
+    author: string,
+    counts: Omit<ArchiveBook, "bookId" | "title" | "author" | "archivedAt"> & { archivedAt?: string }
+  ): Promise<void> {
+    const existing = await dbGet<ArchiveBook>(STORES.ARCHIVE_BOOKS, bookId);
+    const entry: ArchiveBook = {
+      bookId,
+      title,
+      author,
+      archivedAt: counts.archivedAt ?? existing?.archivedAt ?? new Date().toISOString(),
+      audioCount: counts.audioCount,
+      imageCount: counts.imageCount,
+      noteCount: counts.noteCount,
+      presentationCount: counts.presentationCount,
+      badgeCount: counts.badgeCount,
+    };
+    if (archiveIsEmpty(entry)) {
+      await dbDelete(STORES.ARCHIVE_BOOKS, bookId).catch(() => {});
+      return;
+    }
+    await dbPut(STORES.ARCHIVE_BOOKS, entry, bookId);
+  }
+
+  private async _archiveCounts(bookId: string) {
+    const [audio, images, notes, presentations, badges] = await Promise.all([
+      this.loadAudioArtifacts(bookId),
+      this.loadImagesForPrefix(bookId),
+      this.loadNotes(bookId),
+      this.loadPresentations(bookId),
+      this.loadStudyBadgeAwards(bookId),
+    ]);
+    return {
+      audioCount: audio.length,
+      imageCount: images.length,
+      noteCount: notes.length,
+      presentationCount: presentations.length,
+      badgeCount: badges.length,
+    };
+  }
+
+  private async _materializeNotesForArchive(bookId: string): Promise<void> {
+    const [notes, highlights] = await Promise.all([
+      this.loadNotes(bookId),
+      this.loadHighlights(bookId),
+    ]);
+    const materialized = materializeNoteExcerpts(notes, highlights);
+    await Promise.all(
+      materialized.map((note, index) => {
+        if (note.sourceExcerpt === notes[index]?.sourceExcerpt) return Promise.resolve();
+        return this.saveNote(note);
+      })
+    );
+    await dbDeleteByIndex(STORES.HIGHLIGHTS, "bookId", bookId);
+  }
+
+  async archiveAndRemoveBook(book: Book): Promise<void> {
+    const bookId = book.id;
+    await this._materializeNotesForArchive(bookId);
+    const counts = await this._archiveCounts(bookId);
+    await this._saveArchiveEntry(book.id, book.title, book.author, counts);
+
+    const semanticMaps = await dbGetAll<SemanticMap>(STORES.SEMANTIC_MAPS);
+    await Promise.all(
+      semanticMaps
+        .filter((map) => matchesBookScope(map.bookId, bookId))
+        .map((map) => dbDelete(STORES.SEMANTIC_MAPS, map.bookId))
+    );
+
+    const profiles = await dbGetAll<SourceIntelligenceProfile>(STORES.SOURCE_PROFILES);
+    await Promise.all(
+      profiles
+        .filter((profile) => matchesBookScope(profile.bookId, bookId))
+        .map((profile) => dbDelete(STORES.SOURCE_PROFILES, profile.bookId))
+    );
+
     await Promise.allSettled([
       dbDelete(STORES.BOOKS, bookId),
       dbDelete(STORES.BOOK_STRUCTURES, bookId),
       dbDelete(STORES.EPUBS, bookId),
       dbDelete(STORES.PROGRESS, bookId),
-      dbDeleteByIndex(STORES.HIGHLIGHTS, "bookId", bookId),
-      dbDelete(STORES.SEMANTIC_MAPS, bookId),
       dbDelete(STORES.STUDY_GUIDES, bookId),
       dbDeleteByIndex(STORES.STUDY_QUIZZES, "bookId", bookId),
       dbDeleteByIndex(STORES.STUDY_ATTEMPTS, "bookId", bookId),
       dbDeleteByIndex(STORES.STUDY_FLASHCARDS, "bookId", bookId),
-      this.deleteAudioArtifacts(bookId),
-      this.deletePresentations(bookId),
       dbDelete(STORES.BOOK_SETTINGS, bookId),
+    ]);
+  }
+
+  async loadArchiveBooks(): Promise<ArchiveBook[]> {
+    const books = await dbGetAll<ArchiveBook>(STORES.ARCHIVE_BOOKS);
+    return books.sort(
+      (a, b) => new Date(b.archivedAt).getTime() - new Date(a.archivedAt).getTime()
+    );
+  }
+
+  async syncArchiveEntry(bookId: string): Promise<void> {
+    const existing = await dbGet<ArchiveBook>(STORES.ARCHIVE_BOOKS, bookId);
+    if (!existing) return;
+    const counts = await this._archiveCounts(bookId);
+    await this._saveArchiveEntry(bookId, existing.title, existing.author, {
+      ...counts,
+      archivedAt: existing.archivedAt,
+    });
+  }
+
+  async purgeArchive(bookId: string): Promise<void> {
+    await Promise.allSettled([
+      dbDeleteByIndex(STORES.HIGHLIGHTS, "bookId", bookId),
+      dbDeleteByIndex(STORES.NOTES, "bookId", bookId),
+      dbDeleteByIndex(STORES.STUDY_BADGES, "bookId", bookId),
+      this.deletePresentations(bookId),
+      this.deleteAudioArtifacts(bookId),
       this.deleteImages(bookId),
+      dbDelete(STORES.ARCHIVE_BOOKS, bookId),
+    ]);
+  }
+
+  async purgeArchiveCategory(bookId: string, category: ArchiveCategory): Promise<void> {
+    switch (category) {
+      case "audio":
+        await this.deleteAudioArtifacts(bookId);
+        break;
+      case "images":
+        await this.deleteImages(bookId);
+        break;
+      case "notes":
+        await dbDeleteByIndex(STORES.NOTES, "bookId", bookId);
+        break;
+      case "presentations":
+        await this.deletePresentations(bookId);
+        break;
+      case "badges":
+        await dbDeleteByIndex(STORES.STUDY_BADGES, "bookId", bookId);
+        break;
+    }
+    await this.syncArchiveEntry(bookId);
+  }
+
+  async purgeAllArchives(): Promise<void> {
+    const books = await this.loadArchiveBooks();
+    await Promise.all(books.map((book) => this.purgeArchive(book.bookId)));
+  }
+
+  async deleteArchivedAudio(audioId: string): Promise<void> {
+    const meta = await dbGet<AudioArtifact>(STORES.AUDIO_META, audioId);
+    if (!meta) return;
+    await dbDelete(STORES.AUDIO_META, audioId);
+    await dbDelete(STORES.AUDIO_BLOBS, audioId).catch(() => {});
+    await this.syncArchiveEntry(meta.bookId);
+  }
+
+  async deleteArchivedImage(imageId: string, sceneId: string): Promise<void> {
+    const meta = await dbGet<CachedImage>(STORES.IMAGE_META, imageId);
+    if (!meta) return;
+    await dbDelete(STORES.IMAGE_META, imageId);
+    await dbDelete(STORES.IMAGE_BLOBS, sceneId).catch(() => {});
+    await this.syncArchiveEntry(meta.bookId);
+  }
+
+  async deleteArchivedNote(noteId: string): Promise<void> {
+    const note = await dbGet<Note>(STORES.NOTES, noteId);
+    if (!note) return;
+    await this.deleteNote(noteId);
+    await this.syncArchiveEntry(note.bookId);
+  }
+
+  async deleteArchivedPresentation(deckId: string): Promise<void> {
+    const deck = await dbGet<PresentationDeck>(STORES.PRESENTATIONS, deckId);
+    if (!deck) return;
+    await dbDelete(STORES.PRESENTATIONS, deckId);
+    await this.syncArchiveEntry(deck.bookId);
+  }
+
+  async deleteArchivedBadge(badgeId: string): Promise<void> {
+    const badge = await dbGet<StudyBadgeAward>(STORES.STUDY_BADGES, badgeId);
+    if (!badge) return;
+    await dbDelete(STORES.STUDY_BADGES, badgeId);
+    await this.syncArchiveEntry(badge.bookId);
+  }
+
+  // ── Bulk delete ──────────────────────────────────────────────────────────
+
+  async deleteAllBookData(bookId: string): Promise<void> {
+    await this.purgeArchive(bookId).catch(() => {});
+    const semanticMaps = await dbGetAll<SemanticMap>(STORES.SEMANTIC_MAPS);
+    await Promise.all(
+      semanticMaps
+        .filter((map) => matchesBookScope(map.bookId, bookId))
+        .map((map) => dbDelete(STORES.SEMANTIC_MAPS, map.bookId))
+    );
+    const profiles = await dbGetAll<SourceIntelligenceProfile>(STORES.SOURCE_PROFILES);
+    await Promise.all(
+      profiles
+        .filter((profile) => matchesBookScope(profile.bookId, bookId))
+        .map((profile) => dbDelete(STORES.SOURCE_PROFILES, profile.bookId))
+    );
+    await Promise.allSettled([
+      dbDelete(STORES.BOOKS, bookId),
+      dbDelete(STORES.BOOK_STRUCTURES, bookId),
+      dbDelete(STORES.EPUBS, bookId),
+      dbDelete(STORES.PROGRESS, bookId),
+      dbDelete(STORES.STUDY_GUIDES, bookId),
+      dbDeleteByIndex(STORES.STUDY_QUIZZES, "bookId", bookId),
+      dbDeleteByIndex(STORES.STUDY_ATTEMPTS, "bookId", bookId),
+      dbDeleteByIndex(STORES.STUDY_FLASHCARDS, "bookId", bookId),
+      dbDelete(STORES.BOOK_SETTINGS, bookId),
     ]);
   }
 

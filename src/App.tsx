@@ -25,6 +25,7 @@ import SeedPicker from "@/components/visual/SeedPicker";
 import OnboardingModal from "@/components/common/OnboardingModal";
 import SettingsPanel from "@/components/common/SettingsPanel";
 import LibraryPanel from "@/components/common/LibraryPanel";
+import ArchivePanel from "@/components/common/ArchivePanel";
 import GlobalProgressOverlay from "@/components/common/GlobalProgressOverlay";
 import GalleryFocalView from "@/components/visual/GalleryFocalView";
 import VisualDebugOverlay from "@/components/debug/VisualDebugOverlay";
@@ -78,6 +79,7 @@ function App() {
   const { isTablet, isPhone, isPortrait } = useDeviceLayout();
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
   const [importProgress, setImportProgress] = useState("");
   const [importDetails, setImportDetails] = useState<string[]>([]);
   const [importFailed, setImportFailed] = useState(false);
@@ -364,6 +366,7 @@ function App() {
         <SideRail
           onImport={handleImport}
           onLibraryOpen={() => setShowLibrary(true)}
+          onArchiveOpen={() => setShowArchive(true)}
           isTablet={isTablet}
           isPhone={isPhone}
           tocOpen={tabletTocOpen}
@@ -459,6 +462,7 @@ function App() {
           }}
         />
       )}
+      {showArchive && <ArchivePanel onClose={() => setShowArchive(false)} />}
       {visualDebugEnabled && <VisualDebugOverlay />}
 
       {galleryOpen && (

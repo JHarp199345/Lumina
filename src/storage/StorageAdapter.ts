@@ -10,6 +10,7 @@
  * directly — route everything through `import { storage } from "@/storage"`.
  */
 
+import type { ArchiveCategory } from "./archiveOps";
 import type {
   Book,
   BookStructure,
@@ -28,6 +29,7 @@ import type {
   StudyFlashcard,
   AudioArtifact,
   PresentationDeck,
+  ArchiveBook,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -154,6 +156,22 @@ export interface StorageAdapter {
   saveApiKey(name: string, value: string): Promise<void>;
   loadApiKey(name: string): Promise<string | null>;
   deleteApiKey(name: string): Promise<void>;
+
+  // ── Archive ───────────────────────────────────────────────────────────────
+
+  /** Move generated artifacts to the archive and remove the book from the library. */
+  archiveAndRemoveBook(book: Book): Promise<void>;
+  loadArchiveBooks(): Promise<ArchiveBook[]>;
+  /** Permanently delete archived artifacts and the archive entry for a book. */
+  purgeArchive(bookId: string): Promise<void>;
+  purgeArchiveCategory(bookId: string, category: ArchiveCategory): Promise<void>;
+  purgeAllArchives(): Promise<void>;
+  syncArchiveEntry(bookId: string): Promise<void>;
+  deleteArchivedAudio(audioId: string): Promise<void>;
+  deleteArchivedImage(imageId: string, sceneId: string): Promise<void>;
+  deleteArchivedNote(noteId: string): Promise<void>;
+  deleteArchivedPresentation(deckId: string): Promise<void>;
+  deleteArchivedBadge(badgeId: string): Promise<void>;
 
   // ── Bulk delete ───────────────────────────────────────────────────────────
 

@@ -24,6 +24,7 @@ import type {
   StudyFlashcard,
   AudioArtifact,
   PresentationDeck,
+  ArchiveBook,
 } from "@/types";
 
 let _db: Database | null = null;
@@ -202,6 +203,23 @@ async function initSchema(db: Database): Promise<void> {
       panel_layout TEXT
     );
   `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS archive_books (
+      book_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL,
+      archived_at TEXT NOT NULL,
+      audio_count INTEGER NOT NULL DEFAULT 0,
+      image_count INTEGER NOT NULL DEFAULT 0,
+      note_count INTEGER NOT NULL DEFAULT 0,
+      presentation_count INTEGER NOT NULL DEFAULT 0,
+      highlight_count INTEGER NOT NULL DEFAULT 0,
+      badge_count INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  await db.execute(`ALTER TABLE archive_books ADD COLUMN badge_count INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+  await db.execute(`ALTER TABLE notes ADD COLUMN source_excerpt TEXT`).catch(() => {});
 }
 
 // ─── Books ────────────────────────────────────────────────────────────────────
@@ -383,13 +401,14 @@ export async function dbUpdateHighlightColor(highlightId: string, color: string)
 export async function dbSaveNote(note: Note): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT OR REPLACE INTO notes (id, highlight_id, book_id, note_text, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT OR REPLACE INTO notes (id, highlight_id, book_id, note_text, source_excerpt, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       note.id,
       note.highlightId,
       note.bookId,
       note.noteText,
+      note.sourceExcerpt ?? null,
       note.createdAt,
       note.updatedAt,
     ]
@@ -407,9 +426,26 @@ export async function dbLoadNotes(bookId: string): Promise<Note[]> {
     highlightId: String(row.highlight_id),
     bookId: String(row.book_id),
     noteText: String(row.note_text),
+    ...(row.source_excerpt ? { sourceExcerpt: String(row.source_excerpt) } : {}),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   }));
+}
+
+export async function dbLoadNoteById(noteId: string): Promise<Note | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(`SELECT * FROM notes WHERE id = $1`, [noteId]);
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  return {
+    id: String(row.id),
+    highlightId: String(row.highlight_id),
+    bookId: String(row.book_id),
+    noteText: String(row.note_text),
+    ...(row.source_excerpt ? { sourceExcerpt: String(row.source_excerpt) } : {}),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
 }
 
 export async function dbUpdateNote(noteId: string, text: string): Promise<void> {
@@ -789,6 +825,153 @@ export async function dbLoadBookStyleSeed(bookId: string): Promise<StyleSeedId |
   );
   if (rows.length === 0 || !rows[0].style_seed) return null;
   return String(rows[0].style_seed) as StyleSeedId;
+}
+
+// ─── Archive ──────────────────────────────────────────────────────────────────
+
+export async function dbSaveArchiveBook(entry: ArchiveBook): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO archive_books
+     (book_id, title, author, archived_at, audio_count, image_count, note_count, presentation_count, badge_count)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      entry.bookId,
+      entry.title,
+      entry.author,
+      entry.archivedAt,
+      entry.audioCount,
+      entry.imageCount,
+      entry.noteCount,
+      entry.presentationCount,
+      entry.badgeCount,
+    ]
+  );
+}
+
+export async function dbLoadArchiveBooks(): Promise<ArchiveBook[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM archive_books ORDER BY archived_at DESC`
+  );
+  return rows.map((row) => ({
+    bookId: String(row.book_id),
+    title: String(row.title),
+    author: String(row.author),
+    archivedAt: String(row.archived_at),
+    audioCount: Number(row.audio_count ?? 0),
+    imageCount: Number(row.image_count ?? 0),
+    noteCount: Number(row.note_count ?? 0),
+    presentationCount: Number(row.presentation_count ?? 0),
+    badgeCount: Number(row.badge_count ?? 0),
+  }));
+}
+
+export async function dbDeleteArchiveBook(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM archive_books WHERE book_id = $1`, [bookId]);
+}
+
+/** Remove reading/analysis data but keep archived artifacts (audio, images, notes, presentations, badges). */
+export async function dbArchiveAndRemoveBook(bookId: string): Promise<void> {
+  const db = await getDb();
+  const segmentPrefix = `${bookId}::%`;
+  await db.execute(`DELETE FROM books WHERE id = $1`, [bookId]);
+  await db.execute(`DELETE FROM book_structures WHERE book_id = $1`, [bookId]);
+  await db.execute(`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]);
+  await db.execute(`DELETE FROM highlights WHERE book_id = $1`, [bookId]);
+  await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM source_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_quiz_attempts WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_flashcards WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+}
+
+/** Permanently delete every artifact row for a book (archive purge). */
+export async function dbPurgeArchivedArtifacts(bookId: string): Promise<void> {
+  const db = await getDb();
+  const segmentPrefix = `${bookId}::%`;
+  await db.execute(`DELETE FROM highlights WHERE book_id = $1`, [bookId]);
+  await db.execute(`DELETE FROM notes WHERE book_id = $1`, [bookId]);
+  await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM audio_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM presentations WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM study_badges WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM archive_books WHERE book_id = $1`, [bookId]);
+}
+
+export async function dbLoadStudyBadgeAwardById(badgeId: string): Promise<StudyBadgeAward | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT badge_json FROM study_badges WHERE id = $1`,
+    [badgeId]
+  );
+  if (rows.length === 0) return null;
+  try {
+    return JSON.parse(String(rows[0].badge_json)) as StudyBadgeAward;
+  } catch {
+    return null;
+  }
+}
+
+export async function dbDeleteStudyBadgeAward(badgeId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM study_badges WHERE id = $1`, [badgeId]);
+}
+
+export async function dbLoadPresentationDeckById(deckId: string): Promise<PresentationDeck | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT deck_json FROM presentations WHERE id = $1`,
+    [deckId]
+  );
+  if (rows.length === 0) return null;
+  try {
+    return JSON.parse(String(rows[0].deck_json)) as PresentationDeck;
+  } catch {
+    return null;
+  }
+}
+
+export async function dbDeletePresentationDeck(deckId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM presentations WHERE id = $1`, [deckId]);
+}
+
+export async function dbLoadAudioArtifactById(audioId: string): Promise<AudioArtifact | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT audio_json FROM audio_cache WHERE id = $1`,
+    [audioId]
+  );
+  if (rows.length === 0) return null;
+  try {
+    return JSON.parse(String(rows[0].audio_json)) as AudioArtifact;
+  } catch {
+    return null;
+  }
+}
+
+export async function dbDeleteAudioArtifact(audioId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM audio_cache WHERE id = $1`, [audioId]);
+}
+
+export async function dbLoadCachedImageById(imageId: string): Promise<CachedImage | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM image_cache WHERE id = $1`,
+    [imageId]
+  );
+  if (rows.length === 0) return null;
+  return rowToCachedImage(rows[0]);
+}
+
+export async function dbDeleteCachedImage(imageId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM image_cache WHERE id = $1`, [imageId]);
 }
 
 // ─── Bulk delete ──────────────────────────────────────────────────────────────

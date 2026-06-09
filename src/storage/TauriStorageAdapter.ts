@@ -28,6 +28,7 @@ import type {
   StudyFlashcard,
   AudioArtifact,
   PresentationDeck,
+  ArchiveBook,
 } from "@/types";
 import {
   openEpubDialog,
@@ -88,7 +89,26 @@ import {
   dbLoadImageCacheForBookPrefix,
   dbDeleteImageCache,
   dbDeleteAllBookData,
+  dbSaveArchiveBook,
+  dbLoadArchiveBooks,
+  dbDeleteArchiveBook,
+  dbArchiveAndRemoveBook,
+  dbPurgeArchivedArtifacts,
+  dbDeleteStudyBadgeAward,
+  dbDeletePresentationDeck,
+  dbDeleteAudioArtifact,
+  dbDeleteCachedImage,
+  dbLoadAudioArtifactById,
+  dbLoadCachedImageById,
+  dbLoadNoteById,
+  dbLoadPresentationDeckById,
+  dbLoadStudyBadgeAwardById,
 } from "@/services/db";
+import {
+  archiveIsEmpty,
+  materializeNoteExcerpts,
+  type ArchiveCategory,
+} from "./archiveOps";
 import { LUMINA_CONFIG } from "@/config";
 
 export class TauriStorageAdapter implements StorageAdapter {
@@ -346,17 +366,174 @@ export class TauriStorageAdapter implements StorageAdapter {
     await deleteApiKey(name);
   }
 
-  // ── Bulk delete ──────────────────────────────────────────────────────────
+  // ── Archive ──────────────────────────────────────────────────────────────
 
-  async deleteAllBookData(bookId: string): Promise<void> {
-    await dbDeleteAllBookData(bookId);
+  private async _archiveCounts(bookId: string) {
+    const [audio, images, notes, presentations, badges] = await Promise.all([
+      this.loadAudioArtifacts(bookId),
+      this.loadImagesForPrefix(bookId),
+      this.loadNotes(bookId),
+      this.loadPresentations(bookId),
+      this.loadStudyBadgeAwards(bookId),
+    ]);
+    return {
+      audioCount: audio.length,
+      imageCount: images.length,
+      noteCount: notes.length,
+      presentationCount: presentations.length,
+      badgeCount: badges.length,
+    };
+  }
+
+  private async _saveArchiveEntry(
+    bookId: string,
+    title: string,
+    author: string,
+    counts: Omit<ArchiveBook, "bookId" | "title" | "author" | "archivedAt"> & { archivedAt?: string }
+  ): Promise<void> {
+    const existing = (await dbLoadArchiveBooks()).find((entry) => entry.bookId === bookId);
+    const entry: ArchiveBook = {
+      bookId,
+      title,
+      author,
+      archivedAt: counts.archivedAt ?? existing?.archivedAt ?? new Date().toISOString(),
+      audioCount: counts.audioCount,
+      imageCount: counts.imageCount,
+      noteCount: counts.noteCount,
+      presentationCount: counts.presentationCount,
+      badgeCount: counts.badgeCount,
+    };
+    if (archiveIsEmpty(entry)) {
+      await dbDeleteArchiveBook(bookId).catch(() => {});
+      return;
+    }
+    await dbSaveArchiveBook(entry);
+  }
+
+  private async _materializeNotesForArchive(bookId: string): Promise<void> {
+    const [notes, highlights] = await Promise.all([
+      this.loadNotes(bookId),
+      this.loadHighlights(bookId),
+    ]);
+    const materialized = materializeNoteExcerpts(notes, highlights);
+    await Promise.all(
+      materialized.map((note, index) => {
+        if (note.sourceExcerpt === notes[index]?.sourceExcerpt) return Promise.resolve();
+        return this.saveNote(note);
+      })
+    );
+    await Promise.all(highlights.map((highlight) => this.deleteHighlight(highlight.id)));
+  }
+
+  async archiveAndRemoveBook(book: Book): Promise<void> {
+    const bookId = book.id;
+    await this._materializeNotesForArchive(bookId);
+    const counts = await this._archiveCounts(bookId);
+    await this._saveArchiveEntry(bookId, book.title, book.author, counts);
+    await dbArchiveAndRemoveBook(bookId);
+
+    const appDataDir = await getAppDataDir().catch(() => "");
+    if (appDataDir) {
+      await deleteDirectory(`${appDataDir}/books/${bookId}`).catch(() => {});
+    }
+  }
+
+  async loadArchiveBooks(): Promise<ArchiveBook[]> {
+    return dbLoadArchiveBooks();
+  }
+
+  async syncArchiveEntry(bookId: string): Promise<void> {
+    const existing = (await dbLoadArchiveBooks()).find((entry) => entry.bookId === bookId);
+    if (!existing) return;
+    const counts = await this._archiveCounts(bookId);
+    await this._saveArchiveEntry(bookId, existing.title, existing.author, {
+      ...counts,
+      archivedAt: existing.archivedAt,
+    });
+  }
+
+  async purgeArchive(bookId: string): Promise<void> {
+    await dbPurgeArchivedArtifacts(bookId);
     const appDataDir = await getAppDataDir().catch(() => "");
     if (appDataDir) {
       await Promise.allSettled([
-        deleteDirectory(`${appDataDir}/books/${bookId}`),
         deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.IMAGE_CACHE_DIR}/${bookId}`),
         deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.AUDIO_CACHE_DIR}/${bookId}`),
       ]);
+    }
+  }
+
+  async purgeArchiveCategory(bookId: string, category: ArchiveCategory): Promise<void> {
+    switch (category) {
+      case "audio":
+        await this.deleteAudioArtifacts(bookId);
+        break;
+      case "images":
+        await this.deleteImages(bookId);
+        break;
+      case "notes":
+        await Promise.all((await this.loadNotes(bookId)).map((note) => this.deleteNote(note.id)));
+        break;
+      case "presentations":
+        await this.deletePresentations(bookId);
+        break;
+      case "badges":
+        await Promise.all(
+          (await this.loadStudyBadgeAwards(bookId)).map((badge) => dbDeleteStudyBadgeAward(badge.id))
+        );
+        break;
+    }
+    await this.syncArchiveEntry(bookId);
+  }
+
+  async purgeAllArchives(): Promise<void> {
+    const books = await this.loadArchiveBooks();
+    await Promise.all(books.map((book) => this.purgeArchive(book.bookId)));
+  }
+
+  async deleteArchivedAudio(audioId: string): Promise<void> {
+    const meta = await dbLoadAudioArtifactById(audioId);
+    if (!meta) return;
+    await dbDeleteAudioArtifact(audioId);
+    await this.syncArchiveEntry(meta.bookId);
+  }
+
+  async deleteArchivedImage(imageId: string, _sceneId: string): Promise<void> {
+    const meta = await dbLoadCachedImageById(imageId);
+    if (!meta) return;
+    await dbDeleteCachedImage(imageId);
+    await this.syncArchiveEntry(meta.bookId);
+  }
+
+  async deleteArchivedNote(noteId: string): Promise<void> {
+    const note = await dbLoadNoteById(noteId);
+    if (!note) return;
+    await this.deleteNote(noteId);
+    await this.syncArchiveEntry(note.bookId);
+  }
+
+  async deleteArchivedPresentation(deckId: string): Promise<void> {
+    const deck = await dbLoadPresentationDeckById(deckId);
+    if (!deck) return;
+    await dbDeletePresentationDeck(deckId);
+    await this.syncArchiveEntry(deck.bookId);
+  }
+
+  async deleteArchivedBadge(badgeId: string): Promise<void> {
+    const badge = await dbLoadStudyBadgeAwardById(badgeId);
+    if (!badge) return;
+    await dbDeleteStudyBadgeAward(badgeId);
+    await this.syncArchiveEntry(badge.bookId);
+  }
+
+  // ── Bulk delete ──────────────────────────────────────────────────────────
+
+  async deleteAllBookData(bookId: string): Promise<void> {
+    await this.purgeArchive(bookId).catch(() => {});
+    await dbDeleteAllBookData(bookId);
+    const appDataDir = await getAppDataDir().catch(() => "");
+    if (appDataDir) {
+      await deleteDirectory(`${appDataDir}/books/${bookId}`).catch(() => {});
     }
   }
 }

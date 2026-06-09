@@ -500,6 +500,20 @@ export interface StyleSeed {
   previewImage: string; // path to asset
 }
 
+// ─── Archive (artifacts kept after a book leaves the library) ─────────────────
+
+export interface ArchiveBook {
+  bookId: string;
+  title: string;
+  author: string;
+  archivedAt: string;
+  audioCount: number;
+  imageCount: number;
+  noteCount: number;
+  presentationCount: number;
+  badgeCount: number;
+}
+
 // ─── Image Cache ──────────────────────────────────────────────────────────────
 
 export interface CachedImage {
@@ -564,6 +578,8 @@ export interface Note {
   highlightId: string;
   bookId: string;
   noteText: string;
+  /** Quoted passage preserved when the book is archived and highlights are removed. */
+  sourceExcerpt?: string;
   createdAt: string;
   updatedAt: string;
 }

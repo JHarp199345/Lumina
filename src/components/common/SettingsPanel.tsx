@@ -324,7 +324,9 @@ function LibrarySection({ onClose }: { onClose: () => void }) {
   };
 
   const handleDelete = async (bookId: string) => {
-    await storage.deleteAllBookData(bookId);
+    const book = library.find((entry) => entry.id === bookId);
+    if (!book) return;
+    await storage.archiveAndRemoveBook(book);
     removeBook(bookId);
     if (activeBook?.id === bookId) unmountActiveBook();
     setConfirmDelete(null);

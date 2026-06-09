@@ -1,4 +1,4 @@
-import { BookOpen, FolderOpen, Menu, Moon, Settings, Sun, Monitor, NotebookTabs } from "lucide-react";
+import { Archive, BookOpen, FolderOpen, Menu, Moon, Settings, Sun, Monitor, NotebookTabs } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useBookStore } from "@/store/bookStore";
@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 interface SideRailProps {
   onImport: () => void;
   onLibraryOpen: () => void;
+  onArchiveOpen: () => void;
   isTablet?: boolean;
   isPhone?: boolean;
   tocOpen?: boolean;
@@ -20,6 +21,7 @@ interface SideRailProps {
 export default function SideRail({
   onImport,
   onLibraryOpen,
+  onArchiveOpen,
   isTablet,
   isPhone,
   tocOpen,
@@ -77,6 +79,10 @@ export default function SideRail({
 
         <RailButton label="Library" onClick={onLibraryOpen}>
           <BookOpen size={17} />
+        </RailButton>
+
+        <RailButton label="Archive" onClick={onArchiveOpen}>
+          <Archive size={17} />
         </RailButton>
 
         {activeBook && (

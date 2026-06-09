@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 export const STORES = {
   SOURCE_PROFILES: "source_profiles", // SourceIntelligenceProfile, keyed by bookId
@@ -28,6 +28,7 @@ export const STORES = {
   AUDIO_BLOBS:   "audio_blobs",     // Uint8Array audio data, keyed by audio artifact id
   PRESENTATIONS: "presentations",   // PresentationDeck, keyed by id, indexed by bookId
   BOOK_SETTINGS: "book_settings",   // {seedId}, keyed by bookId
+  ARCHIVE_BOOKS: "archive_books",   // ArchiveBook, keyed by bookId
   API_KEYS:      "api_keys",        // string values, keyed by key name
 } as const;
 
@@ -89,6 +90,7 @@ export function openDb(): Promise<IDBDatabase> {
       presentations?.createIndex("bookId", "bookId", { unique: false });
 
       ensure(STORES.BOOK_SETTINGS);                    // explicit key (bookId)
+      ensure(STORES.ARCHIVE_BOOKS);                    // explicit key (bookId)
       ensure(STORES.API_KEYS);                         // explicit key (name)
   };
 
