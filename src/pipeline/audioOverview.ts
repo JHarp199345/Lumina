@@ -15,7 +15,15 @@
  */
 
 import { LUMINA_CONFIG } from "@/config";
-import { profileGroundingText, defaultSpineForType } from "@/pipeline/sourceProfile";
+import {
+  buildExpositoryScopeOutline,
+  buildExpositorySourceContext,
+  defaultKnowledgeSpine,
+  knowledgeProtocol,
+  knowledgeWorkType,
+  suggestPromptFraming,
+} from "@/pipeline/knowledgeGrounding";
+import { profileGroundingText } from "@/pipeline/sourceProfile";
 import type { BookStructure, Chapter, SemanticMap, SourceIntelligenceProfile } from "@/types";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -73,13 +81,18 @@ export function buildScopeOutline(
   structure: BookStructure,
   semanticMap: SemanticMap | null
 ): string {
+  const protocol = knowledgeProtocol(semanticMap);
+  if (protocol === "expository") {
+    return buildExpositoryScopeOutline(scope, structure, semanticMap);
+  }
+
   const chapters = chaptersForScope(scope, structure);
   const lines: string[] = [];
 
   if (scope.type === "whole" && semanticMap) {
     lines.push(`This overview will cover "${structure.title}" by ${structure.author}.`);
     lines.push(`Overall emotional arc: ${semanticMap.arcShape}.`);
-    const themes = collectThemes(semanticMap);
+    const themes = collectNarrativeThemes(semanticMap);
     if (themes.length) lines.push(`Central themes: ${themes.slice(0, 5).join(", ")}.`);
     lines.push("");
     lines.push("Chapter path:");
@@ -99,7 +112,7 @@ export function buildScopeOutline(
   return lines.join("\n").trim();
 }
 
-function collectThemes(map: SemanticMap): string[] {
+function collectNarrativeThemes(map: SemanticMap): string[] {
   const fromBlueprint = (map.narrativeBlueprint as { centralThemes?: string[] } | undefined)?.centralThemes ?? [];
   if (fromBlueprint.length) return fromBlueprint;
   return unique(map.scenes.flatMap((s) => s.symbolicMotifs ?? []));
@@ -117,11 +130,17 @@ function buildSourceContext(
   structure: BookStructure,
   semanticMap: SemanticMap | null
 ): string {
-  const chapters = chaptersForScope(scope, structure);
+  const protocol = knowledgeProtocol(semanticMap);
 
   if (scope.type === "whole") {
     return buildScopeOutline(scope, structure, semanticMap);
   }
+
+  if (protocol === "expository") {
+    return buildExpositorySourceContext(scope, structure, semanticMap);
+  }
+
+  const chapters = chaptersForScope(scope, structure);
 
   // Chapter scope — include real text, capped to a safe word budget.
   const MAX_WORDS = 6000;
@@ -161,14 +180,14 @@ export async function suggestFullerPrompt(
     ? `Build on this starting instruction (expand and sharpen it, do not shorten it):\n${seedPlan.trim()}`
     : "Write a fresh, book-specific instruction from the material below.";
 
+  const protocol = knowledgeProtocol(semanticMap, profile);
   const prompt = `You are helping a reader shape what an audio overview should explain.
 ${angleLine}
 ${seedLine}
 
 Write ONE continuous instruction paragraph (4–8 sentences) that a narrator could follow directly.
-It must be purposeful and specific to THIS material: name real entities, conflicts, ideas, and
-developments; state what to explain, in what order, and what the listener should understand by
-the end. No bullet points, no preamble, no headings — only the instruction text.
+${suggestPromptFraming(protocol)}
+No bullet points, no preamble, no headings — only the instruction text.
 
 MATERIAL:
 ${truncateWords(context, 5000)}`;
@@ -221,9 +240,11 @@ export async function generateOverviewScript(args: ScriptArgs): Promise<string> 
     context = buildSourceContext(scope, structure, semanticMap);
   }
 
+  const protocol = knowledgeProtocol(semanticMap, profile);
+  const workType = knowledgeWorkType(semanticMap, profile);
   const defaultSpine = profile
-    ? defaultSpineForType(profile.workType, minutes, targetWords)
-    : `You are a subject-matter expert and an excellent teacher. Give a clear, structured breakdown of the material: explain it, teach it, simplify the hard parts, and expand on what matters. Open by framing what this material is and why it matters, develop the key ideas in a logical order, and close with the throughline a listener should walk away understanding.`;
+    ? defaultKnowledgeSpine(protocol, profile.workType, minutes, targetWords, "spoken")
+    : defaultKnowledgeSpine(protocol, workType, minutes, targetWords, "spoken");
 
   const instruction = userPrompt.trim()
     ? `Follow the reader's instruction as the primary guide:\n"${userPrompt.trim()}"`

@@ -16,6 +16,7 @@ import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
 import { GOOGLE_KEY_NAME } from "@/pipeline/audioOverview";
 import type { OverviewScope } from "@/pipeline/audioOverview";
+import { knowledgeProtocol } from "@/pipeline/knowledgeGrounding";
 import {
   PRESENTATION_TEMPLATES,
   deckToMarkdown,
@@ -58,8 +59,8 @@ export default function PresentationStudio() {
   const [copied, setCopied] = useState(false);
 
   const suggestions = useMemo(
-    () => (activeStructure ? presentationSuggestions(activeStructure, profile) : []),
-    [activeStructure, profile]
+    () => (activeStructure ? presentationSuggestions(activeStructure, profile, activeSemanticMap) : []),
+    [activeStructure, profile, activeSemanticMap]
   );
   const tailored = Boolean(profile?.suggestionBank?.length);
 
@@ -74,7 +75,7 @@ export default function PresentationStudio() {
 
   const activeDeck = decks.find((d) => d.id === activeDeckId) ?? null;
   const activeSlide = activeDeck?.slides[slideIndex] ?? null;
-  const template = getPresentationTemplate(templateId);
+  const template = getPresentationTemplate(templateId, knowledgeProtocol(activeSemanticMap, profile));
 
   useEffect(() => {
     let cancelled = false;
@@ -112,7 +113,7 @@ export default function PresentationStudio() {
     (async () => {
       const existing = await storage.loadSourceProfile(activeBook.id).catch(() => null);
       if (cancelled) return;
-      if (isUsableSourceProfile(existing)) {
+      if (isUsableSourceProfile(existing, activeSemanticMap)) {
         setProfile(existing);
         return;
       }
@@ -136,7 +137,7 @@ export default function PresentationStudio() {
   }, [activeBook, activeStructure, activeSemanticMap]);
 
   const ensureProfile = async (apiKey: string) => {
-    if (isUsableSourceProfile(profile)) return profile;
+    if (isUsableSourceProfile(profile, activeSemanticMap)) return profile;
     if (!activeStructure || !activeSemanticMap) return profile;
     setProfileBuilding(true);
     try {

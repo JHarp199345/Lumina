@@ -790,6 +790,8 @@ export interface SourceIntelligenceProfile {
   bookId: string;
   builtAt: string;
   workType: WorkType;
+  analysisProtocol?: AnalysisProtocol;
+  expositoryDomain?: ExpositoryDomain;
   identity: { title: string; author: string; genre?: string; era?: string };
   structureKind: "narrative" | "subjectHierarchy";
   sections: SourceProfileSection[];

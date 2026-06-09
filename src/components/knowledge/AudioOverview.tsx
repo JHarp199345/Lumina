@@ -22,6 +22,7 @@ import {
   suggestFullerPrompt,
   type OverviewScope,
 } from "@/pipeline/audioOverview";
+import { knowledgeProtocol, knowledgeWorkType } from "@/pipeline/knowledgeGrounding";
 import { buildSourceProfile, fallbackSuggestions, isUsableSourceProfile } from "@/pipeline/sourceProfile";
 import SuggestionComposer from "@/components/knowledge/SuggestionComposer";
 import type { AudioArtifact, SourceIntelligenceProfile, SourceProfileSuggestion } from "@/types";
@@ -62,9 +63,13 @@ export default function AudioOverview() {
   // title-grounded fallbacks so the field is never dead.
   const suggestions: SourceProfileSuggestion[] = useMemo(() => {
     if (profile?.suggestionBank?.length) return profile.suggestionBank;
-    if (activeStructure) return fallbackSuggestions(activeStructure, profile?.workType ?? "fiction");
+    if (activeStructure) {
+      const protocol = knowledgeProtocol(activeSemanticMap, profile);
+      const workType = knowledgeWorkType(activeSemanticMap, profile);
+      return fallbackSuggestions(activeStructure, workType, protocol);
+    }
     return [];
-  }, [profile, activeStructure]);
+  }, [profile, activeStructure, activeSemanticMap]);
   const tailored = (profile?.suggestionBank?.length ?? 0) > 0;
 
   const scope: OverviewScope = useMemo(
@@ -111,7 +116,7 @@ export default function AudioOverview() {
   };
 
   const ensureProfile = async (apiKey: string) => {
-    if (isUsableSourceProfile(profile)) return profile;
+    if (isUsableSourceProfile(profile, activeSemanticMap)) return profile;
     if (!activeSemanticMap) return profile;
     setProfileBuilding(true);
     setProgress("Building source intelligence…");
@@ -137,7 +142,7 @@ export default function AudioOverview() {
     (async () => {
       const existing = await storage.loadSourceProfile(activeBook.id).catch(() => null);
       if (cancelled) return;
-      if (isUsableSourceProfile(existing)) {
+      if (isUsableSourceProfile(existing, activeSemanticMap)) {
         setProfile(existing);
         return;
       }

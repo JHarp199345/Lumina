@@ -2,18 +2,16 @@
  * Source Intelligence Profile builder (PLANvii).
  *
  * Builds a hidden, teaching-oriented profile of a work in ONE enriched call that
- * REUSES what ingestion already extracted (arc shape, themes/threads from the
- * narrative blueprint, entities from visual lore, chapter structure) plus a small
- * sample of chapter prose. It is not a second analysis pass — it consolidates the
- * existing analysis output into a profile that powers Audio Overview prompts.
- *
- * New imports build it right after analysis (pre-warm); older books build it lazily
- * on first Audio Overview open. Cached either way.
+ * REUSES ingestion analysis (narrative threads OR expository idea map) plus prose samples.
+ * Powers Audio Overview and Presentation Studio prompts.
  */
 
 import { LUMINA_CONFIG } from "@/config";
+import { gatherExpositoryAnalysisGrounding, knowledgeProtocol } from "@/pipeline/knowledgeGrounding";
 import type {
+  AnalysisProtocol,
   BookStructure,
+  ExpositoryDomain,
   SemanticMap,
   SourceIntelligenceProfile,
   SourceProfileSuggestion,
@@ -30,20 +28,37 @@ export async function buildSourceProfile(
   apiKey: string,
   onProgress?: (msg: string) => void
 ): Promise<SourceIntelligenceProfile> {
-  onProgress?.("Building book intelligence…");
+  const protocol = knowledgeProtocol(semanticMap);
+  onProgress?.(
+    protocol === "expository"
+      ? "Building teaching intelligence from the idea map…"
+      : "Building book intelligence…"
+  );
 
-  const grounding = gatherGrounding(structure, semanticMap);
-  const raw = await geminiJson(buildPrompt(structure, grounding), apiKey);
+  const grounding = gatherGrounding(structure, semanticMap, protocol);
+  const raw = await geminiJson(buildPrompt(structure, grounding, protocol), apiKey);
 
-  return normalize(raw, structure);
+  return normalize(raw, structure, semanticMap, protocol);
 }
 
-// ─── Grounding: reuse already-extracted ingestion artifacts ─────────────────────
+// ─── Grounding ───────────────────────────────────────────────────────────────
 
-function gatherGrounding(structure: BookStructure, map: SemanticMap | null): string {
+function gatherGrounding(
+  structure: BookStructure,
+  map: SemanticMap | null,
+  protocol: AnalysisProtocol
+): string {
+  if (protocol === "expository") {
+    return gatherExpositoryAnalysisGrounding(structure, map);
+  }
+  return gatherNarrativeGrounding(structure, map);
+}
+
+function gatherNarrativeGrounding(structure: BookStructure, map: SemanticMap | null): string {
   const lines: string[] = [];
   lines.push(`Title: ${structure.title}`);
   lines.push(`Author: ${structure.author}`);
+  lines.push(`Analysis protocol: narrative (story / drama)`);
   lines.push(`Chapters: ${structure.chapters.length}, total words: ${structure.totalWords}`);
 
   if (map) {
@@ -68,13 +83,11 @@ function gatherGrounding(structure: BookStructure, map: SemanticMap | null): str
     }
   }
 
-  // Chapter titles + a small sample of prose so the model can infer subject/plot.
   lines.push("Chapter list:");
   structure.chapters.forEach((c, i) =>
     lines.push(`  ${i + 1}. ${c.title || `Chapter ${c.index + 1}`}`)
   );
 
-  // Sample prose from a few evenly-spaced chapters (cap total words).
   const sampleChapters = pickEvenly(structure.chapters, 5);
   let budget = 2400;
   lines.push("Sample passages:");
@@ -96,8 +109,23 @@ function pickEvenly<T>(arr: T[], n: number): T[] {
 
 // ─── Prompt ─────────────────────────────────────────────────────────────────
 
-function buildPrompt(structure: BookStructure, grounding: string): string {
-  return `You are building a hidden "source intelligence profile" of a book so a narrator can later
+function buildPrompt(structure: BookStructure, grounding: string, protocol: AnalysisProtocol): string {
+  const expositoryRules =
+    protocol === "expository"
+      ? `
+EXPOSITORY RULES (this is NOT fiction):
+- entities should be concepts, theories, researchers, institutions — not dramatic characters
+- progression = ordered argument / evidence / model-building steps, NOT plot beats
+- teachingSummary per section = what idea is explained and how the author's model develops
+- themes = conceptual themes (e.g. constructionism, interoception), not emotional motifs
+- suggestionBank angles: by-subject, key-arguments, models-and-mechanisms, first-time, lecture
+- NEVER suggest character development, emotional arc, or relationship drama angles`
+      : `
+NARRATIVE RULES:
+- For fiction use narrative angles (as a story / themes / relationships / chapter-by-chapter /
+  for a first-time reader / like a lecture).`;
+
+  return `You are building a hidden "source intelligence profile" of a book so a narrator or presenter can later
 explain it well. Use the analysis grounding below. Infer carefully; do not invent specifics
 you cannot support.
 
@@ -111,7 +139,7 @@ Return STRICT JSON with this shape:
   "entities": [ { "name": "", "type": "character|person|org|place|concept", "role": "", "relationships": [ { "to": "", "nature": "", "evolution": "how it changes" } ] } ],
   "progression": [ "ordered plot movements OR argument/evidence steps" ],
   "suggestionBank": [
-    { "id": "story|themes|relationships|chapter|first-time|lecture|by-subject|key-arguments|methods",
+    { "id": "story|themes|relationships|chapter|first-time|lecture|by-subject|key-arguments|methods|models",
       "label": "short chip label",
       "workTypes": ["fiction"],
       "planText": "a detailed overview instruction (4-8 sentences) a reader could accept as-is: state the angle, what to explain, which real entities/ideas/conflicts to foreground, what the listener should understand by the end, and how to organize the explanation. Purposeful and specific — never generic." }
@@ -119,20 +147,17 @@ Return STRICT JSON with this shape:
 }
 
 Rules:
-- planText must reference this book's real content (entities, ideas, conflicts), never generic
-  phrasing and never chapter opening lines. Each planText should be a complete, actionable
-  directive — long enough to shape a ~20 minute spoken overview, not a one-liner.
-- For fiction use narrative angles (as a story / themes / relationships / chapter-by-chapter /
-  for a first-time reader / like a lecture). For nonfiction/scholarly use by-subject /
-  key-arguments / methods & evidence plus first-time and lecture.
+- planText must reference this book's real content, never generic phrasing and never chapter opening lines.
+- For nonfiction/scholarly use by-subject / key-arguments / models-and-mechanisms plus first-time and lecture.
 - Keep sections aligned to the chapter list; importance is 0..1.
 - Output ONLY the JSON object.
+${expositoryRules}
 
 ANALYSIS GROUNDING:
 ${grounding}`;
 }
 
-// ─── Normalize model output into a stored profile ───────────────────────────────
+// ─── Normalize ───────────────────────────────────────────────────────────────
 
 interface RawProfile {
   workType?: string;
@@ -154,10 +179,25 @@ const VALID_WORK_TYPES: WorkType[] = [
   "fiction", "nonfiction", "scholarly", "manual", "memoir", "reference", "scripture", "other",
 ];
 
-function normalize(raw: RawProfile, structure: BookStructure): SourceIntelligenceProfile {
+function normalize(
+  raw: RawProfile,
+  structure: BookStructure,
+  map: SemanticMap | null,
+  protocol: AnalysisProtocol
+): SourceIntelligenceProfile {
+  const mappedWorkType = map?.workType;
   const workType: WorkType = VALID_WORK_TYPES.includes(raw.workType as WorkType)
     ? (raw.workType as WorkType)
-    : "other";
+    : mappedWorkType && VALID_WORK_TYPES.includes(mappedWorkType)
+      ? mappedWorkType
+      : protocol === "expository"
+        ? "scholarly"
+        : "other";
+
+  const structureKind =
+    protocol === "expository" || raw.structureKind === "subjectHierarchy"
+      ? "subjectHierarchy"
+      : "narrative";
 
   const sections = (raw.sections ?? []).map((s, i) => ({
     id: `sec_${i}`,
@@ -170,7 +210,9 @@ function normalize(raw: RawProfile, structure: BookStructure): SourceIntelligenc
     name: e.name?.trim() || "?",
     type: (["character", "person", "org", "place", "concept"].includes(e.type ?? "")
       ? e.type
-      : "concept") as "character" | "person" | "org" | "place" | "concept",
+      : protocol === "expository"
+        ? "concept"
+        : "concept") as "character" | "person" | "org" | "place" | "concept",
     role: e.role?.trim() || "",
     relationships: (e.relationships ?? []).slice(0, 8).map((r) => ({
       to: r.to?.trim() || "",
@@ -188,17 +230,21 @@ function normalize(raw: RawProfile, structure: BookStructure): SourceIntelligenc
       planText: s.planText!.trim(),
     }));
 
+  const expositoryDomain = map?.expositoryDomain;
+
   return {
     bookId: structure.bookId,
     builtAt: new Date().toISOString(),
     workType,
+    analysisProtocol: protocol,
+    expositoryDomain,
     identity: {
       title: structure.title,
       author: structure.author,
       genre: raw.identity?.genre?.trim() || undefined,
       era: raw.identity?.era?.trim() || undefined,
     },
-    structureKind: raw.structureKind === "subjectHierarchy" ? "subjectHierarchy" : "narrative",
+    structureKind,
     sections,
     concepts: {
       mainIdeas: clean(raw.concepts?.mainIdeas),
@@ -208,19 +254,24 @@ function normalize(raw: RawProfile, structure: BookStructure): SourceIntelligenc
     },
     entities,
     progression: clean(raw.progression),
-    suggestionBank: suggestionBank.length > 0 ? suggestionBank : fallbackSuggestions(structure, workType),
+    suggestionBank:
+      suggestionBank.length > 0 ? suggestionBank : fallbackSuggestions(structure, workType, protocol),
   };
 }
 
-/**
- * Minimal, title-grounded overview angles. Used inside the SIP builder when the
- * model omits a bank, and exported so the Audio Overview field can offer real
- * starting points even before a Source Intelligence Profile has been built.
- */
-export function fallbackSuggestions(structure: BookStructure, workType: WorkType): SourceProfileSuggestion[] {
-  // If the model omitted the bank, provide minimal, still-grounded angles.
-  const isScholarly = workType === "nonfiction" || workType === "scholarly" || workType === "reference";
-  if (isScholarly) {
+export function fallbackSuggestions(
+  structure: BookStructure,
+  workType: WorkType,
+  protocol: AnalysisProtocol = workType === "fiction" ? "narrative" : "expository"
+): SourceProfileSuggestion[] {
+  const isExpository =
+    protocol === "expository" ||
+    workType === "nonfiction" ||
+    workType === "scholarly" ||
+    workType === "reference" ||
+    workType === "manual";
+
+  if (isExpository) {
     return [
       {
         id: "by-subject",
@@ -235,6 +286,12 @@ export function fallbackSuggestions(structure: BookStructure, workType: WorkType
         planText: `Explain the central thesis and main arguments of "${structure.title}" as a teaching overview. State the core claim up front, then develop each major argument in sequence: what evidence supports it, what objections or complications the author addresses, and how the conclusions follow. Name the real ideas, figures, and examples the work depends on. End with what a listener should take away about the argument's stakes and implications.`,
       },
       {
+        id: "models-and-mechanisms",
+        label: "Models & mechanisms",
+        workTypes: [workType],
+        planText: `Teach the core models and mechanisms in "${structure.title}". For each major model the author introduces, explain what problem it solves, how the parts fit together, what predictions or claims it makes, and how it differs from older theories. Use the book's real terminology. The listener should finish understanding not just what the author claims, but how the conceptual machinery works.`,
+      },
+      {
         id: "first-time",
         label: "For a first-time reader",
         workTypes: [workType],
@@ -242,6 +299,7 @@ export function fallbackSuggestions(structure: BookStructure, workType: WorkType
       },
     ];
   }
+
   return [
     {
       id: "story",
@@ -264,17 +322,26 @@ export function fallbackSuggestions(structure: BookStructure, workType: WorkType
   ];
 }
 
-// ─── Grounding text for the summarizer (used by audioOverview) ───────────────────
+// ─── Grounding text for summarizer / deck builder ─────────────────────────────
 
 export function profileGroundingText(profile: SourceIntelligenceProfile): string {
   const lines: string[] = [];
+  const expository = profile.analysisProtocol === "expository" || profile.structureKind === "subjectHierarchy";
+
   lines.push(`Work: "${profile.identity.title}" by ${profile.identity.author} (${profile.workType}).`);
+  if (profile.expositoryDomain && profile.expositoryDomain !== "general") {
+    lines.push(`Domain: ${profile.expositoryDomain}.`);
+  }
   if (profile.concepts.mainIdeas.length) lines.push(`Main ideas: ${profile.concepts.mainIdeas.join("; ")}.`);
-  if (profile.concepts.themes.length) lines.push(`Themes: ${profile.concepts.themes.join(", ")}.`);
+  if (profile.concepts.themes.length) {
+    lines.push(`${expository ? "Conceptual themes" : "Themes"}: ${profile.concepts.themes.join(", ")}.`);
+  }
   if (profile.concepts.keyTerms.length) lines.push(`Key terms: ${profile.concepts.keyTerms.join(", ")}.`);
 
   if (profile.entities.length) {
-    lines.push("People / entities and how relationships evolve:");
+    lines.push(
+      expository ? "Concepts / figures and how they relate:" : "People / entities and how relationships evolve:"
+    );
     for (const e of profile.entities.slice(0, 16)) {
       const rels = e.relationships
         .filter((r) => r.to)
@@ -285,7 +352,7 @@ export function profileGroundingText(profile: SourceIntelligenceProfile): string
   }
 
   if (profile.progression.length) {
-    lines.push(profile.structureKind === "narrative" ? "Plot progression:" : "Argument progression:");
+    lines.push(expository ? "Argument / idea progression:" : "Plot progression:");
     profile.progression.forEach((p, i) => lines.push(`  ${i + 1}. ${p}`));
   }
 
@@ -299,12 +366,18 @@ export function profileGroundingText(profile: SourceIntelligenceProfile): string
   return lines.join("\n");
 }
 
-// ─── Type-aware default prompt spine ────────────────────────────────────────────
-
 export function isUsableSourceProfile(
-  profile: SourceIntelligenceProfile | null
+  profile: SourceIntelligenceProfile | null,
+  semanticMap?: SemanticMap | null
 ): profile is SourceIntelligenceProfile {
   if (!profile) return false;
+  if (
+    semanticMap?.analysisProtocol &&
+    profile.analysisProtocol &&
+    profile.analysisProtocol !== semanticMap.analysisProtocol
+  ) {
+    return false;
+  }
   return (
     profile.sections.length > 0 &&
     profile.suggestionBank.length > 0 &&
@@ -316,9 +389,13 @@ export function isUsableSourceProfile(
 }
 
 export function defaultSpineForType(workType: WorkType, minutes: number, targetWords: number): string {
-  const scholarly = workType === "nonfiction" || workType === "scholarly" || workType === "reference" || workType === "manual";
+  const scholarly =
+    workType === "nonfiction" ||
+    workType === "scholarly" ||
+    workType === "reference" ||
+    workType === "manual";
   if (scholarly) {
-    return `You are a subject-matter expert and an excellent teacher. In about ${minutes} minutes (~${targetWords} spoken words), give a structured explanation of this work. Explain the central thesis, the major concepts, the subject hierarchy, the supporting arguments, key terminology, important examples and evidence, and the implications. Organize the overview by topic and subject hierarchy — not by summarizing chapter openings.`;
+    return `You are a subject-matter expert and an excellent teacher. In about ${minutes} minutes (~${targetWords} spoken words), give a structured explanation of this expository work. Explain the central thesis, the major concepts, the subject hierarchy, the supporting arguments, key terminology, important examples and evidence, and the implications. Organize the overview by topic and subject hierarchy — not by summarizing chapter openings.`;
   }
   return `You are a subject-matter expert and an excellent teacher. In about ${minutes} minutes (~${targetWords} spoken words), explain this book clearly and engagingly. Explain the main story arc, the major characters and factions, the central conflicts, the important turning points, and the major themes — and how the relationships and ideas develop across the work. Organize the overview by the book's natural parts or acts. Do not read passages aloud; explain what happens, why it matters, and how it develops.`;
 }
@@ -351,17 +428,18 @@ function parseJson(raw: string): RawProfile {
   try {
     return JSON.parse(cleaned) as RawProfile;
   } catch {
-    // Try to extract the first {...} block.
     const m = cleaned.match(/\{[\s\S]*\}/);
     if (m) {
-      try { return JSON.parse(m[0]) as RawProfile; } catch { /* fall through */ }
+      try {
+        return JSON.parse(m[0]) as RawProfile;
+      } catch {
+        /* fall through */
+      }
     }
     console.warn("[sourceProfile] Could not parse model JSON");
     return {};
   }
 }
-
-// ─── small utils ────────────────────────────────────────────────────────────────
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0.5));

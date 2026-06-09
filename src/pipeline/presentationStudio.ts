@@ -12,14 +12,22 @@
 
 import { LUMINA_CONFIG } from "@/config";
 import {
+  buildExpositoryScopeOutline,
+  buildExpositorySourceContext,
+  defaultKnowledgeSpine,
+  knowledgeProtocol,
+  knowledgeWorkType,
+  suggestPromptFraming,
+} from "@/pipeline/knowledgeGrounding";
+import {
   profileGroundingText,
-  defaultSpineForType,
   fallbackSuggestions,
   isUsableSourceProfile,
 } from "@/pipeline/sourceProfile";
 import type { OverviewScope } from "@/pipeline/audioOverview";
 import { scopeLabel } from "@/pipeline/audioOverview";
 import type {
+  AnalysisProtocol,
   BookStructure,
   Chapter,
   PresentationDeck,
@@ -92,8 +100,64 @@ export const PRESENTATION_TEMPLATES: PresentationTemplate[] = [
   },
 ];
 
-export function getPresentationTemplate(id: PresentationTemplateId): PresentationTemplate {
-  return PRESENTATION_TEMPLATES.find((t) => t.id === id) ?? PRESENTATION_TEMPLATES[0];
+const EXPOSITORY_PRESENTATION_TEMPLATES: PresentationTemplate[] = [
+  {
+    id: "teach",
+    label: "Teaching deck",
+    description: "Structured for a study session or classroom walkthrough",
+    brief: `PROJECT BRIEF — Expository teaching presentation:
+- Slide 1: title + what problem or question this work addresses
+- Slide 2: learning objectives — concepts and models the audience will understand
+- Body: one section slide per major topic; content slides teach definitions, contrasts, and mechanisms (max 5 bullets)
+- Use quote slides only for pivotal definitions or claims worth showing verbatim
+- Final slide: key models, terms, and takeaways
+- Speaker notes on every slide: teach the idea, define terms, connect to prior slides
+- Do NOT organize as character arcs or emotional plot beats`,
+  },
+  {
+    id: "pitch",
+    label: "Quick pitch",
+    description: "Short intro — thesis, stakes, why it matters",
+    brief: `PROJECT BRIEF — Expository pitch deck:
+- Open with why this work matters now
+- 3–5 slides on the central thesis, the problem with old models, and the author's new framework
+- Name real concepts, evidence, and implications — no generic filler
+- Close with one memorable intellectual takeaway
+- Speaker notes: confident teacher pitching an important idea`,
+  },
+  {
+    id: "chapter-walkthrough",
+    label: "Chapter walkthrough",
+    description: "Follows the book's parts in reading order",
+    brief: `PROJECT BRIEF — Expository chapter walkthrough:
+- Title slide for the scoped material
+- One section slide per chapter or major part in order
+- Under each section: 1–2 content slides on the main idea taught, key terms introduced, and how it builds on prior chapters
+- Track how the argument or model develops across the sequence
+- Summary slide: integrated understanding of the scoped material
+- Speaker notes on every slide — teach the ideas, not retell anecdotes`,
+  },
+  {
+    id: "themes-deep",
+    label: "Models & frameworks",
+    description: "Organized by concepts and models, not reading order",
+    brief: `PROJECT BRIEF — Models & frameworks deck:
+- Title slide + framing: which models or conceptual frameworks this deck explains
+- One section slide per major model, contrast, or theoretical framework
+- Content slides break down components, mechanisms, evidence, and implications
+- Include contrast slides (old theory vs new theory) where the material supports it
+- Synthesis slide: how the models fit together
+- Closing: what mastery of these ideas unlocks
+- Speaker notes: analytical, precise, grounded in the book's terminology`,
+  },
+];
+
+export function getPresentationTemplate(
+  id: PresentationTemplateId,
+  protocol: AnalysisProtocol = "narrative"
+): PresentationTemplate {
+  const bank = protocol === "expository" ? EXPOSITORY_PRESENTATION_TEMPLATES : PRESENTATION_TEMPLATES;
+  return bank.find((t) => t.id === id) ?? bank[0];
 }
 
 // ─── Presentation-specific suggestion angles ────────────────────────────────────
@@ -107,13 +171,15 @@ function toPresentationPlan(planText: string): string {
 
 export function presentationSuggestions(
   structure: BookStructure,
-  profile: SourceIntelligenceProfile | null
+  profile: SourceIntelligenceProfile | null,
+  semanticMap?: SemanticMap | null
 ): SourceProfileSuggestion[] {
-  const workType: WorkType = profile?.workType ?? "fiction";
+  const protocol = knowledgeProtocol(semanticMap, profile);
+  const workType: WorkType = knowledgeWorkType(semanticMap, profile);
   const base =
-    profile?.suggestionBank?.length && isUsableSourceProfile(profile)
+    profile?.suggestionBank?.length && isUsableSourceProfile(profile, semanticMap)
       ? profile.suggestionBank
-      : fallbackSuggestions(structure, workType);
+      : fallbackSuggestions(structure, workType, protocol);
 
   return base.map((s) => ({
     ...s,
@@ -142,6 +208,10 @@ function buildScopeOutline(
   structure: BookStructure,
   semanticMap: SemanticMap | null
 ): string {
+  if (knowledgeProtocol(semanticMap) === "expository") {
+    return buildExpositoryScopeOutline(scope, structure, semanticMap);
+  }
+
   const chapters = chaptersForScope(scope, structure);
   const lines: string[] = [];
 
@@ -169,11 +239,15 @@ function buildSourceContext(
   structure: BookStructure,
   semanticMap: SemanticMap | null
 ): string {
-  const chapters = chaptersForScope(scope, structure);
   if (scope.type === "whole") {
     return buildScopeOutline(scope, structure, semanticMap);
   }
 
+  if (knowledgeProtocol(semanticMap) === "expository") {
+    return buildExpositorySourceContext(scope, structure, semanticMap);
+  }
+
+  const chapters = chaptersForScope(scope, structure);
   const MAX_WORDS = 6000;
   let budget = MAX_WORDS;
   const parts: string[] = [];
@@ -225,14 +299,15 @@ export async function suggestPresentationPrompt(
     ? `Build on this starting instruction (expand and sharpen it, do not shorten it):\n${seedPlan.trim()}`
     : "Write a fresh, book-specific presentation instruction from the material below.";
 
+  const protocol = knowledgeProtocol(semanticMap, profile);
   const prompt = `You are helping a reader shape what a PowerPoint-style slide deck should explain.
 ${angleLine}
 ${seedLine}
 
 Write ONE continuous instruction paragraph (4–8 sentences) that a deck generator could follow directly.
-It must be purposeful and specific to THIS material: name real entities, conflicts, ideas, and
-developments; state what slides should cover, in what order, and what the audience should
-understand by the end. No bullet points, no preamble, no headings — only the instruction text.
+${suggestPromptFraming(protocol)}
+State what slides should cover, in what order, and what the audience should understand by the end.
+No bullet points, no preamble, no headings — only the instruction text.
 
 MATERIAL:
 ${truncateWords(context, 5000)}`;
@@ -282,16 +357,19 @@ export async function generatePresentationDeck(args: PresentationArgs): Promise<
 
   onProgress?.("Building slide deck…");
 
-  const template = getPresentationTemplate(templateId);
+  const protocol = knowledgeProtocol(semanticMap, profile);
+  const template = getPresentationTemplate(templateId, protocol);
   const material = buildMaterialContext(scope, structure, semanticMap, profile);
   const label = scopeLabel(scope, structure);
 
-  const defaultInstruction = profile
-    ? defaultSpineForType(profile.workType, 20, 2800).replace(
-        /spoken words|spoken narration|to be heard/gi,
-        "slides"
-      )
-    : `Create a clear, structured slide deck explaining this material for a live presenter.`;
+  const workType = knowledgeWorkType(semanticMap, profile);
+  const defaultInstruction = defaultKnowledgeSpine(
+    protocol,
+    profile?.workType ?? workType,
+    20,
+    2800,
+    "slides"
+  );
 
   const readerInstruction = userPrompt.trim()
     ? `READER INSTRUCTION (primary guide):\n"${userPrompt.trim()}"`
@@ -320,6 +398,7 @@ Return STRICT JSON only:
 
 Rules:
 - Ground every slide in THIS material — real names, events, ideas, arguments.
+${protocol === "expository" ? "- Teach concepts, models, definitions, and evidence — not character arcs or emotional plot." : ""}
 - Max 5 bullets per content slide; section slides may have 0 bullets.
 - Speaker notes on EVERY slide — presenter-ready, not empty.
 - First slide layout "title"; last slide layout "summary".
