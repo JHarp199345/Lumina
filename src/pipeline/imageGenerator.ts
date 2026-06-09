@@ -30,6 +30,8 @@ export interface GenerateImageOptions {
   bookId: string;
   /** Absolute word position in the book — stamped permanently on the image record. */
   wordPosition: number;
+  /** EPUB file slot — one image per slot in cache and generation. */
+  visualSlotKey?: string;
   googleApiKey: string;
   falApiKey?: string;
   priorPaletteContext?: string; // from previous generations in this book
@@ -37,7 +39,8 @@ export interface GenerateImageOptions {
 }
 
 export async function generateImage(options: GenerateImageOptions): Promise<CachedImage> {
-  const { scene, styleSeed, bookId, wordPosition, googleApiKey, falApiKey, priorPaletteContext } = options;
+  const { scene, styleSeed, bookId, wordPosition, visualSlotKey, googleApiKey, falApiKey, priorPaletteContext } =
+    options;
 
   // Build the full prompt
   const prompt = buildImagePrompt(scene, styleSeed, priorPaletteContext);
@@ -82,6 +85,7 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
     bookId,
     sceneId: scene.id,
     wordPosition,
+    visualSlotKey,
     descriptionUsed: prompt,
     styleSeed: styleSeed.id,
     generatedAt: new Date().toISOString(),

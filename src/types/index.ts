@@ -456,6 +456,8 @@ export interface CachedImage {
   sceneId: string;
   /** Absolute word position (0…N) in the book — stable across re-analysis. */
   wordPosition?: number;
+  /** EPUB file slot — at most one cached image per slot. */
+  visualSlotKey?: string;
   filePath: string;
   descriptionUsed: string;
   styleSeed: StyleSeedId;

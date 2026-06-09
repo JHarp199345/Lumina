@@ -3,21 +3,20 @@ import type { CachedImage, Chapter, GenerationQueueItem, GenerationStatus } from
 import { LUMINA_CONFIG } from "@/config";
 import { findImageAtPosition } from "@/utils/imagePosition";
 
+function slotHasCachedImage(cache: Record<string, CachedImage>, slotKey: string): boolean {
+  return Object.values(cache).some((img) => img.visualSlotKey === slotKey);
+}
+
 interface ImageStore {
-  // Current displayed image
   currentImage: CachedImage | null;
   currentThemes: string[];
   isTransitioning: boolean;
-
-  // Cache (in-memory index)
-  imageCache: Record<string, CachedImage>; // keyed by sceneId
-
-  // Generation queue
+  imageCache: Record<string, CachedImage>;
   queue: GenerationQueueItem[];
   isGenerating: boolean;
-  /** Set when the reader jumps (TOC, gallery, etc.) — suppresses gap-fill churn. */
+  /** Slot currently being generated — only one API call at a time. */
+  activeGenerationSlot: string | null;
   navigationJumpUntil: number;
-  /** After regenerate-all: block auto-queue until the reader advances forward. */
   regenerateCooldownUntil: number;
 
   markNavigationJump: () => void;
@@ -30,7 +29,12 @@ interface ImageStore {
 
   addToCache: (image: CachedImage) => void;
   getCachedImage: (sceneId: string) => CachedImage | undefined;
+  getCachedImageForSlot: (slotKey: string) => CachedImage | undefined;
   getCachedImageAtPosition: (position: number, chapters: Chapter[]) => CachedImage | undefined;
+
+  /** Returns false if another slot is generating or this slot already has an image. */
+  claimGenerationSlot: (slotKey: string, allowReplace?: boolean) => boolean;
+  releaseGenerationSlot: () => void;
 
   enqueue: (item: GenerationQueueItem) => void;
   dequeue: () => GenerationQueueItem | undefined;
@@ -48,6 +52,7 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   imageCache: {},
   queue: [],
   isGenerating: false,
+  activeGenerationSlot: null,
   navigationJumpUntil: 0,
   regenerateCooldownUntil: 0,
 
@@ -75,9 +80,25 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   setIsTransitioning: (isTransitioning) => set({ isTransitioning }),
 
   addToCache: (image) =>
-    set((state) => ({ imageCache: { ...state.imageCache, [image.sceneId]: image } })),
+    set((state) => {
+      const next: Record<string, CachedImage> = { ...state.imageCache };
+      if (image.visualSlotKey) {
+        for (const [key, cached] of Object.entries(next)) {
+          if (cached.visualSlotKey === image.visualSlotKey && cached.id !== image.id) {
+            delete next[key];
+          }
+        }
+      }
+      next[image.sceneId] = image;
+      return { imageCache: next };
+    }),
 
   getCachedImage: (sceneId) => get().imageCache[sceneId],
+
+  getCachedImageForSlot: (slotKey) => {
+    const cache = get().imageCache;
+    return Object.values(cache).find((img) => img.visualSlotKey === slotKey);
+  },
 
   getCachedImageAtPosition: (position, chapters) =>
     findImageAtPosition(
@@ -88,6 +109,16 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE
     ),
 
+  claimGenerationSlot: (slotKey, allowReplace = false) => {
+    const state = get();
+    if (state.isGenerating || state.activeGenerationSlot) return false;
+    if (!allowReplace && slotHasCachedImage(state.imageCache, slotKey)) return false;
+    set({ activeGenerationSlot: slotKey });
+    return true;
+  },
+
+  releaseGenerationSlot: () => set({ activeGenerationSlot: null }),
+
   enqueue: (item) =>
     set((state) => {
       const existing = state.queue.find((q) => q.sceneId === item.sceneId);
@@ -96,6 +127,8 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       }
 
       if (item.visualSlotKey) {
+        if (slotHasCachedImage(state.imageCache, item.visualSlotKey)) return state;
+        if (state.activeGenerationSlot === item.visualSlotKey) return state;
         const slotBusy = state.queue.some(
           (q) =>
             q.visualSlotKey === item.visualSlotKey &&
@@ -115,9 +148,18 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
     }),
 
   dequeue: () => {
-    const { queue } = get();
-    const pending = queue.find((q) => q.status === "pending");
-    return pending;
+    const state = get();
+    for (const item of state.queue) {
+      if (item.status !== "pending") continue;
+      if (item.visualSlotKey && slotHasCachedImage(state.imageCache, item.visualSlotKey)) {
+        continue;
+      }
+      if (item.visualSlotKey && state.activeGenerationSlot === item.visualSlotKey) {
+        continue;
+      }
+      return item;
+    }
+    return undefined;
   },
 
   updateQueueItemStatus: (sceneId, status) =>
@@ -131,21 +173,21 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
 
   clearImageCache: () => {
     console.info("[ImageStore] clearImageCache");
-    set({ imageCache: {}, currentImage: null, currentThemes: [] });
+    set({ imageCache: {}, currentImage: null, currentThemes: [], activeGenerationSlot: null });
   },
 
-  clearImagesForUnmount: () =>
-    {
-      console.info("[ImageStore] clearImagesForUnmount");
-      set({
+  clearImagesForUnmount: () => {
+    console.info("[ImageStore] clearImagesForUnmount");
+    set({
       currentImage: null,
       currentThemes: [],
       isTransitioning: false,
       imageCache: {},
       queue: [],
       isGenerating: false,
+      activeGenerationSlot: null,
       navigationJumpUntil: 0,
       regenerateCooldownUntil: 0,
-      });
-    },
+    });
+  },
 }));

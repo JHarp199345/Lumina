@@ -21,6 +21,7 @@ import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useBookStore } from "@/store/bookStore";
 import { getImageForScene } from "@/utils/imagePosition";
 import { segmentScenesOnePerSlot } from "@/utils/sceneDedup";
+import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
 function displaySrc(src: string): string {
@@ -72,7 +73,7 @@ export default function GalleryFocalView({
   onClose,
 }: GalleryFocalViewProps) {
   // Every planned moment, in reading order — generated and not-yet-generated.
-  const chapters = useBookStore((state) => state.activeStructure?.chapters ?? []);
+  const chapters = useBookStore((state) => state.activeStructure?.chapters ?? EMPTY_CHAPTERS);
   const items: GalleryItem[] = useMemo(() => {
     const allScenes = activeSemanticMap?.scenes ?? [];
     const scenes = segmentScenesOnePerSlot(allScenes, chapters);
@@ -87,11 +88,6 @@ export default function GalleryFocalView({
 
   const startIndex = Math.max(0, items.findIndex((it) => it.scene.id === startSceneId));
   const [index, setIndex] = useState(startIndex < 0 ? 0 : startIndex);
-
-  useEffect(() => {
-    const next = Math.max(0, items.findIndex((it) => it.scene.id === startSceneId));
-    setIndex(next < 0 ? 0 : next);
-  }, [startSceneId, items]);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [showBookMenu, setShowBookMenu] = useState(false);
   const selectedThumbRef = useRef<HTMLButtonElement>(null);

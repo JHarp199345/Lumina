@@ -392,15 +392,12 @@ export function useBookOrchestration() {
       const semanticMap = useBookStore.getState().activeSemanticMap;
       const mapScenes = segmentScenesOnePerSlot(semanticMap?.scenes ?? [scene], chapters);
       const slotKey = visualSlotKeyForScene(scene, chapters);
-      const { imageCache } = useImageStore.getState();
+      const store = useImageStore.getState();
 
       if (slotKey) {
-        const cached = findImageForVisualSlot(
-          slotKey,
-          Object.values(imageCache),
-          mapScenes,
-          chapters
-        );
+        const cached =
+          store.getCachedImageForSlot(slotKey) ??
+          findImageForVisualSlot(slotKey, Object.values(store.imageCache), mapScenes, chapters);
         if (cached) {
           if (shouldDisplay) {
             setCurrentImage(cached);
@@ -440,6 +437,8 @@ export function useBookOrchestration() {
       const falKey = await storage.loadApiKey("lumina_fal_key");
       if (!styleSeed || !googleKey) return;
 
+      if (slotKey && !store.claimGenerationSlot(slotKey)) return;
+
       setIsGenerating(true);
       try {
         const generated = await generateImage({
@@ -447,6 +446,7 @@ export function useBookOrchestration() {
           styleSeed,
           bookId: semanticBookId,
           wordPosition: scenePosition,
+          visualSlotKey: slotKey ?? undefined,
           googleApiKey: googleKey,
           falApiKey: falKey ?? undefined,
           onComplete: async (img) => {
@@ -478,12 +478,15 @@ export function useBookOrchestration() {
         enqueue({
           sceneId: scene.id,
           bookId: semanticBookId,
+          wordPosition: scenePosition,
+          visualSlotKey: slotKey ?? undefined,
           priority: -1000,
           status: "pending",
           description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
         });
       } finally {
         setIsGenerating(false);
+        if (slotKey) store.releaseGenerationSlot();
       }
     },
     [addToCache, enqueue, setCurrentImage, setCurrentThemes, setIsGenerating]

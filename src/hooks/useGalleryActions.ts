@@ -12,6 +12,7 @@ import {
   slotHasQueuedOrCachedImage,
   visualSlotKeyForScene,
 } from "@/utils/sceneDedup";
+import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 
 export function useGalleryActions() {
   const visitPassage = useCallback((sceneId: string) => {
@@ -42,38 +43,50 @@ export function useGalleryActions() {
     const scene = activeSemanticMap.scenes.find((s) => s.id === sceneId);
     if (!scene) return;
 
-    const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
+    const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
     const canonicalScenes = segmentScenesOnePerSlot(activeSemanticMap.scenes, chapters);
     const slotKey = visualSlotKeyForScene(scene, chapters);
+    const store = useImageStore.getState();
     if (
-      slotKey &&
+      !slotKey ||
       slotHasQueuedOrCachedImage(
         slotKey,
-        Object.values(useImageStore.getState().imageCache),
+        Object.values(store.imageCache),
         canonicalScenes,
         chapters,
-        useImageStore.getState().queue
-      )
+        store.queue
+      ) ||
+      store.getCachedImageForSlot(slotKey)
     ) {
       return;
     }
 
+    if (!store.claimGenerationSlot(slotKey)) return;
+
     const googleKey = await storage.loadApiKey("lumina_google_ai_key");
     const falKey = await storage.loadApiKey("lumina_fal_key");
     const styleSeed = getStyleSeedById(activeStyleSeed);
-    if (!googleKey || !styleSeed) return;
+    if (!googleKey || !styleSeed) {
+      store.releaseGenerationSlot();
+      return;
+    }
 
-    await generateImage({
-      scene,
-      styleSeed,
-      bookId: activeBook.id,
-      wordPosition: computeSceneWordPosition(scene, chapters),
-      googleApiKey: googleKey,
-      falApiKey: falKey ?? undefined,
-      onComplete: async (img) => {
-        useImageStore.getState().addToCache(img);
-      },
-    });
+    try {
+      await generateImage({
+        scene,
+        styleSeed,
+        bookId: activeBook.id,
+        wordPosition: computeSceneWordPosition(scene, chapters),
+        visualSlotKey: slotKey,
+        googleApiKey: googleKey,
+        falApiKey: falKey ?? undefined,
+        onComplete: async (img) => {
+          store.addToCache(img);
+        },
+      });
+    } finally {
+      store.releaseGenerationSlot();
+    }
   }, []);
 
   return { visitPassage, generateForScene };

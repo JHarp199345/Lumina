@@ -18,7 +18,8 @@ import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useUiStore } from "@/store/uiStore";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { getImageForScene } from "@/utils/imagePosition";
-import { segmentScenesOnePerSlot } from "@/utils/sceneDedup";
+import { segmentScenesOnePerSlot, visualSlotKeyForScene } from "@/utils/sceneDedup";
+import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 import type { CachedImage, SemanticMap } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -172,28 +173,38 @@ export default function VisualPanel() {
         );
       if (!scene) return;
 
-      const newImage = await generateImage({
-        scene,
-        styleSeed,
-        bookId: activeBook.id,
-        wordPosition:
-          typeof currentImage.wordPosition === "number"
-            ? currentImage.wordPosition
-            : computeSceneWordPosition(scene, chapters),
-        googleApiKey: googleKey,
-        falApiKey: falKey ?? undefined,
-        onComplete: async (img) => {
-          addToCache(img);
-          setCurrentImage(img);
-          setCurrentThemes(img.emotionalThemes);
-          // Image already persisted inside storage.saveImage() — no extra save needed
-        },
-      });
+      const slotKey = visualSlotKeyForScene(scene, chapters);
+      const store = useImageStore.getState();
+      if (slotKey && !store.claimGenerationSlot(slotKey, true)) return;
 
-      addToCache(newImage);
-      setCurrentImage(newImage);
-      setCurrentThemes(newImage.emotionalThemes);
-      setHasFailed(false);
+      const wordPosition =
+        typeof currentImage.wordPosition === "number"
+          ? currentImage.wordPosition
+          : computeSceneWordPosition(scene, chapters);
+
+      try {
+        const newImage = await generateImage({
+          scene,
+          styleSeed,
+          bookId: activeBook.id,
+          wordPosition,
+          visualSlotKey: slotKey ?? undefined,
+          googleApiKey: googleKey,
+          falApiKey: falKey ?? undefined,
+          onComplete: async (img) => {
+            addToCache(img);
+            setCurrentImage(img);
+            setCurrentThemes(img.emotionalThemes);
+          },
+        });
+
+        addToCache(newImage);
+        setCurrentImage(newImage);
+        setCurrentThemes(newImage.emotionalThemes);
+        setHasFailed(false);
+      } finally {
+        if (slotKey) store.releaseGenerationSlot();
+      }
     } catch (err) {
       console.error("[Regenerate] Failed:", err);
       setHasFailed(true);
@@ -563,7 +574,7 @@ function VisualPlanFilmstrip({
   onSelectScene: (sceneId: string) => void;
   onDismiss: () => void;
 }) {
-  const chapters = useBookStore((state) => state.activeStructure?.chapters ?? []);
+  const chapters = useBookStore((state) => state.activeStructure?.chapters ?? EMPTY_CHAPTERS);
   const allScenes = activeSemanticMap.scenes;
   const scenes = segmentScenesOnePerSlot(allScenes, chapters);
   const cached = Object.values(imageCache);

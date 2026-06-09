@@ -72,7 +72,10 @@ function App() {
       }
     })();
   }, [importEpubFile]);
-  const { startOrchestration, reAnalyzeBook } = useBookOrchestration();
+  const { startOrchestration, reAnalyzeBook, regenerateAllImages } = useBookOrchestration();
+  const { galleryOpen, galleryStartSceneId, closeGallery } = useUiStore();
+  const imageCache = useImageStore((state) => state.imageCache);
+  const { visitPassage, generateForScene } = useGalleryActions();
   const { isTablet, isPhone, isPortrait } = useDeviceLayout();
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -301,10 +304,6 @@ function App() {
   const showImportOverlay = Boolean(importProgress) && !isAnalyzing;
   const showProgressOverlay =
     isAnalyzing || showImportOverlay || importFailed || analysisFailed;
-  const { galleryOpen, galleryStartSceneId, closeGallery } = useUiStore();
-  const imageCache = useImageStore((state) => state.imageCache);
-  const { visitPassage, generateForScene } = useGalleryActions();
-  const { regenerateAllImages } = useBookOrchestration();
 
   const handleImport = async () => {
     let failed = false;
@@ -468,6 +467,7 @@ function App() {
 
       {galleryOpen && (
         <GalleryFocalView
+          key={galleryStartSceneId ?? "gallery"}
           activeSemanticMap={activeSemanticMap}
           imageCache={imageCache}
           startSceneId={galleryStartSceneId}
