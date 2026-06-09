@@ -59,6 +59,31 @@ always resolve back to the passage via the existing `luminaNavigate` window API.
 
 ---
 
+## GOVERNING PRINCIPLE — THE NETWORK NEVER GATES THE BASELINE
+
+The network is a **non-authoritative, progressively-enhancing overlay**, not a dependency.
+This principle outranks every feature below it. Three consequences:
+
+1. **It is both background structure and a surfaceable view.** By default the graph accretes
+   invisibly as the reader uses the app. On demand it renders as a navigable web. Same data,
+   two faces — never one or the other.
+
+2. **Nothing requires it to exist.** Every experience that *can* be enhanced by the network
+   has a complete baseline that works with an empty graph: search falls back to the existing
+   library/archive indexes, the suggestion carousel falls back to just "＋ New Note," the
+   reader falls back to today's per-book Notepad. Cold start is not an error state — it is the
+   honest beginning, and it silently grows teeth as the corpus grows.
+
+3. **Reliance scales with maturity.** The network's influence is *weighted by how much of it
+   exists*. A 5-note library barely feels its hand; a 500-note library lets it genuinely
+   govern. The reader earns the network's authority by building it through use — the app
+   never pretends to know more than the data supports.
+
+A reader who never builds a network still has the full Lumina they have today. A reader who
+builds a deep one gets a second brain. There is no cliff between those states — only a slope.
+
+---
+
 ## RELATIONSHIP TO WHAT EXISTS TODAY
 
 | Today | Becomes |
@@ -323,6 +348,92 @@ Both register into `network_media_assets`, so the Sunburst and Hub can show and 
 
 ---
 
+## PART 7 — SURFACING: THE CONSTELLATION (two zoom levels of one graph)
+
+The network is background structure *and* a surfaceable view (per the Governing Principle).
+The surfaceable form is a single graph rendered at two scales:
+
+### 7a. Library-wide Constellation (the star-field)
+
+A force-directed view of **every node across the whole library**. This is the "web of
+interconnected nodes" — the bird's-eye of the reader's thinking.
+
+- **Nodes are heterogeneous.** A node is any knowledge artifact, not just a note:
+  highlight, NetworkNote, audio overview, teaching schema (study guide / SIP), generated
+  image, presentation deck. Each renders with a glyph for its kind.
+- **A node need not be complete to exist.** An orphaned note with zero edges is a
+  first-class node — a **lone star**, rendered dim and adrift. It is still indexed and still
+  matchable; it simply hasn't been connected yet.
+- **Edges are typed and weighted:**
+  - `provenance` — note → the passage(s) it was built from (strong, explicit).
+  - `similarity` — note ↔ note via cosine ≥ floor (discovered, weight = score).
+  - `membership` — node → its network (the clustering force).
+  - `derivation` — generated asset → its source notes (audio/deck → inputs).
+- **Clusters are networks.** Nodes pulled together by membership + similarity *are* the
+  reader's networks — some named, some still emergent. The force layout makes a named
+  network read as a constellation and an un-named dense cluster read as a candidate one
+  ("you seem to be forming a network here — name it?").
+- **Revelation = an edge being born.** When a fresh highlight's embedding crosses the floor
+  against a lone star, the new edge **animates into existence** and the star drifts into the
+  cluster. That visible moment — a solitary thought suddenly connected — is the emotional
+  core of the feature and is on-brand for Lumina's atmosphere.
+
+Reached from the Networks rail destination as the default landing view ("Constellation"),
+with the named-network list beside it.
+
+### 7b. Per-network Sunburst (the focused view)
+
+Zooming into one cluster collapses the star-field into the radial `SunburstNote` view from
+PART 5 (hub = network, ring = books, sectors = notes, points = passages). The Constellation
+is the macro; the Sunburst is the micro. Same underlying graph, different lens.
+
+### Build note
+
+The Constellation is **read-only over the same stores** — it derives nodes from
+NetworkNotes + provenance + media assets and edges from membership + an on-demand
+similarity pass. It builds nothing new in the data model; it is purely a projection. It can
+therefore ship *after* everything else and is never on the critical path.
+
+---
+
+## PART 8 — PROGRESSIVE-ENHANCEMENT SEARCH (how the network governs recall)
+
+This is the concrete mechanism behind the Governing Principle. Search and suggestion are
+**two-tier with automatic fallback** — the network re-ranks when present, the baseline
+index always answers.
+
+### Baseline tier (always on, ships first, zero graph required)
+
+The existing library + archive lexical search over titles, quotes, and note bodies. Works
+with an empty graph, no key, and offline. This is the floor the experience never drops
+below.
+
+### Enhanced tier (engages only when the graph is rich enough)
+
+1. Embed the query (one cached Gemini call).
+2. Cosine over stored note/highlight embeddings (local, brute-force, instant).
+3. **Merge and re-rank** the lexical results — boost semantically-near hits and same-network
+   items, and append a "related across your library" strip.
+4. Blend: `score = α·lexical + β·semantic + γ·network-bonus`.
+
+**β and γ scale with corpus maturity.** A near-empty library leaves α dominant (the network
+barely nudges); a deep one lets β/γ genuinely steer. Maturity is a cheap signal — node
+count, edge density, embedding coverage — so reliance grows automatically with how much the
+reader has actually built. The app never claims more authority than the data earns.
+
+### The preference + fallback
+
+A browser/app setting — **"Use network relations to enhance search & suggestions"** — with
+automatic fallback to the plain index whenever: the graph is below a maturity threshold, no
+embedding key is set, or the device is offline. Default: **on-when-available**. The reader
+can force baseline-only if they prefer determinism.
+
+The same tiering governs the **suggestion carousel**: rich graph → ranked semantic cards;
+sparse graph → just "＋ New Note." Cold start is not an empty state, it is the honest
+beginning.
+
+---
+
 ## DATA LIFECYCLE (one diagram)
 
 ```
@@ -377,6 +488,17 @@ Both register into `network_media_assets`, so the Sunburst and Hub can show and 
 - Network-scope Audio Overview (comparative cross-book brief → Gemini TTS).
 - Network presentation deck (graph → slides). Register both as `NetworkMediaAsset`.
 
+### Phase 7 — Progressive-enhancement search (PART 8)
+- Ship the two-tier search/suggestion blend with the maturity-weighted re-rank, the
+  preference toggle, and automatic fallback to the existing library/archive index. Note:
+  the *baseline tier already exists today* — this phase only adds the enhanced overlay, so
+  it can land incrementally and degrade safely from day one.
+
+### Phase 8 — Library-wide Constellation (PART 7a)
+- Force-directed star-field over the existing stores (read-only projection — no new data
+  model). Heterogeneous node glyphs, typed/weighted edges, lone-star orphans, edge-birth
+  animation. Ships last; never on the critical path.
+
 ---
 
 ## OPEN QUESTIONS / DECISIONS
@@ -392,6 +514,14 @@ Both register into `network_media_assets`, so the Sunburst and Hub can show and 
    coexist rather than replacing the Notepad.
 6. **Privacy copy.** One honest line that note text is embedded via the Google key
    (already used for analysis); keyword fallback when no key.
+7. **Maturity thresholds (PART 8).** What node-count / edge-density / coverage values flip
+   the enhanced tier on and set β/γ weight? Start conservative (enhanced engages only past
+   a few dozen embedded nodes) and tune on a real growing library.
+8. **Search preference default.** Recommend **on-when-available** with a force-baseline
+   escape hatch. Confirm.
+9. **Constellation node scope (PART 7a).** Ship with notes + passages + media assets as
+   nodes first; fold in highlights/images/teaching-schemas as node kinds once the layout is
+   legible. Confirm the v1 node set.
 
 ---
 
