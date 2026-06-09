@@ -253,8 +253,8 @@ export default function StructuredTextRenderer({
   const listenAlongMode = useAudioStore((s) => s.listenAlongMode);
   const isFocused = useUiStore((s) => s.focusMode === "reader");
   const { isTablet } = useDeviceLayout();
-  // Desktop focus spread only — never apply column layout on tablet.
-  const useFocusColumns = !isTablet && isFocused && !listenAlongMode;
+  // Expanded reader spread: two columns on desktop only. Tablet stays single column.
+  const useFocusColumns = isFocused && !listenAlongMode && !isTablet;
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Word offset within the current chapter, preserved across re-pagination so
@@ -649,13 +649,13 @@ export default function StructuredTextRenderer({
       ) : (
         <div
           className={
-            isTablet
-              ? "relative z-10 flex h-full w-full max-w-full flex-col overflow-hidden"
-              : `relative z-10 flex h-full flex-col overflow-hidden ${
-                  isFocused
-                    ? "mx-auto w-full max-w-[min(100%,50%)]"
-                    : "mx-auto w-full max-w-[min(100%,810px)]"
+            isFocused
+              ? `relative z-10 mx-auto flex h-full w-full flex-col overflow-hidden ${
+                  isTablet ? "max-w-[min(100%,94%)]" : "max-w-[min(100%,88%)]"
                 }`
+              : isTablet
+                ? "relative z-10 flex h-full w-full max-w-full flex-col overflow-hidden"
+                : "relative z-10 mx-auto flex h-full w-full max-w-[min(100%,810px)] flex-col overflow-hidden"
           }
         >
           <div className="mb-4 flex items-center justify-between border-b border-hair pb-3">
@@ -670,17 +670,16 @@ export default function StructuredTextRenderer({
           </div>
           <div
             ref={contentRef}
-            className={
-              isTablet
-                ? `min-h-0 flex-1 overscroll-contain pr-[0.25in] font-serif text-ink [text-wrap:pretty] ${
-                    listenAlongMode ? "overflow-y-auto" : "overflow-hidden"
-                  }`
-                : `min-h-0 flex-1 overscroll-contain font-serif text-ink [text-wrap:pretty] ${
-                    useFocusColumns
-                      ? "overflow-hidden columns-2 gap-12 [column-fill:auto]"
-                      : "overflow-y-auto pr-2"
-                  }`
-            }
+            className={[
+              "min-h-0 flex-1 overscroll-contain font-serif text-ink [text-wrap:pretty]",
+              useFocusColumns
+                ? "overflow-hidden columns-2 gap-10 [column-fill:auto] lg:gap-12"
+                : isTablet
+                  ? listenAlongMode
+                    ? "overflow-y-auto pr-[0.25in]"
+                    : "overflow-hidden pr-[0.25in]"
+                  : "overflow-y-auto pr-2",
+            ].join(" ")}
           >
             {currentText.split(/\n{2,}/).map((paragraph, index) => (
               <ReadAlongParagraph
