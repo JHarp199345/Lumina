@@ -10,6 +10,7 @@ import { resolveChapterIndex } from "@/utils/chapterNavigation";
 import { parseChapterDisplay } from "@/utils/titleUtils";
 import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
+import { ensureReadingParagraphs } from "@/utils/readingText";
 import type { Chapter } from "@/types";
 
 const DEFAULT_WORDS_PER_PAGE = 220;
@@ -43,7 +44,7 @@ function splitIntoPageSegments(
 ): PageSegment[] {
   const wpp = Math.max(60, Math.round(wordsPerPage));
   const display = parseChapterDisplay(chapterTitle);
-  const cleanedText = removeLeadingDuplicateHeading(text, [
+  const cleanedText = removeLeadingDuplicateHeading(ensureReadingParagraphs(text), [
     chapterTitle,
     display.title,
     display.subtitle ?? "",

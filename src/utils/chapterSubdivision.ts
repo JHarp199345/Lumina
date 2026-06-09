@@ -5,6 +5,7 @@
  */
 
 import type { Chapter, Section } from "@/types";
+import { ensureReadingParagraphs, sliceTextByWordRange } from "@/utils/readingText";
 
 /** Target max words per reading chapter after subdivision. */
 export const READING_CHAPTER_MAX_WORDS = 3200;
@@ -32,7 +33,7 @@ function buildSections(text: string, chapterId: string): Section[] {
 }
 
 function splitTextAtParagraphs(text: string, maxWords: number): string[] {
-  const paragraphs = text
+  const paragraphs = ensureReadingParagraphs(text)
     .split(/\n{2,}/)
     .map((p) => p.replace(/\s+/g, " ").trim())
     .filter(Boolean);
@@ -155,8 +156,7 @@ function subdivideOneChapter(chapter: Chapter): Chapter[] {
 
   return parts.map(({ start, end }, partIndex) => {
     const id = `${chapter.id}_p${partIndex}`;
-    const allWords = (chapter.rawText || "").split(/\s+/).filter(Boolean);
-    const rawText = allWords.slice(start, end).join(" ");
+    const rawText = sliceTextByWordRange(chapter.rawText || "", start, end);
     const slicedSections = sliceSections(sections, start, end).map((section, index) => ({
       ...section,
       id: `${id}_s${index}`,

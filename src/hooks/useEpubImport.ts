@@ -12,6 +12,7 @@ import { storage } from "@/storage";
 import type { Book, BookStructure, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { subdivideOversizedChapters, READING_CHAPTER_MIN_SPLIT } from "@/utils/chapterSubdivision";
+import { ensureReadingParagraphs } from "@/utils/readingText";
 import { getDisplayImage, hydrateImageWordPositions } from "@/utils/imagePosition";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { diagnosticInfo } from "@/utils/diagnostics";
@@ -274,11 +275,23 @@ export function useEpubImport() {
         if (split.length > structure.chapters.length) {
           structure = {
             ...structure,
-            chapters: split,
+            chapters: split.map((chapter) => ({
+              ...chapter,
+              rawText: ensureReadingParagraphs(chapter.rawText ?? ""),
+            })),
             totalWords: split.reduce((sum, chapter) => sum + chapter.wordCount, 0),
           };
           await storage.saveBookStructure(structure).catch(() => {});
           onProgress?.(`Refined ${split.length} reading sections for visual pacing…`);
+        } else if (structure.chapters.some((ch) => !(ch.rawText ?? "").includes("\n\n"))) {
+          structure = {
+            ...structure,
+            chapters: structure.chapters.map((chapter) => ({
+              ...chapter,
+              rawText: ensureReadingParagraphs(chapter.rawText ?? ""),
+            })),
+          };
+          await storage.saveBookStructure(structure).catch(() => {});
         }
       }
 
