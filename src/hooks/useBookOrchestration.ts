@@ -26,6 +26,7 @@ import {
   hydrateImageWordPositions,
 } from "@/utils/imagePosition";
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
+import { LUMINA_CONFIG } from "@/config";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import type {
   AnalysisProgressDetail,
@@ -153,18 +154,49 @@ export function useBookOrchestration() {
       const seedId = state.activeStyleSeed;
       if (!seedId) return;
 
-      const currentChapterIndex = useReaderStore.getState().currentChapterIndex;
-      const slice = getAnalysisSlice(structure, currentChapterIndex);
+      const slice = getAnalysisSlice(structure, 0);
 
       // Delete cached segment map so _runAnalysis doesn't find it.
       await storage.deleteSemanticMap(slice.semanticBookId).catch(() => {});
 
+      clearQueue();
       setActiveSemanticMap(null);
       await _runAnalysis(slice.structure, seedId, slice.semanticBookId, slice.label, {
         ensureOpeningImage: false,
       });
+
+      const semanticMap = useBookStore.getState().activeSemanticMap;
+      if (!semanticMap) return;
+
+      const chapters = structure.chapters;
+      const persistedImages = await storage.loadImages(slice.semanticBookId).catch(() => [] as CachedImage[]);
+      const hydrated = hydrateImageWordPositions(persistedImages, semanticMap.scenes, chapters);
+      hydrated.forEach((image) => addToCache(image));
+
+      const win = window as Window & { luminaNavigate?: (target: string) => void };
+      win.luminaNavigate?.("lumina://chapter/0/page/0");
+      useReaderStore.getState().setCurrentCfi("lumina://chapter/0/page/0");
+      useReaderStore.getState().setCurrentChapterIndex(0);
+      useReaderStore.getState().setPercentComplete(0);
+      useReaderStore.getState().setWordPosition(0);
+      useImageStore.getState().markNavigationJump();
+
+      const imageToDisplay = getDisplayImage(hydrated, 0, chapters);
+      if (imageToDisplay) {
+        setCurrentImage(imageToDisplay);
+        setCurrentThemes(imageToDisplay.emotionalThemes);
+      } else {
+        setCurrentImage(null);
+        setCurrentThemes([]);
+      }
+
+      diagnosticInfo("reanalyze.restore", "Re-analysis complete — restored opening position and cached art", {
+        semanticBookId: slice.semanticBookId,
+        persistedImages: hydrated.length,
+        displayedSceneId: imageToDisplay?.sceneId ?? null,
+      });
     },
-    [setActiveSemanticMap]
+    [setActiveSemanticMap, clearQueue, addToCache, setCurrentImage, setCurrentThemes]
   );
 
   // ── Regenerate all images (keeps the plan; lazy from current position) ───────
@@ -410,7 +442,13 @@ export function useBookOrchestration() {
       }
 
       const persistedImages = await storage.loadImages(semanticBookId).catch(() => [] as CachedImage[]);
-      const persisted = findImageAtPosition(persistedImages, scenePosition, chapters);
+      const persisted = findImageAtPosition(
+        persistedImages,
+        scenePosition,
+        chapters,
+        undefined,
+        LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE
+      );
       if (persisted) {
         addToCache(persisted);
         if (shouldDisplay) {

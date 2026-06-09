@@ -817,17 +817,6 @@ function ImageGalleryModal({
               Rebuilds the visual scaffold. The slider below erases generated images.
             </p>
           )}
-          {isAnalyzing && (
-            <div className="w-[min(420px,80vw)] rounded-full border border-hair bg-black/28 p-1 backdrop-blur-sm">
-              <div
-                className="h-1.5 rounded-full bg-lumina-gold/70 transition-all duration-500"
-                style={{ width: `${Math.max(6, Math.min(100, analysisProgressDetail?.percent ?? 12))}%` }}
-              />
-              <p className="mt-2 truncate text-center text-[11px] tracking-wide text-ink-faint">
-                {analysisProgressDetail?.message || analysisProgress || "Preparing the visual story..."}
-              </p>
-            </div>
-          )}
         </div>
 
         {/* Slide-to-confirm wipe + repaint. Only offered when images exist. */}

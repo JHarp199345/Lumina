@@ -6,6 +6,12 @@ export const LUMINA_CONFIG = {
   GENERATION_APPROACH_DISTANCE_WORDS: 5000,
   /** Pre-generate planned images when the reader is within this many words. */
   VISUAL_PRELOAD_DISTANCE_WORDS: 1000,
+  /** |ΔwordPosition| above this = navigation jump, not continuous reading. */
+  VISUAL_JUMP_THRESHOLD_WORDS: 2500,
+  /** Re-analysis may shift scene anchors slightly; reuse images within this span. */
+  VISUAL_POSITION_MATCH_TOLERANCE: 400,
+  /** After a jump, only auto-queue scenes within this many words of the landing spot. */
+  VISUAL_JUMP_QUEUE_WINDOW_WORDS: 1000,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words

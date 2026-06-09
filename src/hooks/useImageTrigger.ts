@@ -54,6 +54,8 @@ export function useImageTrigger() {
     isGenerating,
     setIsGenerating,
     getCachedImageAtPosition,
+    navigationJumpUntil,
+    pruneQueueOutsideWindow,
   } = useImageStore();
   const { imageGenerationEnabled } = useSettingsStore();
 
@@ -61,11 +63,15 @@ export function useImageTrigger() {
   const priorPromptRef = useRef<string>("");
   const generatedCountRef = useRef(0);
   const lastDisplayDecisionRef = useRef<string>("");
+  const lastWordPositionRef = useRef(0);
+  const lastForwardPositionRef = useRef(0);
 
   useEffect(() => {
     priorPromptRef.current = "";
     generatedCountRef.current = 0;
     lastDisplayDecisionRef.current = "";
+    lastWordPositionRef.current = 0;
+    lastForwardPositionRef.current = 0;
   }, [activeBook?.id]);
 
   const getSceneWordPosition = useCallback(
@@ -162,6 +168,32 @@ export function useImageTrigger() {
       const beat = activeSemanticMap.storyboard?.beats.find((item) => item.sceneId === scene.id);
       return beat?.generationIntent !== "planned_only";
     });
+
+    const positionDelta = wordPosition - lastWordPositionRef.current;
+    const isNavigationJump =
+      Date.now() < navigationJumpUntil ||
+      Math.abs(positionDelta) >= LUMINA_CONFIG.VISUAL_JUMP_THRESHOLD_WORDS;
+    const isMovingForward = positionDelta >= -120;
+
+    if (isNavigationJump) {
+      pruneQueueOutsideWindow(
+        wordPosition,
+        LUMINA_CONFIG.VISUAL_JUMP_QUEUE_WINDOW_WORDS,
+        0
+      );
+    } else {
+      pruneQueueOutsideWindow(
+        wordPosition,
+        LUMINA_CONFIG.VISUAL_PRELOAD_DISTANCE_WORDS,
+        0
+      );
+    }
+
+    lastWordPositionRef.current = wordPosition;
+    if (isMovingForward) {
+      lastForwardPositionRef.current = wordPosition;
+    }
+
     const passedGeneratableScenes = generatableScenes.filter(({ position }) => position <= wordPosition);
     const governingPlannedScene = passedGeneratableScenes[passedGeneratableScenes.length - 1] ?? null;
 
@@ -185,30 +217,37 @@ export function useImageTrigger() {
         bookId: activeSemanticMap.bookId,
         distance: governingPlannedScene.position - wordPosition,
         anchorPosition: governingPlannedScene.position,
+        navigationJump: isNavigationJump,
       });
     }
 
-    const preloadDistance = LUMINA_CONFIG.VISUAL_PRELOAD_DISTANCE_WORDS;
-    for (const { scene, position: scenePos } of generatableScenes) {
-      if (getCachedImageAtPosition(scenePos, chapters)) continue;
+    const preloadDistance = isNavigationJump
+      ? LUMINA_CONFIG.VISUAL_JUMP_QUEUE_WINDOW_WORDS
+      : LUMINA_CONFIG.VISUAL_PRELOAD_DISTANCE_WORDS;
 
-      const distance = scenePos - wordPosition;
+    // Read-ahead only while moving forward naturally — never gap-fill on jumps or scroll-back.
+    if (isMovingForward && !isNavigationJump) {
+      for (const { scene, position: scenePos } of generatableScenes) {
+        if (getCachedImageAtPosition(scenePos, chapters)) continue;
 
-      if (distance > 0 && distance <= preloadDistance) {
-        enqueue({
-          sceneId: scene.id,
-          bookId: activeSemanticMap.bookId,
-          wordPosition: scenePos,
-          priority: distance,
-          status: "pending",
-          description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
-        });
-        diagnosticInfo("image.queue.enqueue", "Queued nearby visual anchor", {
-          sceneId: scene.id,
-          bookId: activeSemanticMap.bookId,
-          distance,
-          anchorPosition: scenePos,
-        });
+        const distance = scenePos - wordPosition;
+
+        if (distance > 0 && distance <= preloadDistance) {
+          enqueue({
+            sceneId: scene.id,
+            bookId: activeSemanticMap.bookId,
+            wordPosition: scenePos,
+            priority: distance,
+            status: "pending",
+            description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
+          });
+          diagnosticInfo("image.queue.enqueue", "Queued nearby visual anchor", {
+            sceneId: scene.id,
+            bookId: activeSemanticMap.bookId,
+            distance,
+            anchorPosition: scenePos,
+          });
+        }
       }
     }
   }, [
@@ -222,6 +261,8 @@ export function useImageTrigger() {
     setCurrentImage,
     setCurrentThemes,
     getCachedImageAtPosition,
+    navigationJumpUntil,
+    pruneQueueOutsideWindow,
   ]);
 
   const processQueue = useCallback(async () => {
@@ -234,13 +275,34 @@ export function useImageTrigger() {
     if (!semanticMap) return;
 
     const scene = semanticMap.scenes.find((s) => s.id === next.sceneId);
-    if (!scene) return;
+    if (!scene) {
+      updateQueueItemStatus(next.sceneId, "complete");
+      return;
+    }
 
     const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
+    const readerPosition = useReaderStore.getState().wordPosition;
     const scenePosition =
       typeof next.wordPosition === "number"
         ? next.wordPosition
         : computeSceneWordPosition(scene, chapters);
+
+    const aheadLimit =
+      Date.now() < useImageStore.getState().navigationJumpUntil
+        ? LUMINA_CONFIG.VISUAL_JUMP_QUEUE_WINDOW_WORDS
+        : LUMINA_CONFIG.VISUAL_PRELOAD_DISTANCE_WORDS;
+    const sceneDelta = scenePosition - readerPosition;
+    if (sceneDelta > aheadLimit || sceneDelta < -LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE) {
+      updateQueueItemStatus(next.sceneId, "complete");
+      diagnosticInfo("image.queue.skip_distant", "Skipping queued scene outside reader window", {
+        sceneId: next.sceneId,
+        scenePosition,
+        readerPosition,
+        sceneDelta,
+        aheadLimit,
+      });
+      return;
+    }
 
     const existingMemoryImage = getCachedImageAtPosition(scenePosition, chapters);
     if (existingMemoryImage) {
@@ -249,7 +311,13 @@ export function useImageTrigger() {
     }
 
     const persistedImages = await storage.loadImages(next.bookId).catch(() => [] as CachedImage[]);
-    const existingPersistedImage = findImageAtPosition(persistedImages, scenePosition, chapters);
+    const existingPersistedImage = findImageAtPosition(
+      persistedImages,
+      scenePosition,
+      chapters,
+      undefined,
+      LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE
+    );
     if (existingPersistedImage) {
       addToCache(existingPersistedImage);
       updateQueueItemStatus(next.sceneId, "complete");

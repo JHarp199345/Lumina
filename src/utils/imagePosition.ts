@@ -88,15 +88,30 @@ export function findImageAtPosition(
   images: Iterable<CachedImage>,
   position: number,
   chapters: Chapter[],
-  scenesById?: Map<string, IdentifiedScene>
+  scenesById?: Map<string, IdentifiedScene>,
+  tolerance = 0
 ): CachedImage | undefined {
+  let best: CachedImage | undefined;
+  let bestDistance = tolerance >= 0 ? tolerance + 1 : 1;
+
   for (const image of images) {
     const scene = scenesById?.get(image.sceneId);
-    if (resolveImageWordPosition(image, chapters, scene) === position) {
-      return image;
+    const imagePosition = resolveImageWordPosition(image, chapters, scene);
+    if (imagePosition < 0) continue;
+
+    if (tolerance <= 0) {
+      if (imagePosition === position) return image;
+      continue;
+    }
+
+    const distance = Math.abs(imagePosition - position);
+    if (distance <= tolerance && distance < bestDistance) {
+      best = image;
+      bestDistance = distance;
     }
   }
-  return undefined;
+
+  return best;
 }
 
 export function getImageForScene(

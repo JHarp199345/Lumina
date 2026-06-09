@@ -26,6 +26,7 @@ import SeedPicker from "@/components/visual/SeedPicker";
 import OnboardingModal from "@/components/common/OnboardingModal";
 import SettingsPanel from "@/components/common/SettingsPanel";
 import LibraryPanel from "@/components/common/LibraryPanel";
+import GlobalProgressOverlay from "@/components/common/GlobalProgressOverlay";
 import VisualDebugOverlay from "@/components/debug/VisualDebugOverlay";
 import type { StyleSeedId, BookStructure } from "@/types";
 
@@ -38,6 +39,11 @@ function App() {
     analysisRequested,
     setAnalysisRequested,
     setActiveStructure,
+    isAnalyzing,
+    analysisProgress,
+    analysisProgressDetail,
+    setAnalysisProgress,
+    setAnalysisProgressDetail,
   } = useBookStore();
   const [showOnboarding, setShowOnboarding] = useState(!hasCompletedOnboarding);
   const { importEpub, importEpubFile, loadLibrary, openBook } = useEpubImport();
@@ -189,7 +195,7 @@ function App() {
           hasSeed: Boolean(activeStyleSeed),
         });
         setImportFailed(false);
-        setImportProgress("Starting visual analysis…");
+        setImportProgress("");
 
         setAnalysisRequested(false);
 
@@ -199,9 +205,7 @@ function App() {
           } else {
             await startOrchestration(structure, activeStyleSeed);
           }
-          setImportProgress("");
         } else {
-          setImportProgress("");
           setPendingSeedSelection({ structure });
         }
       } catch (err) {
@@ -259,6 +263,19 @@ function App() {
     if (message) console.info("[Lumina Import]", message);
   };
 
+  const analysisProgressHint = (() => {
+    if (analysisProgressDetail?.phase === "scoring") {
+      return "Scoring each chapter's emotional tone — large books take longer.";
+    }
+    if (analysisProgressDetail?.phase === "scenes") {
+      return "Finding the key visual moments across the story.";
+    }
+    if (analysisProgressDetail?.phase === "prompts" || analysisProgressDetail?.phase === "opening-image") {
+      return "Turning story beats into image briefs for your style.";
+    }
+    return "Building your visual plan — large books can take a minute.";
+  })();
+
   const importProgressHint = (() => {
     if (importFailed) return "The failed step is listed below.";
     const step = importProgress.toLowerCase();
@@ -271,11 +288,16 @@ function App() {
     if (step.includes("saving") || step.includes("mounting")) {
       return "Almost ready — finishing setup.";
     }
-    if (step.includes("analysis") || step.includes("visual")) {
-      return "Building your visual plan — large books can take a minute.";
-    }
     return "Working…";
   })();
+
+  const analysisFailed = analysisProgressDetail?.phase === "error";
+  const showAnalysisOverlay =
+    isAnalyzing ||
+    (analysisProgressDetail != null && analysisProgressDetail.phase !== "complete");
+  const showImportOverlay = Boolean(importProgress) && !showAnalysisOverlay;
+  const showProgressOverlay =
+    showAnalysisOverlay || showImportOverlay || importFailed || analysisFailed;
 
   const handleImport = async () => {
     let failed = false;
@@ -318,9 +340,7 @@ function App() {
     setPendingSeedSelection(null);
     try {
       setImportFailed(false);
-      setImportProgress("Starting visual analysis…");
       await startOrchestration(structure, seedId);
-      setImportProgress("");
     } catch (err) {
       console.error("[Lumina Analysis] Failed after style selection:", err);
       diagnosticError("analysis.seed_selection.failed", "Analysis failed after style selection", {
@@ -386,50 +406,25 @@ function App() {
       <FloatingAudioPlayer />
       <SunburstNote />
 
-      <AnimatePresence>
-        {importProgress && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim backdrop-blur-sm"
-          >
-            <div className="w-[min(560px,calc(100vw-2rem))] rounded-xl border border-hair bg-surface-dark px-5 py-4 shadow-2xl">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm text-ink/80">{importProgress}</p>
-                  <p className="mt-1 text-xs text-ink-faint">{importProgressHint}</p>
-                </div>
-                {importFailed && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImportFailed(false);
-                      setImportProgress("");
-                    }}
-                    className="rounded-md border border-sky-200/15 px-3 py-1 text-xs text-ink-soft transition hover:border-hair hover:text-ink"
-                  >
-                    Close
-                  </button>
-                )}
-              </div>
-
-              {importDetails.length > 0 && (
-                <div className="mt-4 max-h-48 space-y-1 overflow-auto rounded-lg border border-hair bg-black/20 p-3">
-                  {importDetails.map((detail, index) => (
-                    <p
-                      key={`${detail}-${index}`}
-                      className="break-words font-mono text-[11px] leading-relaxed text-ink/45"
-                    >
-                      {detail}
-                    </p>
-                  ))}
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <GlobalProgressOverlay
+        visible={showProgressOverlay}
+        mode={showAnalysisOverlay ? "analysis" : "import"}
+        message={
+          showAnalysisOverlay
+            ? analysisProgressDetail?.message || analysisProgress || "Starting visual analysis…"
+            : importProgress
+        }
+        hint={showAnalysisOverlay ? analysisProgressHint : importProgressHint}
+        detail={showAnalysisOverlay ? analysisProgressDetail : null}
+        log={showImportOverlay ? importDetails : []}
+        failed={importFailed || analysisFailed}
+        onDismiss={() => {
+          setImportFailed(false);
+          setImportProgress("");
+          setAnalysisProgress("");
+          setAnalysisProgressDetail(null);
+        }}
+      />
 
       {/* Style Seed Picker — appears after EPUB import */}
       <AnimatePresence>

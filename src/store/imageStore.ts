@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { CachedImage, Chapter, GenerationQueueItem, GenerationStatus } from "@/types";
+import { LUMINA_CONFIG } from "@/config";
 import { findImageAtPosition } from "@/utils/imagePosition";
 
 interface ImageStore {
@@ -14,6 +15,11 @@ interface ImageStore {
   // Generation queue
   queue: GenerationQueueItem[];
   isGenerating: boolean;
+  /** Set when the reader jumps (TOC, gallery, etc.) — suppresses gap-fill churn. */
+  navigationJumpUntil: number;
+
+  markNavigationJump: () => void;
+  pruneQueueOutsideWindow: (wordPosition: number, aheadWords: number, behindWords?: number) => void;
 
   setCurrentImage: (image: CachedImage | null) => void;
   setCurrentThemes: (themes: string[]) => void;
@@ -39,6 +45,20 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   imageCache: {},
   queue: [],
   isGenerating: false,
+  navigationJumpUntil: 0,
+
+  markNavigationJump: () =>
+    set({ navigationJumpUntil: Date.now() + 4000 }),
+
+  pruneQueueOutsideWindow: (wordPosition, aheadWords, behindWords = 0) =>
+    set((state) => ({
+      queue: state.queue.filter((item) => {
+        if (item.status === "generating") return true;
+        if (typeof item.wordPosition !== "number") return false;
+        const delta = item.wordPosition - wordPosition;
+        return delta >= -behindWords && delta <= aheadWords;
+      }),
+    })),
 
   setCurrentImage: (currentImage) => {
     console.info("[ImageStore] setCurrentImage:", currentImage?.sceneId ?? "null");
@@ -53,7 +73,13 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   getCachedImage: (sceneId) => get().imageCache[sceneId],
 
   getCachedImageAtPosition: (position, chapters) =>
-    findImageAtPosition(Object.values(get().imageCache), position, chapters),
+    findImageAtPosition(
+      Object.values(get().imageCache),
+      position,
+      chapters,
+      undefined,
+      LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE
+    ),
 
   enqueue: (item) =>
     set((state) => {
@@ -101,6 +127,7 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       imageCache: {},
       queue: [],
       isGenerating: false,
+      navigationJumpUntil: 0,
       });
     },
 }));

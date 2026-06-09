@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storage } from "@/storage";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
+import { useImageStore } from "@/store/imageStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useUiStore } from "@/store/uiStore";
 import { useAudioStore } from "@/store/audioStore";
@@ -393,9 +394,14 @@ export default function StructuredTextRenderer({
   );
 
   const goTo = useCallback(
-    (chapterIndex: number, nextPageIndex: number) => {
+    (
+      chapterIndex: number,
+      nextPageIndex: number,
+      options: { sequential?: boolean } = {}
+    ) => {
       if (!activeStructure) return;
       if (chapterIndex < 0 && activeBook?.coverImage) {
+        if (!options.sequential) useImageStore.getState().markNavigationJump();
         setPageIndex(0);
         saveLocation(-1, 0);
         return;
@@ -409,6 +415,10 @@ export default function StructuredTextRenderer({
       const pagesInChapter = Math.max(1, pages?.length ?? 1);
       const safePageIndex = Math.max(0, Math.min(pagesInChapter - 1, nextPageIndex));
 
+      if (!options.sequential) {
+        useImageStore.getState().markNavigationJump();
+      }
+
       // Record the word offset at the start of this page so re-pagination can
       // return the reader to the same text.
       chapterWordOffsetRef.current = chapterPageSegments[safeChapterIndex]?.[safePageIndex]?.startWordOffset ?? 0;
@@ -416,7 +426,7 @@ export default function StructuredTextRenderer({
       setPageIndex(safePageIndex);
       saveLocation(safeChapterIndex, safePageIndex);
     },
-    [activeBook?.coverImage, activeStructure, chapterPages, saveLocation]
+    [activeBook?.coverImage, activeStructure, chapterPages, chapterPageSegments, saveLocation]
   );
 
   useEffect(() => {
@@ -449,30 +459,30 @@ export default function StructuredTextRenderer({
   const nextPage = useCallback(() => {
     if (!activeStructure) return;
     if (currentChapterIndex < 0) {
-      goTo(0, 0);
+      goTo(0, 0, { sequential: true });
       return;
     }
 
     const pagesInChapter = Math.max(1, chapterPages[currentChapterIndex]?.length ?? 1);
-    if (pageIndex < pagesInChapter - 1) goTo(currentChapterIndex, pageIndex + 1);
-    else goTo(currentChapterIndex + 1, 0);
+    if (pageIndex < pagesInChapter - 1) goTo(currentChapterIndex, pageIndex + 1, { sequential: true });
+    else goTo(currentChapterIndex + 1, 0, { sequential: true });
   }, [activeStructure, chapterPages, currentChapterIndex, goTo, pageIndex]);
 
   const prevPage = useCallback(() => {
     if (!activeStructure) return;
     if (currentChapterIndex <= 0 && pageIndex === 0) {
-      if (activeBook?.coverImage) goTo(-1, 0);
+      if (activeBook?.coverImage) goTo(-1, 0, { sequential: true });
       return;
     }
 
     if (pageIndex > 0) {
-      goTo(currentChapterIndex, pageIndex - 1);
+      goTo(currentChapterIndex, pageIndex - 1, { sequential: true });
       return;
     }
 
     const previousChapter = currentChapterIndex - 1;
     const previousPages = Math.max(1, chapterPages[previousChapter]?.length ?? 1);
-    goTo(previousChapter, previousPages - 1);
+    goTo(previousChapter, previousPages - 1, { sequential: true });
   }, [activeBook?.coverImage, activeStructure, chapterPages, currentChapterIndex, goTo, pageIndex]);
 
   useEffect(() => {

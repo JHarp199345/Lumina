@@ -26,14 +26,21 @@ export default function LibraryPanel({
   const [openProgress, setOpenProgress] = useState("");
   const [view, setView] = useState<"library" | "open-shelf">("library");
 
+  const reportOpenProgress = (message: string) => {
+    setOpenProgress(message);
+    onImportProgress?.(message);
+  };
+
   const handleOpen = async (book: (typeof library)[0]) => {
-    setOpenProgress("Preparing reader…");
+    reportOpenProgress("Preparing reader…");
     try {
-      await openBook(book, setOpenProgress);
+      await openBook(book, reportOpenProgress);
       await new Promise((resolve) => setTimeout(resolve, 700));
+      onImportProgress?.("");
+      setOpenProgress("");
       onClose();
     } catch (err) {
-      setOpenProgress(
+      reportOpenProgress(
         `Open failed: ${err instanceof Error ? err.message : String(err)}`
       );
     }
