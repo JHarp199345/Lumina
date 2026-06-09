@@ -9,9 +9,9 @@ import ChapterHeader from "@/components/reader/ChapterHeader";
 import { isWeb } from "@/utils/runtime";
 
 const READING_WIDTH_CLASSES = {
-  narrow: "max-w-[480px]",
-  medium: "max-w-[640px]",
-  wide: "max-w-[800px]",
+  narrow: "max-w-[min(100%,560px)]",
+  medium: "max-w-[min(100%,820px)]",
+  wide: "w-full max-w-full",
 };
 
 interface ReaderPanelProps {
@@ -39,7 +39,7 @@ export default function ReaderPanel({ onImport }: ReaderPanelProps) {
 
       {/* EPUB Renderer */}
       <div
-        className={`flex-1 overflow-hidden mx-auto w-full ${READING_WIDTH_CLASSES[readingWidth]}`}
+        className={`flex-1 overflow-hidden w-full ${readingWidth === "wide" ? "" : "mx-auto"} ${READING_WIDTH_CLASSES[readingWidth]}`}
         style={{ fontSize: `${fontSize}px`, lineHeight }}
       >
         {!activeBook ? (

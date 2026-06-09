@@ -276,7 +276,7 @@ export default function StructuredTextRenderer({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [fontSize, lineHeight, currentChapterIndex]);
+  }, [fontSize, lineHeight, currentChapterIndex, isFocused]);
 
   const chapterPageSegments = useMemo(
     () =>
@@ -564,7 +564,7 @@ export default function StructuredTextRenderer({
 
   return (
     <div
-      className="reader-paper-surface relative h-full w-full overflow-hidden bg-reader px-6 py-5 text-ink"
+      className="reader-paper-surface relative h-full w-full overflow-hidden bg-reader px-[clamp(1rem,3vw,2rem)] py-5 text-ink"
       onClick={(event) => {
         // Don't turn the page while the reader is selecting text.
         const sel = window.getSelection();
@@ -622,7 +622,7 @@ export default function StructuredTextRenderer({
           )}
         </div>
       ) : (
-        <div className="relative z-10 mx-auto flex h-full max-w-[680px] flex-col overflow-hidden">
+        <div className="relative z-10 flex h-full w-full max-w-full flex-col overflow-hidden">
           <div className="mb-4 flex items-center justify-between border-b border-hair pb-3">
             <p className="text-[10px] uppercase tracking-[0.22em] text-lumina-gold/58">
               {activeBook.title}
