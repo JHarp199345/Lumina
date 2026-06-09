@@ -8,10 +8,11 @@ import StructuredTextRenderer from "@/components/reader/StructuredTextRenderer";
 import ChapterHeader from "@/components/reader/ChapterHeader";
 import { isWeb } from "@/utils/runtime";
 
+// Caps tuned so ~37% of the prior side margins remain (ref. ~880px reader panel).
 const READING_WIDTH_CLASSES = {
-  narrow: "max-w-[480px]",
-  medium: "max-w-[640px]",
-  wide: "max-w-[800px]",
+  narrow: "max-w-[min(100%,730px)]",
+  medium: "max-w-[min(100%,800px)]",
+  wide: "max-w-[min(100%,850px)]",
 };
 
 interface ReaderPanelProps {
