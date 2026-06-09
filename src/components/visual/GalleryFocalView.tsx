@@ -16,6 +16,7 @@ import { animate, AnimatePresence, motion, useMotionValue } from "framer-motion"
 import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, RefreshCw, Check, AlertTriangle } from "lucide-react";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
+import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
 function displaySrc(src: string): string {
@@ -85,34 +86,10 @@ export default function GalleryFocalView({
   const generatedCount = items.filter((item) => item.image).length;
 
   // Surface a calm, always-visible status for re-analysis — independent of the
-  // Book Visuals menu. The orchestration clears its "complete" detail in the same
-  // tick it flips isAnalyzing→false, so we observe that transition ourselves to
-  // hold a brief done/failed confirmation that the reader can actually see.
-  const wasAnalyzingRef = useRef(false);
-  const [outcome, setOutcome] = useState<{ kind: "done" | "error"; message: string } | null>(null);
+  // Book Visuals menu. The done/failed confirmation is held briefly after the
+  // run ends (see useAnalysisOutcome for why the transition is observed here).
+  const outcome = useAnalysisOutcome(isAnalyzing, analysisPhase, analysisProgress);
   const analysisPct = Math.max(6, Math.min(100, analysisPercent ?? 12));
-
-  useEffect(() => {
-    if (isAnalyzing) {
-      wasAnalyzingRef.current = true;
-      setOutcome(null);
-      return;
-    }
-    if (!wasAnalyzingRef.current) return;
-    wasAnalyzingRef.current = false;
-    setOutcome(
-      analysisPhase === "error"
-        ? { kind: "error", message: analysisProgress || "Analysis didn't finish. Try again." }
-        : { kind: "done", message: "Visual plan refreshed." }
-    );
-  }, [isAnalyzing, analysisPhase, analysisProgress]);
-
-  useEffect(() => {
-    if (!outcome) return;
-    const ms = outcome.kind === "error" ? 6000 : 4000;
-    const t = window.setTimeout(() => setOutcome(null), ms);
-    return () => window.clearTimeout(t);
-  }, [outcome]);
 
   const clamp = (i: number) => Math.max(0, Math.min(items.length - 1, i));
 

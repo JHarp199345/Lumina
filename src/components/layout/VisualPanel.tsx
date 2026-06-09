@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, animate } from "framer-motion";
-import { Sparkles, RefreshCw, Loader, MapPin, X, LayoutGrid, CornerUpLeft } from "lucide-react";
+import { Sparkles, RefreshCw, Loader, MapPin, X, LayoutGrid, CornerUpLeft, Check, AlertTriangle } from "lucide-react";
 import { useImageStore } from "@/store/imageStore";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
@@ -16,6 +16,7 @@ import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useLongPress } from "@/hooks/useLongPress";
 import AmbientSceneLayer, { type AmbientPhase } from "@/components/visual/AmbientSceneLayer";
 import GalleryFocalView from "@/components/visual/GalleryFocalView";
+import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import type { CachedImage, SemanticMap, VisualBeat } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -86,6 +87,15 @@ export default function VisualPanel() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
   const [returnCfi, setReturnCfi] = useState<string | null>(null);
+
+  // Brief done/failed confirmation after a (re-)analysis — the in-flight state is
+  // already shown by the ambient layer / image overlay; this fills the missing
+  // "it finished" moment that the orchestration clears too fast to paint.
+  const analysisOutcome = useAnalysisOutcome(
+    isAnalyzing,
+    analysisProgressDetail?.phase,
+    analysisProgressDetail?.message || analysisProgress
+  );
 
   const currentScene = currentImage
     ? activeSemanticMap?.scenes.find((scene) => scene.id === currentImage.sceneId)
@@ -304,6 +314,30 @@ export default function VisualPanel() {
             />
           );
         })()}
+
+        {/* Re-analysis confirmation — brief done/failed status the orchestration
+            otherwise clears too fast to see. In-flight progress is already shown
+            by the ambient layer / image overlay above. */}
+        <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center px-4">
+          <AnimatePresence>
+            {analysisOutcome && (
+              <motion.div
+                key={analysisOutcome.kind}
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="pointer-events-auto flex max-w-[calc(100%-16px)] items-center gap-2.5 rounded-xl border border-white/12 bg-[#081522]/92 px-3.5 py-2.5 shadow-2xl shadow-black/45 backdrop-blur-xl"
+              >
+                {analysisOutcome.kind === "done" ? (
+                  <Check size={14} className="shrink-0 text-emerald-300/90" />
+                ) : (
+                  <AlertTriangle size={14} className="shrink-0 text-rose-300/90" />
+                )}
+                <p className="truncate text-[12px] text-white/80">{analysisOutcome.message}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* Tablet: always-visible action button (44×44px touch target) */}
         {isTablet && currentImage && !isRegenerating && (
