@@ -7,6 +7,7 @@ import EpubRenderer from "@/components/reader/EpubRenderer";
 import StructuredTextRenderer from "@/components/reader/StructuredTextRenderer";
 import ChapterHeader from "@/components/reader/ChapterHeader";
 import { isWeb } from "@/utils/runtime";
+import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 
 // Caps tuned so ~37% of the prior side margins remain (ref. ~880px reader panel).
 const READING_WIDTH_CLASSES = {
@@ -24,6 +25,7 @@ export default function ReaderPanel({ onImport }: ReaderPanelProps) {
   const { currentChapterIndex, percentComplete } = useReaderStore();
   const { fontSize, lineHeight, readingWidth } = useSettingsStore();
   const isExpanded = useUiStore((s) => s.focusMode === "reader");
+  const { isTablet } = useDeviceLayout();
 
   const currentChapter = activeStructure?.chapters[currentChapterIndex];
 
@@ -41,7 +43,9 @@ export default function ReaderPanel({ onImport }: ReaderPanelProps) {
 
       {/* EPUB Renderer */}
       <div
-        className={`flex-1 overflow-hidden w-full ${isExpanded ? "" : `mx-auto ${READING_WIDTH_CLASSES[readingWidth]}`}`}
+        className={`flex-1 overflow-hidden w-full ${
+          isTablet || isExpanded ? "" : `mx-auto ${READING_WIDTH_CLASSES[readingWidth]}`
+        }`}
         style={{ fontSize: `${fontSize}px`, lineHeight }}
       >
         {!activeBook ? (

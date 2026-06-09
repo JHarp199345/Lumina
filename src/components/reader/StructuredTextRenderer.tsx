@@ -7,6 +7,7 @@ import { useUiStore } from "@/store/uiStore";
 import { useAudioStore } from "@/store/audioStore";
 import { parseChapterDisplay } from "@/utils/titleUtils";
 import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
+import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import type { Chapter } from "@/types";
 
 const DEFAULT_WORDS_PER_PAGE = 220;
@@ -248,6 +249,8 @@ export default function StructuredTextRenderer({
   const isAudioPlaying = useAudioStore((s) => s.isPlaying);
   const listenAlongMode = useAudioStore((s) => s.listenAlongMode);
   const isFocused = useUiStore((s) => s.focusMode === "reader");
+  const { isTablet } = useDeviceLayout();
+  const useFocusColumns = isFocused && !listenAlongMode && !isTablet;
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Word offset within the current chapter, preserved across re-pagination so
@@ -262,12 +265,15 @@ export default function StructuredTextRenderer({
     const el = contentRef.current;
     if (!el) return;
     const measure = () => {
-      const w = el.clientWidth;
-      const h = el.clientHeight;
+      const style = getComputedStyle(el);
+      const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+      const w = el.clientWidth - padX;
+      const h = el.clientHeight - padY;
       if (w < 60 || h < 60) return;
       const lineH = fontSize * lineHeight;
       const linesPerPage = Math.max(4, Math.floor(h / lineH));
-      const columnCount = isFocused ? FOCUS_COLUMN_COUNT : 1;
+      const columnCount = useFocusColumns ? FOCUS_COLUMN_COUNT : 1;
       const columnWidth =
         columnCount === 1
           ? w
@@ -283,7 +289,7 @@ export default function StructuredTextRenderer({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [fontSize, lineHeight, currentChapterIndex, isFocused]);
+  }, [fontSize, lineHeight, currentChapterIndex, useFocusColumns]);
 
   const chapterPageSegments = useMemo(
     () =>
@@ -572,7 +578,11 @@ export default function StructuredTextRenderer({
   return (
     <div
       className={`reader-paper-surface relative h-full w-full overflow-hidden bg-reader py-5 text-ink ${
-        isFocused ? "px-[clamp(1rem,2vw,1.5rem)]" : "px-[clamp(0.75rem,2vw,1.25rem)]"
+        isTablet
+          ? "pl-3 pr-0"
+          : isFocused
+            ? "px-[clamp(1rem,2vw,1.5rem)]"
+            : "px-[clamp(0.75rem,2vw,1.25rem)]"
       }`}
       onClick={(event) => {
         // Don't turn the page while the reader is selecting text.
@@ -633,9 +643,11 @@ export default function StructuredTextRenderer({
       ) : (
         <div
           className={`relative z-10 flex h-full flex-col overflow-hidden ${
-            isFocused
-              ? "mx-auto w-full max-w-[min(100%,50%)]"
-              : "mx-auto w-full max-w-[min(100%,810px)]"
+            isTablet
+              ? "w-full max-w-full"
+              : isFocused
+                ? "mx-auto w-full max-w-[min(100%,50%)]"
+                : "mx-auto w-full max-w-[min(100%,810px)]"
           }`}
         >
           <div className="mb-4 flex items-center justify-between border-b border-hair pb-3">
@@ -651,9 +663,11 @@ export default function StructuredTextRenderer({
           <div
             ref={contentRef}
             className={`min-h-0 flex-1 overscroll-contain font-serif text-ink [text-wrap:pretty] ${
-              isFocused && !listenAlongMode
+              useFocusColumns
                 ? "overflow-hidden columns-2 gap-12 [column-fill:auto]"
-                : "overflow-y-auto pr-2"
+                : isTablet
+                  ? `pr-[0.25in] ${listenAlongMode ? "overflow-y-auto" : "overflow-hidden"}`
+                  : "overflow-y-auto pr-2"
             }`}
           >
             {currentText.split(/\n{2,}/).map((paragraph, index) => (
