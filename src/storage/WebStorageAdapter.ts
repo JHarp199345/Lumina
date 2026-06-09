@@ -29,6 +29,7 @@ import type {
   StudyBadgeAward,
   StudyFlashcard,
   AudioArtifact,
+  PresentationDeck,
 } from "@/types";
 import {
   STORES,
@@ -341,6 +342,21 @@ export class WebStorageAdapter implements StorageAdapter {
     );
   }
 
+  // ── Presentation Studio ───────────────────────────────────────────────
+
+  async savePresentation(deck: PresentationDeck): Promise<void> {
+    await dbPut(STORES.PRESENTATIONS, deck);
+  }
+
+  async loadPresentations(bookId: string): Promise<PresentationDeck[]> {
+    const decks = await dbGetByIndex<PresentationDeck>(STORES.PRESENTATIONS, "bookId", bookId);
+    return decks.sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime());
+  }
+
+  async deletePresentations(bookId: string): Promise<void> {
+    await dbDeleteByIndex(STORES.PRESENTATIONS, "bookId", bookId);
+  }
+
   // ── Style seed ───────────────────────────────────────────────────────────
 
   async saveBookStyleSeed(bookId: string, seedId: StyleSeedId): Promise<void> {
@@ -429,6 +445,7 @@ export class WebStorageAdapter implements StorageAdapter {
       dbDeleteByIndex(STORES.STUDY_ATTEMPTS, "bookId", bookId),
       dbDeleteByIndex(STORES.STUDY_FLASHCARDS, "bookId", bookId),
       this.deleteAudioArtifacts(bookId),
+      this.deletePresentations(bookId),
       dbDelete(STORES.BOOK_SETTINGS, bookId),
       this.deleteImages(bookId),
     ]);

@@ -33,6 +33,12 @@ export const LUMINA_CONFIG = {
   AUDIO_OVERVIEW_TTS_CHUNK_CHARS: 1800,   // per Gemini TTS request
   AUDIO_OVERVIEW_DEFAULT_VOICE: "Kore",
 
+  // Presentation Studio (Gemini → structured slide deck)
+  PRESENTATION_DEFAULT_SLIDES: 16,
+  PRESENTATION_MIN_SLIDES: 8,
+  PRESENTATION_MAX_SLIDES: 32,
+  PRESENTATION_STEP: 2,
+
   // Storage
   IMAGE_CACHE_DIR: "lumina/cache/images",
   AUDIO_CACHE_DIR: "lumina/cache/audio",

@@ -40,6 +40,7 @@ import LensStudio from "@/components/knowledge/LensStudio";
 import StudyGuide from "@/components/knowledge/StudyGuide";
 import VoiceStudio from "@/components/knowledge/VoiceStudio";
 import AudioOverview from "@/components/knowledge/AudioOverview";
+import PresentationStudio from "@/components/knowledge/PresentationStudio";
 
 const LENS_EDGE: Record<string, string> = {
   yellow: "border-l-[#d8b24e]",
@@ -266,12 +267,7 @@ function PresentationStudioView({ onBack, onClose }: { onBack: () => void; onClo
   return (
     <>
       <DrawerHeader title="Presentation Studio" onBack={onBack} onClose={onClose} />
-      <UnderConstructionView
-        icon={<Presentation size={28} />}
-        label="Presentation Studio"
-        text="This will turn study guides, highlights, notes, quizzes, flashcards, and chapter structure into readable slide decks that can zoom from one chapter to the whole book."
-        points={["Chapter decks", "Whole-book decks", "Export-ready outlines"]}
-      />
+      <PresentationStudio />
     </>
   );
 }

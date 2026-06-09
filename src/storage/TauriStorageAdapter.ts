@@ -27,6 +27,7 @@ import type {
   StudyBadgeAward,
   StudyFlashcard,
   AudioArtifact,
+  PresentationDeck,
 } from "@/types";
 import {
   openEpubDialog,
@@ -77,6 +78,9 @@ import {
   dbSaveAudioArtifact,
   dbLoadAudioArtifacts,
   dbDeleteAudioArtifacts,
+  dbSavePresentation,
+  dbLoadPresentations,
+  dbDeletePresentations,
   dbSaveBookStyleSeed,
   dbLoadBookStyleSeed,
   dbSaveImageCache,
@@ -272,6 +276,20 @@ export class TauriStorageAdapter implements StorageAdapter {
     if (appDataDir) {
       await deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.AUDIO_CACHE_DIR}/${bookId}`).catch(() => {});
     }
+  }
+
+  // ── Presentation Studio ───────────────────────────────────────────────
+
+  async savePresentation(deck: PresentationDeck): Promise<void> {
+    await dbSavePresentation(deck);
+  }
+
+  async loadPresentations(bookId: string): Promise<PresentationDeck[]> {
+    return dbLoadPresentations(bookId);
+  }
+
+  async deletePresentations(bookId: string): Promise<void> {
+    await dbDeletePresentations(bookId);
   }
 
   // ── Style seed ───────────────────────────────────────────────────────────

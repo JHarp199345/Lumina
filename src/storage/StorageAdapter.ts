@@ -27,6 +27,7 @@ import type {
   StudyBadgeAward,
   StudyFlashcard,
   AudioArtifact,
+  PresentationDeck,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -114,6 +115,12 @@ export interface StorageAdapter {
   saveAudioArtifact(meta: Omit<AudioArtifact, "filePath">, data: Uint8Array): Promise<string>;
   loadAudioArtifacts(bookId: string): Promise<AudioArtifact[]>;
   deleteAudioArtifacts(bookId: string): Promise<void>;
+
+  // ── Presentation Studio ───────────────────────────────────────────────────
+
+  savePresentation(deck: PresentationDeck): Promise<void>;
+  loadPresentations(bookId: string): Promise<PresentationDeck[]>;
+  deletePresentations(bookId: string): Promise<void>;
 
   // ── Style seed ────────────────────────────────────────────────────────────
 

@@ -301,6 +301,20 @@ export function profileGroundingText(profile: SourceIntelligenceProfile): string
 
 // ─── Type-aware default prompt spine ────────────────────────────────────────────
 
+export function isUsableSourceProfile(
+  profile: SourceIntelligenceProfile | null
+): profile is SourceIntelligenceProfile {
+  if (!profile) return false;
+  return (
+    profile.sections.length > 0 &&
+    profile.suggestionBank.length > 0 &&
+    (profile.progression.length > 0 ||
+      profile.entities.length > 0 ||
+      profile.concepts.mainIdeas.length > 0 ||
+      profile.concepts.themes.length > 0)
+  );
+}
+
 export function defaultSpineForType(workType: WorkType, minutes: number, targetWords: number): string {
   const scholarly = workType === "nonfiction" || workType === "scholarly" || workType === "reference" || workType === "manual";
   if (scholarly) {

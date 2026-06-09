@@ -780,6 +780,42 @@ export interface AudioArtifact {
   overviewScript?: string;    // the generated summary script that was voiced (transcript)
 }
 
+// ─── Presentation Studio ──────────────────────────────────────────────────────
+
+export type PresentationTemplateId = "teach" | "pitch" | "chapter-walkthrough" | "themes-deep";
+
+export type PresentationSlideLayout = "title" | "section" | "content" | "quote" | "summary";
+
+export interface PresentationTemplate {
+  id: PresentationTemplateId;
+  label: string;
+  description: string;
+  /** Fixed project-brief instructions sent with every generation for this template. */
+  brief: string;
+}
+
+export interface PresentationSlide {
+  index: number;
+  layout: PresentationSlideLayout;
+  title: string;
+  bullets: string[];
+  speakerNotes: string;
+  visualHint?: string;
+}
+
+export interface PresentationDeck {
+  id: string;
+  bookId: string;
+  title: string;
+  scopeLabel: string;
+  templateId: PresentationTemplateId;
+  projectBrief: string;
+  userPrompt: string;
+  slideCount: number;
+  slides: PresentationSlide[];
+  generatedAt: string;
+}
+
 export interface AudioAlignmentSpan {
   startMs: number;
   endMs: number;
