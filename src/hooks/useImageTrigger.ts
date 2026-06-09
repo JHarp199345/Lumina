@@ -55,6 +55,7 @@ export function useImageTrigger() {
     setIsGenerating,
     getCachedImageAtPosition,
     navigationJumpUntil,
+    regenerateCooldownUntil,
     pruneQueueOutsideWindow,
   } = useImageStore();
   const { imageGenerationEnabled } = useSettingsStore();
@@ -173,7 +174,15 @@ export function useImageTrigger() {
     const isNavigationJump =
       Date.now() < navigationJumpUntil ||
       Math.abs(positionDelta) >= LUMINA_CONFIG.VISUAL_JUMP_THRESHOLD_WORDS;
-    const isMovingForward = positionDelta >= -120;
+    const hasAdvancedForward = positionDelta >= LUMINA_CONFIG.VISUAL_FORWARD_ADVANCE_WORDS;
+
+    if (hasAdvancedForward && Date.now() < regenerateCooldownUntil) {
+      useImageStore.setState({ regenerateCooldownUntil: 0 });
+    }
+
+    if (Date.now() < regenerateCooldownUntil) {
+      return;
+    }
 
     if (isNavigationJump) {
       pruneQueueOutsideWindow(
@@ -190,7 +199,7 @@ export function useImageTrigger() {
     }
 
     lastWordPositionRef.current = wordPosition;
-    if (isMovingForward) {
+    if (hasAdvancedForward) {
       lastForwardPositionRef.current = wordPosition;
     }
 
@@ -225,8 +234,8 @@ export function useImageTrigger() {
       ? LUMINA_CONFIG.VISUAL_JUMP_QUEUE_WINDOW_WORDS
       : LUMINA_CONFIG.VISUAL_PRELOAD_DISTANCE_WORDS;
 
-    // Read-ahead only while moving forward naturally — never gap-fill on jumps or scroll-back.
-    if (isMovingForward && !isNavigationJump) {
+    // Read-ahead only after meaningful forward reading — never on idle ticks, cache updates, or jumps.
+    if (hasAdvancedForward && !isNavigationJump) {
       for (const { scene, position: scenePos } of generatableScenes) {
         if (getCachedImageAtPosition(scenePos, chapters)) continue;
 
@@ -262,6 +271,7 @@ export function useImageTrigger() {
     setCurrentThemes,
     getCachedImageAtPosition,
     navigationJumpUntil,
+    regenerateCooldownUntil,
     pruneQueueOutsideWindow,
   ]);
 

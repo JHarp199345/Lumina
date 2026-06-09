@@ -17,8 +17,11 @@ interface ImageStore {
   isGenerating: boolean;
   /** Set when the reader jumps (TOC, gallery, etc.) — suppresses gap-fill churn. */
   navigationJumpUntil: number;
+  /** After regenerate-all: block auto-queue until the reader advances forward. */
+  regenerateCooldownUntil: number;
 
   markNavigationJump: () => void;
+  markRegenerateCooldown: () => void;
   pruneQueueOutsideWindow: (wordPosition: number, aheadWords: number, behindWords?: number) => void;
 
   setCurrentImage: (image: CachedImage | null) => void;
@@ -46,9 +49,13 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   queue: [],
   isGenerating: false,
   navigationJumpUntil: 0,
+  regenerateCooldownUntil: 0,
 
   markNavigationJump: () =>
     set({ navigationJumpUntil: Date.now() + 4000 }),
+
+  markRegenerateCooldown: () =>
+    set({ regenerateCooldownUntil: Date.now() + 60_000 }),
 
   pruneQueueOutsideWindow: (wordPosition, aheadWords, behindWords = 0) =>
     set((state) => ({
@@ -128,6 +135,7 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       queue: [],
       isGenerating: false,
       navigationJumpUntil: 0,
+      regenerateCooldownUntil: 0,
       });
     },
 }));

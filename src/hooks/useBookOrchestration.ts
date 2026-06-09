@@ -199,52 +199,6 @@ export function useBookOrchestration() {
     [setActiveSemanticMap, clearQueue, addToCache, setCurrentImage, setCurrentThemes]
   );
 
-  // ── Regenerate all images (keeps the plan; lazy from current position) ───────
-  //
-  // Wipes every cached image, then INSTANTLY repaints only the scene block the
-  // reader is currently in. The rest regenerate lazily through the read-ahead
-  // trigger as the reader reaches them — no whole-book churn, minimal quota.
-  // The narrative plan (threads, briefs) is untouched; only pixels are remade.
-
-  const regenerateAllImages = useCallback(async () => {
-    const state = useBookStore.getState();
-    if (!state.activeBook) return;
-    const map = state.activeSemanticMap;
-    const seedId = state.activeStyleSeed;
-    if (!map || !seedId) return;
-
-    diagnosticInfo("regenerate_all.start", "Regenerating images from current position", {
-      bookId: map.bookId,
-      scenes: map.scenes.length,
-    });
-
-    // 1. Wipe all cached images (DB + memory + queue + current display).
-    await storage.deleteImages(map.bookId).catch(() => {});
-    clearQueue();
-    clearImageCache();
-
-    // 2. Find the scene block the reader is currently in (most recently passed).
-    const wordPosition = useReaderStore.getState().wordPosition;
-    const chapters = state.activeStructure?.chapters ?? [];
-    const generatable = map.scenes.filter((scene) => {
-      const beat = map.storyboard?.beats.find((b) => b.sceneId === scene.id);
-      return beat?.generationIntent !== "planned_only";
-    });
-
-    let current: IdentifiedScene | undefined;
-    let bestPos = -Infinity;
-    for (const scene of generatable) {
-      const pos = computeSceneWordPosition(scene, chapters);
-      if (pos <= wordPosition && pos > bestPos) {
-        bestPos = pos;
-        current = scene;
-      }
-    }
-    // 3. Instantly repaint the current block. The read-ahead trigger handles the
-    //    rest as the reader advances (it enqueues any scene with no cached image).
-    if (current) await _ensureSceneImage(current, seedId, map.bookId);
-  }, [clearQueue, clearImageCache]);
-
   // ── Internal helpers ─────────────────────────────────────────────────────────
 
   const _runAnalysis = useCallback(
@@ -524,6 +478,64 @@ export function useBookOrchestration() {
     },
     [_ensureSceneImage]
   );
+
+  // ── Regenerate all images (keeps the plan; lazy from current position) ───────
+  //
+  // Nuclear reset: wipe the whole image library, regenerate ONLY the scene at
+  // the reader's current position, then leave every other trigger point planned
+  // until read-ahead fires on natural forward reading.
+
+  const regenerateAllImages = useCallback(async () => {
+    const state = useBookStore.getState();
+    if (!state.activeBook) return;
+    const map = state.activeSemanticMap;
+    const seedId = state.activeStyleSeed;
+    if (!map || !seedId) return;
+
+    const wordPosition = useReaderStore.getState().wordPosition;
+
+    diagnosticInfo("regenerate_all.start", "Wiping image library and regenerating current scene only", {
+      bookId: state.activeBook.id,
+      semanticBookId: map.bookId,
+      wordPosition,
+      scenes: map.scenes.length,
+    });
+
+    await storage.deleteImages(state.activeBook.id).catch(() => {});
+    clearQueue();
+    clearImageCache();
+    useImageStore.getState().markRegenerateCooldown();
+
+    const chapters = state.activeStructure?.chapters ?? [];
+    const generatable = map.scenes.filter((scene) => {
+      const beat = map.storyboard?.beats.find((b) => b.sceneId === scene.id);
+      return beat?.generationIntent !== "planned_only";
+    });
+
+    let current: IdentifiedScene | undefined;
+    let bestPos = -Infinity;
+    for (const scene of generatable) {
+      const pos = computeSceneWordPosition(scene, chapters);
+      if (pos <= wordPosition && pos > bestPos) {
+        bestPos = pos;
+        current = scene;
+      }
+    }
+
+    if (current) {
+      await _ensureSceneImage(current, seedId, map.bookId, { display: true });
+    } else {
+      setCurrentImage(null);
+      setCurrentThemes([]);
+    }
+
+    diagnosticInfo("regenerate_all.complete", "Image library wiped; current scene regenerated", {
+      bookId: state.activeBook.id,
+      wordPosition,
+      currentSceneId: current?.id ?? null,
+      currentScenePosition: current ? bestPos : null,
+    });
+  }, [clearQueue, clearImageCache, setCurrentImage, setCurrentThemes, _ensureSceneImage]);
 
   return { startOrchestration, reAnalyzeBook, regenerateAllImages };
 }

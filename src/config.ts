@@ -12,6 +12,8 @@ export const LUMINA_CONFIG = {
   VISUAL_POSITION_MATCH_TOLERANCE: 400,
   /** After a jump, only auto-queue scenes within this many words of the landing spot. */
   VISUAL_JUMP_QUEUE_WINDOW_WORDS: 1000,
+  /** Reader must advance at least this many words before read-ahead preloads fire. */
+  VISUAL_FORWARD_ADVANCE_WORDS: 80,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words
