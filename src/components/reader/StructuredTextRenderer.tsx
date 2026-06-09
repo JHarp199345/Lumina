@@ -149,6 +149,33 @@ function pageIndexForChapterOffset(pages: PageSegment[] | undefined, offset: num
   return index >= 0 ? index : pages.length - 1;
 }
 
+/** Balance page paragraphs across a left/right focus spread (desktop only). */
+function splitParagraphsForSpread(paragraphs: string[]): [string[], string[]] {
+  if (paragraphs.length <= 1) return [paragraphs, []];
+  const target =
+    paragraphs.reduce((sum, paragraph) => sum + wordCount(paragraph), 0) / 2;
+  const left: string[] = [];
+  const right: string[] = [];
+  let leftWords = 0;
+
+  for (const paragraph of paragraphs) {
+    const count = wordCount(paragraph);
+    if (right.length === 0 && (left.length === 0 || leftWords + count <= target)) {
+      left.push(paragraph);
+      leftWords += count;
+    } else {
+      right.push(paragraph);
+    }
+  }
+
+  if (right.length === 0 && left.length > 1) {
+    const moved = left.pop();
+    if (moved) right.push(moved);
+  }
+
+  return [left, right];
+}
+
 function pageIndexForChapterWordOffset(pages: PageSegment[] | undefined, offset: number): number {
   if (!pages || pages.length === 0) return 0;
   const safeOffset = Math.max(0, offset);
@@ -580,14 +607,28 @@ export default function StructuredTextRenderer({
         ? wordsBeforeCurrentChapter
         : wordsBeforeCurrentChapter + (currentPageSegment?.startWordOffset ?? 0);
   const paragraphWordCursor = { current: 0 };
+  const pageParagraphs = currentText.split(/\n{2,}/).filter(Boolean);
+  const focusSpread = useFocusColumns ? splitParagraphsForSpread(pageParagraphs) : null;
+
+  const renderParagraphs = (paragraphs: string[], startParagraphIndex: number) =>
+    paragraphs.map((paragraph, index) => (
+      <ReadAlongParagraph
+        key={`${startParagraphIndex + index}-${paragraph.slice(0, 24)}`}
+        paragraph={paragraph}
+        paragraphIndex={startParagraphIndex + index}
+        pageStartWord={currentPageStartWord}
+        wordCursor={paragraphWordCursor}
+        activeWordPosition={activeWordPosition}
+      />
+    ));
 
   return (
     <div
       className={`reader-paper-surface relative h-full w-full overflow-hidden bg-reader py-5 text-ink ${
         isTablet
           ? "pl-3 pr-0"
-          : isFocused
-            ? "px-[clamp(1rem,2vw,1.5rem)]"
+          : isFocused && !isTablet
+            ? "px-[clamp(1.5rem,4vw,3.5rem)]"
             : "px-[clamp(0.75rem,2vw,1.25rem)]"
       }`}
       onClick={(event) => {
@@ -649,13 +690,13 @@ export default function StructuredTextRenderer({
       ) : (
         <div
           className={
-            isFocused
-              ? `relative z-10 mx-auto flex h-full w-full flex-col overflow-hidden ${
-                  isTablet ? "max-w-[min(100%,94%)]" : "max-w-[min(100%,88%)]"
-                }`
-              : isTablet
-                ? "relative z-10 flex h-full w-full max-w-full flex-col overflow-hidden"
-                : "relative z-10 mx-auto flex h-full w-full max-w-[min(100%,810px)] flex-col overflow-hidden"
+            isFocused && !isTablet
+              ? "relative z-10 flex h-full w-full max-w-none flex-col overflow-hidden"
+              : isFocused && isTablet
+                ? "relative z-10 mx-auto flex h-full w-full max-w-[min(100%,94%)] flex-col overflow-hidden"
+                : isTablet
+                  ? "relative z-10 flex h-full w-full max-w-full flex-col overflow-hidden"
+                  : "relative z-10 mx-auto flex h-full w-full max-w-[min(100%,810px)] flex-col overflow-hidden"
           }
         >
           <div className="mb-4 flex items-center justify-between border-b border-hair pb-3">
@@ -673,7 +714,7 @@ export default function StructuredTextRenderer({
             className={[
               "min-h-0 flex-1 overscroll-contain font-serif text-ink [text-wrap:pretty]",
               useFocusColumns
-                ? "overflow-hidden columns-2 gap-10 [column-fill:auto] lg:gap-12"
+                ? "grid grid-cols-2 gap-x-[clamp(2rem,4.5vw,4rem)] overflow-hidden"
                 : isTablet
                   ? listenAlongMode
                     ? "overflow-y-auto pr-[0.25in]"
@@ -681,16 +722,16 @@ export default function StructuredTextRenderer({
                   : "overflow-y-auto pr-2",
             ].join(" ")}
           >
-            {currentText.split(/\n{2,}/).map((paragraph, index) => (
-              <ReadAlongParagraph
-                key={index}
-                paragraph={paragraph}
-                paragraphIndex={index}
-                pageStartWord={currentPageStartWord}
-                wordCursor={paragraphWordCursor}
-                activeWordPosition={activeWordPosition}
-              />
-            ))}
+            {focusSpread ? (
+              <>
+                <div className="min-h-0 overflow-hidden">{renderParagraphs(focusSpread[0], 0)}</div>
+                <div className="min-h-0 overflow-hidden">
+                  {renderParagraphs(focusSpread[1], focusSpread[0].length)}
+                </div>
+              </>
+            ) : (
+              renderParagraphs(pageParagraphs, 0)
+            )}
           </div>
         </div>
       )}
