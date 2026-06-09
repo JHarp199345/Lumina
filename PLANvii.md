@@ -449,11 +449,22 @@ GEMINI_TTS_DEFAULT_VOICE: "Kore",                    // a clear neutral prebuilt
 - **Overview-angle chips** swap which SIP plan is ghosted (type-aware).
 - **✨ Suggest fuller** swaps in a richer ghost (one cheap call). No raw fragments shown.
 - Tune the overlay in isolation first (textareas can't render inline grey text).
+- The suggestion bank is hidden infrastructure, not a public prompt library. The UI only
+  shows compact angle labels and the currently ghosted plan. Default suggestions should
+  rotate through the stored bank with recent-history protection so the same plan is not
+  offered repeatedly.
 
 ### Phase 4 — Type-aware default + SIP grounding in the summarizer
 - Replace the single default spine with **fiction vs nonfiction/scholarly** variants.
 - Ground the summarizer on the SIP (concepts, relationships+progression, subject
   hierarchy) instead of chapter openings; keep chapter-scope optional prose on top.
+- When generation is triggered, verify the SIP is present and complete enough. If missing
+  or thin, build/enrich it first and cache it, then generate from the enriched profile.
+  If the profile is already complete, reuse it. This keeps the overview rich without
+  redoing expensive ingestion work every time.
+- Time targets should bias toward richness over verbosity: if there is not enough material,
+  explain more deeply; if there is too much, retrieve and condense the strongest profile
+  entries rather than padding or dumping facts.
 
 ### Phase 5 — Polish
 - Graceful failure (script ok but TTS fails → keep transcript, retry voicing).

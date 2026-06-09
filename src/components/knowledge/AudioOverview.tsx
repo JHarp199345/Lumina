@@ -25,6 +25,8 @@ import {
 import { buildSourceProfile } from "@/pipeline/sourceProfile";
 import type { AudioArtifact, SourceIntelligenceProfile, SourceProfileSuggestion } from "@/types";
 
+const SUGGESTION_HISTORY_KEY = "lumina.audioOverview.suggestionHistory";
+
 export default function AudioOverview() {
   const { activeBook, activeStructure, activeSemanticMap } = useBookStore();
   const currentChapterIndex = useReaderStore((s) => s.currentChapterIndex);
@@ -52,6 +54,7 @@ export default function AudioOverview() {
   const [prompt, setPrompt] = useState("");           // the real, accepted/typed text
   const [ghost, setGhost] = useState("");             // greyed proposed plan (Smart Compose)
   const [selectedAngleId, setSelectedAngleId] = useState<string | null>(null);
+  const [readerSelectedAngle, setReaderSelectedAngle] = useState(false);
   const [profile, setProfile] = useState<SourceIntelligenceProfile | null>(null);
   const [profileBuilding, setProfileBuilding] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -98,9 +101,32 @@ export default function AudioOverview() {
     };
   }, []);
 
+  const buildAndStoreProfile = async (apiKey: string) => {
+    if (!activeBook || !activeStructure || !activeSemanticMap) return null;
+    const built = await buildSourceProfile(activeStructure, activeSemanticMap, apiKey);
+    await storage.saveSourceProfile(built).catch(() => {});
+    setProfile(built);
+    return built;
+  };
+
+  const ensureProfile = async (apiKey: string) => {
+    if (isUsableSourceProfile(profile)) return profile;
+    if (!activeSemanticMap) return profile;
+    setProfileBuilding(true);
+    setProgress("Building source intelligence…");
+    try {
+      return await buildAndStoreProfile(apiKey);
+    } catch (err) {
+      console.warn("[AudioOverview] SIP enrichment failed:", err);
+      return profile;
+    } finally {
+      setProfileBuilding(false);
+    }
+  };
+
   // Load the Source Intelligence Profile for this book; lazily build + cache it if
-  // missing (one enriched call that reuses the existing analysis). Older books that
-  // were analyzed before the SIP existed build it here on first open.
+  // missing or too thin (one enriched call that reuses the existing analysis). Older
+  // books build it here on first open; generation also checks once more before running.
   useEffect(() => {
     let cancelled = false;
     if (!activeBook || !activeStructure) {
@@ -111,7 +137,7 @@ export default function AudioOverview() {
     (async () => {
       const existing = await storage.loadSourceProfile(activeBook.id).catch(() => null);
       if (cancelled) return;
-      if (existing) {
+      if (isUsableSourceProfile(existing)) {
         setProfile(existing);
         return;
       }
@@ -136,15 +162,23 @@ export default function AudioOverview() {
     };
   }, [activeBook, activeStructure, activeSemanticMap]);
 
-  // Seed the ghost from the profile's best suggestion when it arrives / scope changes.
+  // Seed the ghost from the hidden suggestion bank when the profile arrives / scope
+  // changes. If the reader has not chosen a specific angle, rotate through the bank
+  // without repeating recent suggestions too often.
   useEffect(() => {
     if (!profile) {
       setGhost("");
       return;
     }
-    setGhost(planFor(selectedAngleId));
+    if (selectedAngleId && readerSelectedAngle) {
+      setGhost(planFor(selectedAngleId));
+      return;
+    }
+    const suggestion = pickRotatingSuggestion(profile.suggestionBank, activeBook?.id ?? "unknown", scopeType);
+    setGhost(suggestion?.planText ?? planFor(null));
+    if (suggestion) setSelectedAngleId(suggestion.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, selectedAngleId, scopeType]);
+  }, [profile, selectedAngleId, readerSelectedAngle, scopeType, activeBook?.id]);
 
   const overviewArtifacts = useMemo(
     () =>
@@ -160,6 +194,7 @@ export default function AudioOverview() {
   };
 
   const applyAngle = (id: string) => {
+    setReaderSelectedAngle(true);
     setSelectedAngleId(id);
     const plan = planFor(id);
     if (prompt.trim()) setPrompt(plan); // already editing → replace outright
@@ -200,8 +235,9 @@ export default function AudioOverview() {
     }
     setError(null);
     setIsGenerating(true);
-    setProgress("Summarizing the material…");
+    setProgress("Preparing source intelligence…");
     try {
+      const enrichedProfile = await ensureProfile(apiKey);
       // A visible ghost the reader didn't dismiss counts as the instruction;
       // a truly empty field falls back to the type-aware default.
       const effectivePrompt = prompt.trim() ? prompt.trim() : ghost.trim();
@@ -209,7 +245,7 @@ export default function AudioOverview() {
         scope,
         structure: activeStructure,
         semanticMap: activeSemanticMap,
-        profile,
+        profile: enrichedProfile,
         userPrompt: effectivePrompt,
         minutes,
         apiKey,
@@ -595,6 +631,51 @@ function GhostComposer({
       )}
     </div>
   );
+}
+
+function isUsableSourceProfile(profile: SourceIntelligenceProfile | null): profile is SourceIntelligenceProfile {
+  if (!profile) return false;
+  return (
+    profile.sections.length > 0 &&
+    profile.suggestionBank.length > 0 &&
+    (profile.progression.length > 0 ||
+      profile.entities.length > 0 ||
+      profile.concepts.mainIdeas.length > 0 ||
+      profile.concepts.themes.length > 0)
+  );
+}
+
+function pickRotatingSuggestion(
+  bank: SourceProfileSuggestion[],
+  bookId: string,
+  scopeType: OverviewScope["type"]
+): SourceProfileSuggestion | null {
+  if (bank.length === 0) return null;
+  const key = `${SUGGESTION_HISTORY_KEY}:${bookId}:${scopeType}`;
+  const recent = readSuggestionHistory(key);
+  const recentSet = new Set(recent.slice(0, Math.min(3, Math.max(1, bank.length - 1))));
+  const available = bank.filter((suggestion) => !recentSet.has(suggestion.id));
+  const pool = available.length > 0 ? available : bank;
+  const picked = pool[Math.floor(Math.random() * pool.length)] ?? bank[0];
+  writeSuggestionHistory(key, [picked.id, ...recent.filter((id) => id !== picked.id)].slice(0, 6));
+  return picked;
+}
+
+function readSuggestionHistory(key: string): string[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSuggestionHistory(key: string, value: string[]): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Nonessential; rotation can degrade to random if storage is unavailable.
+  }
 }
 
 function Centered({ icon, text }: { icon: React.ReactNode; text: string }) {
