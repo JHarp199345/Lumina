@@ -1,15 +1,11 @@
 /**
- * sceneDedup — one visual anchor per word-position band.
- *
- * Gutenberg / junk TOC output can yield many tiny chapters that share the same
- * spine file and offset. Analysis may also stack opening + inflection + planned
- * scenes on top of each other. Collapse collisions so the gallery and trigger
- * each map to a single scene per reading segment.
+ * sceneDedup — strict one visual slot per EPUB reading chapter/section.
  */
 
-import { LUMINA_CONFIG } from "@/config";
-import type { BookStructure, Chapter, IdentifiedScene } from "@/types";
+import type { BookStructure, Chapter, IdentifiedScene, MacroArc } from "@/types";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+
+const MIN_CHAPTER_WORDS = 120;
 
 function scenePriority(scene: IdentifiedScene): number {
   if (scene.inflectionPointId === "opening") return 100;
@@ -18,7 +14,7 @@ function scenePriority(scene: IdentifiedScene): number {
   return 40;
 }
 
-function shouldPreferScene(candidate: IdentifiedScene, incumbent: IdentifiedScene): boolean {
+export function shouldPreferScene(candidate: IdentifiedScene, incumbent: IdentifiedScene): boolean {
   const candidatePriority = scenePriority(candidate);
   const incumbentPriority = scenePriority(incumbent);
   if (candidatePriority !== incumbentPriority) {
@@ -27,56 +23,85 @@ function shouldPreferScene(candidate: IdentifiedScene, incumbent: IdentifiedScen
   return (candidate.narrativeWeight ?? 0) > (incumbent.narrativeWeight ?? 0);
 }
 
-export function dedupeScenesByWordPosition(
-  scenes: IdentifiedScene[],
-  chapters: Chapter[],
-  minSeparationWords = LUMINA_CONFIG.VISUAL_MIN_SCENE_SEPARATION_WORDS
-): IdentifiedScene[] {
-  if (scenes.length <= 1) return scenes;
-
-  const sorted = [...scenes].sort(
-    (a, b) => computeSceneWordPosition(a, chapters) - computeSceneWordPosition(b, chapters)
-  );
-
-  const kept: IdentifiedScene[] = [];
-
-  for (const scene of sorted) {
-    const position = computeSceneWordPosition(scene, chapters);
-    const last = kept[kept.length - 1];
-    if (!last) {
-      kept.push(scene);
-      continue;
+/** Keep the single best scene when multiple candidates target the same chapter. */
+export function pickBestScenePerChapter(scenes: IdentifiedScene[]): Map<string, IdentifiedScene> {
+  const byChapter = new Map<string, IdentifiedScene>();
+  for (const scene of scenes) {
+    const existing = byChapter.get(scene.chapterId);
+    if (!existing || shouldPreferScene(scene, existing)) {
+      byChapter.set(scene.chapterId, scene);
     }
-
-    const lastPosition = computeSceneWordPosition(last, chapters);
-    if (position - lastPosition < minSeparationWords) {
-      if (shouldPreferScene(scene, last)) {
-        kept[kept.length - 1] = scene;
-      }
-      continue;
-    }
-
-    kept.push(scene);
   }
-
-  return kept;
+  return byChapter;
 }
 
-export function isWordPositionCovered(
-  position: number,
+/**
+ * Gallery / stale-plan safety net: one timeline entry per reading chapter, in order.
+ */
+export function segmentScenesOnePerChapter(
   scenes: IdentifiedScene[],
   chapters: Chapter[],
-  minSeparationWords = LUMINA_CONFIG.VISUAL_MIN_SCENE_SEPARATION_WORDS
-): boolean {
-  return scenes.some((scene) => {
-    const scenePosition = computeSceneWordPosition(scene, chapters);
-    return Math.abs(scenePosition - position) < minSeparationWords;
-  });
+  minChapterWords = MIN_CHAPTER_WORDS
+): IdentifiedScene[] {
+  const byChapter = pickBestScenePerChapter(scenes);
+  const result: IdentifiedScene[] = [];
+
+  for (const chapter of chapters) {
+    if (chapter.wordCount < minChapterWords) continue;
+    const scene = byChapter.get(chapter.id);
+    if (scene) result.push(scene);
+  }
+
+  return result;
+}
+
+export interface BuildPlannedChapterScene {
+  (chapter: Chapter, structure: BookStructure, macroArc: MacroArc): IdentifiedScene;
+}
+
+/**
+ * Analysis output: exactly one visual anchor per substantial reading chapter.
+ * Directed beats (opening / inflection) win over planned filler for that chapter.
+ */
+export function buildChapterVisualPlan(
+  structure: BookStructure,
+  macroArc: MacroArc,
+  directedScenes: IdentifiedScene[],
+  buildPlanned: BuildPlannedChapterScene
+): IdentifiedScene[] {
+  const directedByChapter = pickBestScenePerChapter(directedScenes);
+  const plan: IdentifiedScene[] = [];
+
+  for (const chapter of structure.chapters) {
+    if (!chapter.rawText || chapter.wordCount < MIN_CHAPTER_WORDS) continue;
+
+    const directed = directedByChapter.get(chapter.id);
+    if (directed) {
+      plan.push(directed);
+      continue;
+    }
+
+    plan.push(buildPlanned(chapter, structure, macroArc));
+  }
+
+  return plan;
+}
+
+/** @deprecated Use segmentScenesOnePerChapter — word bands still allowed duplicate chapters. */
+export function dedupeScenesByWordPosition(
+  scenes: IdentifiedScene[],
+  chapters: Chapter[]
+): IdentifiedScene[] {
+  return segmentScenesOnePerChapter(scenes, chapters);
 }
 
 export function dedupeScenesForStructure(
   scenes: IdentifiedScene[],
   structure: BookStructure
 ): IdentifiedScene[] {
-  return dedupeScenesByWordPosition(scenes, structure.chapters);
+  return segmentScenesOnePerChapter(scenes, structure.chapters);
+}
+
+export function scenePositionKey(scene: IdentifiedScene, chapters: Chapter[]): number {
+  return computeSceneWordPosition(scene, chapters);
 }

@@ -19,7 +19,7 @@ import { toAssetUrl } from "@/utils/tauriBridge";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useBookStore } from "@/store/bookStore";
 import { getImageForScene } from "@/utils/imagePosition";
-import { dedupeScenesByWordPosition } from "@/utils/sceneDedup";
+import { segmentScenesOnePerChapter } from "@/utils/sceneDedup";
 import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
 function displaySrc(src: string): string {
@@ -73,7 +73,7 @@ export default function GalleryFocalView({
   // Every planned moment, in reading order — generated and not-yet-generated.
   const chapters = useBookStore((state) => state.activeStructure?.chapters ?? []);
   const items: GalleryItem[] = useMemo(() => {
-    const scenes = dedupeScenesByWordPosition(activeSemanticMap?.scenes ?? [], chapters);
+    const scenes = segmentScenesOnePerChapter(activeSemanticMap?.scenes ?? [], chapters);
     const beats = activeSemanticMap?.storyboard?.beats ?? [];
     const cached = Object.values(imageCache);
     return scenes.map((scene) => ({

@@ -25,7 +25,7 @@ import type {
 import { LUMINA_CONFIG } from "@/config";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
-import { dedupeScenesForStructure, isWordPositionCovered } from "@/utils/sceneDedup";
+import { buildChapterVisualPlan } from "@/utils/sceneDedup";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -108,23 +108,24 @@ export async function analyzeBook(
     analysisStructure
   );
 
-  const goldenNumber = calculateGoldenNumber(analysisStructure.totalWords, annotatedScenes.length);
-  // Structure-aware selection: prefer scenes that complete setup→payoff chains,
-  // and pull a payoff's setup in with it, instead of taking the top-sentiment N.
-  const defaultScenes = selectNarrativeScenes(annotatedScenes, goldenNumber, narrativeBlueprint);
-  const defaultSceneIds = new Set(defaultScenes.map((scene) => scene.id));
-
-  // Whole-book plan: merge directed scenes with one-per-uncovered-chapter scenes,
-  // then re-annotate so the planned chapter scenes also carry thread membership.
-  const mergedScenes = mergeScenesForWholeBookPlan(
+  // One visual slot per reading chapter — opening/inflection beats claim their
+  // chapter; everything else gets a single planned anchor in that section.
+  const chapterPlan = buildChapterVisualPlan(
+    analysisStructure,
+    macroArc,
     annotatedScenes,
-    buildPlannedChapterScenes(analysisStructure, macroArc, annotatedScenes)
+    buildPlannedChapterScene
   );
+
   const plannedScenes = annotateScenesWithThreads(
-    dedupeScenesForStructure(mergedScenes, analysisStructure),
+    chapterPlan,
     narrativeBlueprint,
     analysisStructure
   );
+
+  const goldenNumber = calculateGoldenNumber(analysisStructure.totalWords, plannedScenes.length);
+  const defaultScenes = selectNarrativeScenes(plannedScenes, goldenNumber, narrativeBlueprint);
+  const defaultSceneIds = new Set(defaultScenes.map((scene) => scene.id));
 
   const storyboard = buildVisualStoryboard({
     bookId: analysisStructure.bookId,
@@ -157,71 +158,39 @@ export async function analyzeBook(
   };
 }
 
-function buildPlannedChapterScenes(
+function buildPlannedChapterScene(
+  chapter: BookStructure["chapters"][0],
   structure: BookStructure,
-  macroArc: MacroArc,
-  existingScenes: IdentifiedScene[]
-): IdentifiedScene[] {
-  const planned: IdentifiedScene[] = [];
+  macroArc: MacroArc
+): IdentifiedScene {
+  const targetOffset = Math.floor(chapter.wordCount * 0.42);
+  const anchorSection = chapter.sections.reduce((best, section) => {
+    const bestDist = Math.abs((best.startWordOffset ?? 0) - targetOffset);
+    const sectionDist = Math.abs((section.startWordOffset ?? 0) - targetOffset);
+    return sectionDist < bestDist ? section : best;
+  }, chapter.sections[0] ?? { id: chapter.id, startWordOffset: targetOffset });
 
-  for (const chapter of structure.chapters) {
-    if (!chapter.rawText || chapter.wordCount < 250) continue;
-
-    const targetOffset = Math.floor(chapter.wordCount * 0.42);
-    const wordsBefore = structure.chapters
-      .slice(0, chapter.index)
-      .reduce((sum, ch) => sum + ch.wordCount, 0);
-    const targetPosition = wordsBefore + targetOffset;
-
-    if (isWordPositionCovered(targetPosition, existingScenes, structure.chapters)) {
-      continue;
-    }
-    const anchorSection = chapter.sections.reduce((best, section) => {
-      const bestDist = Math.abs((best.startWordOffset ?? 0) - targetOffset);
-      const sectionDist = Math.abs((section.startWordOffset ?? 0) - targetOffset);
-      return sectionDist < bestDist ? section : best;
-    }, chapter.sections[0] ?? { id: chapter.id, startWordOffset: targetOffset });
-
-    const scene = buildFallbackScene(chapter, structure, `planned_chapter_${chapter.index}`, {
-      id: `planned_chapter_${chapter.index}`,
-      approximateChapterIndex: chapter.index,
-      emotionalShift: macroArc.dominantEmotions.slice(0, 2).join(", ") || "emotional transition",
-      significance: 0.35,
-      narrativeLabel: chapter.title,
-    });
-
-    planned.push({
-      ...scene,
-      id: `scene_planned_${structure.bookId}_${chapter.id}`,
-      inflectionPointId: `planned_chapter_${chapter.index}`,
-      sectionId: anchorSection.id,
-      anchor: {
-        href: chapter.href,
-        spineIndex: chapter.spineIndex,
-        wordOffset: anchorSection.startWordOffset ?? targetOffset,
-      },
-      narrativeWeight: 0.35,
-      imageDescription: buildFallbackDescription(scene, macroArc),
-    });
-  }
-
-  return planned;
-}
-
-function mergeScenesForWholeBookPlan(
-  directedCandidates: IdentifiedScene[],
-  plannedCandidates: IdentifiedScene[]
-): IdentifiedScene[] {
-  const byId = new Map<string, IdentifiedScene>();
-  [...directedCandidates, ...plannedCandidates].forEach((scene) => {
-    byId.set(scene.id, scene);
+  const scene = buildFallbackScene(chapter, structure, `planned_chapter_${chapter.index}`, {
+    id: `planned_chapter_${chapter.index}`,
+    approximateChapterIndex: chapter.index,
+    emotionalShift: macroArc.dominantEmotions.slice(0, 2).join(", ") || "emotional transition",
+    significance: 0.35,
+    narrativeLabel: chapter.title,
   });
 
-  return [...byId.values()].sort((a, b) =>
-    a.anchor.spineIndex - b.anchor.spineIndex ||
-    a.anchor.wordOffset - b.anchor.wordOffset ||
-    a.id.localeCompare(b.id)
-  );
+  return {
+    ...scene,
+    id: `scene_planned_${structure.bookId}_${chapter.id}`,
+    inflectionPointId: `planned_chapter_${chapter.index}`,
+    sectionId: anchorSection.id,
+    anchor: {
+      href: chapter.href,
+      spineIndex: chapter.spineIndex,
+      wordOffset: anchorSection.startWordOffset ?? targetOffset,
+    },
+    narrativeWeight: 0.35,
+    imageDescription: buildFallbackDescription(scene, macroArc),
+  };
 }
 
 function makeProgressReporter(onProgress?: AnalysisProgressReporter): AnalysisProgressReporter {
@@ -279,6 +248,7 @@ async function identifyScenes(
   onProgress?: AnalysisProgressReporter
 ): Promise<IdentifiedScene[]> {
   const scenes: IdentifiedScene[] = [];
+  const usedChapterIds = new Set<string>();
   const totalScenes = macroArc.inflectionPoints.length + (structure.chapters[0] ? 1 : 0);
 
   // Opening atmosphere — always first
@@ -297,13 +267,14 @@ async function identifyScenes(
       return buildFallbackScene(openingChapter, structure, "opening");
     });
     scenes.push(scene);
+    usedChapterIds.add(openingChapter.id);
   }
 
-  // One scene per inflection point
+  // One scene per inflection point — never stack a second beat on the same chapter.
   for (let i = 0; i < macroArc.inflectionPoints.length; i++) {
     const point = macroArc.inflectionPoints[i];
     const chapter = structure.chapters[point.approximateChapterIndex];
-    if (!chapter) continue;
+    if (!chapter || usedChapterIds.has(chapter.id)) continue;
     onProgress?.({
       phase: "scenes",
       message: `Finding key scene ${i + 1} of ${macroArc.inflectionPoints.length}…`,
@@ -318,6 +289,7 @@ async function identifyScenes(
       return buildFallbackScene(chapter, structure, point.id, point);
     });
     scenes.push(scene);
+    usedChapterIds.add(chapter.id);
   }
 
   return scenes;
