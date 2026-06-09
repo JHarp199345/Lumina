@@ -572,7 +572,7 @@ export default function StructuredTextRenderer({
   return (
     <div
       className={`reader-paper-surface relative h-full w-full overflow-hidden bg-reader py-5 text-ink ${
-        isFocused ? "px-[clamp(2rem,5vw,4rem)]" : "px-[clamp(0.75rem,2vw,1.25rem)]"
+        isFocused ? "px-[clamp(1rem,2vw,1.5rem)]" : "px-[clamp(0.75rem,2vw,1.25rem)]"
       }`}
       onClick={(event) => {
         // Don't turn the page while the reader is selecting text.
@@ -633,7 +633,9 @@ export default function StructuredTextRenderer({
       ) : (
         <div
           className={`relative z-10 flex h-full flex-col overflow-hidden ${
-            isFocused ? "w-full max-w-full" : "mx-auto w-full max-w-[min(100%,810px)]"
+            isFocused
+              ? "mx-auto w-full max-w-[min(100%,50%)]"
+              : "mx-auto w-full max-w-[min(100%,810px)]"
           }`}
         >
           <div className="mb-4 flex items-center justify-between border-b border-hair pb-3">
