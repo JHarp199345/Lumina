@@ -12,8 +12,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
-import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader } from "lucide-react";
+import { animate, motion, useMotionValue } from "framer-motion";
+import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, RefreshCw } from "lucide-react";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
 import type { CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
@@ -38,10 +38,15 @@ interface GalleryFocalViewProps {
   activeSemanticMap: SemanticMap | null;
   imageCache: Record<string, CachedImage>;
   startSceneId?: string;
+  isAnalyzing: boolean;
+  analysisProgress?: string;
+  analysisPercent?: number;
   /** Navigate the reader to a passage and CLOSE the gallery (go read it). */
   onVisitPassage: (sceneId: string) => void;
   /** Generate the image for a planned scene. */
   onGenerateScene: (sceneId: string) => Promise<void>;
+  onAnalyze: () => void;
+  onRegenerateAll: () => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -49,8 +54,13 @@ export default function GalleryFocalView({
   activeSemanticMap,
   imageCache,
   startSceneId,
+  isAnalyzing,
+  analysisProgress,
+  analysisPercent,
   onVisitPassage,
   onGenerateScene,
+  onAnalyze,
+  onRegenerateAll,
   onClose,
 }: GalleryFocalViewProps) {
   // Every planned moment, in reading order — generated and not-yet-generated.
@@ -67,7 +77,9 @@ export default function GalleryFocalView({
   const startIndex = Math.max(0, items.findIndex((it) => it.scene.id === startSceneId));
   const [index, setIndex] = useState(startIndex < 0 ? 0 : startIndex);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [showBookMenu, setShowBookMenu] = useState(false);
   const selectedThumbRef = useRef<HTMLButtonElement>(null);
+  const generatedCount = items.filter((item) => item.image).length;
 
   const clamp = (i: number) => Math.max(0, Math.min(items.length - 1, i));
 
@@ -125,17 +137,89 @@ export default function GalleryFocalView({
       onClick={onClose}
     >
       {/* Top bar */}
-      <div className="flex items-center justify-between px-5 py-3" onClick={(e) => e.stopPropagation()}>
+      <div className="relative flex items-center justify-between px-5 py-3" onClick={(e) => e.stopPropagation()}>
         <p className="text-[11px] uppercase tracking-[0.22em] text-white/35">
           {index + 1} / {items.length}
         </p>
-        <button
-          onClick={onClose}
-          className="flex h-10 w-10 items-center justify-center rounded-md text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white/80"
-          aria-label="Close gallery"
-        >
-          <X size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowBookMenu((open) => !open)}
+            className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/[0.025] text-white/42 backdrop-blur-sm transition-colors hover:border-lumina-gold/35 hover:bg-white/[0.06] hover:text-lumina-gold/85"
+            aria-label="Book visual controls"
+            aria-expanded={showBookMenu}
+          >
+            <ListFilter size={18} />
+          </button>
+          <button
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded-md text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white/80"
+            aria-label="Close gallery"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {showBookMenu && (
+          <div
+            className="absolute right-16 top-14 z-30 w-[min(360px,calc(100vw-32px))] rounded-xl border border-white/12 bg-[#081522]/92 p-3 text-left shadow-2xl shadow-black/45 backdrop-blur-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lumina-gold/75">
+                  Book Visuals
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-white/42">
+                  Analysis rebuilds the plan. Image regeneration only happens from the slide action.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowBookMenu(false)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white/35 transition-colors hover:bg-white/[0.06] hover:text-white/75"
+                aria-label="Close visual controls"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <button
+              onClick={onAnalyze}
+              disabled={isAnalyzing}
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/[0.075] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-lumina-gold/88 transition-colors hover:border-lumina-gold/50 hover:bg-lumina-gold/[0.11] disabled:cursor-default disabled:opacity-70"
+            >
+              {isAnalyzing ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {isAnalyzing ? "Analyzing" : activeSemanticMap ? "Re-analyze This Book" : "Analyze This Book"}
+            </button>
+
+            {isAnalyzing && (
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-2">
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
+                  <div
+                    className="h-full rounded-full bg-lumina-gold/72 transition-all duration-500"
+                    style={{ width: `${Math.max(6, Math.min(100, analysisPercent ?? 12))}%` }}
+                  />
+                </div>
+                <p className="mt-2 truncate text-center text-[10px] tracking-wide text-white/42">
+                  {analysisProgress || "Preparing the visual story..."}
+                </p>
+              </div>
+            )}
+
+            {generatedCount > 0 && !isAnalyzing && (
+              <div className="mt-3 border-t border-white/10 pt-3">
+                <p className="mb-2 text-[10px] uppercase tracking-[0.14em] text-white/35">
+                  Generated images
+                </p>
+                <FocalSlideToRegenerate
+                  onConfirm={async () => {
+                    await onRegenerateAll();
+                    setShowBookMenu(false);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Hero: the piece on the wall ─ matte frame + soft shadow, no lamp */}
@@ -256,5 +340,58 @@ export default function GalleryFocalView({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function FocalSlideToRegenerate({ onConfirm }: { onConfirm: () => void | Promise<void> }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const x = useMotionValue(0);
+  const [maxX, setMaxX] = useState(0);
+  const [confirmed, setConfirmed] = useState(false);
+  const HANDLE = 36;
+  const PADDING = 4;
+
+  useEffect(() => {
+    const measure = () => {
+      if (trackRef.current) {
+        setMaxX(Math.max(0, trackRef.current.offsetWidth - HANDLE - PADDING * 2));
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  return (
+    <div
+      ref={trackRef}
+      className="relative h-11 select-none overflow-hidden rounded-full border border-white/12 bg-sky-50/[0.055] shadow-inner shadow-black/20 backdrop-blur-md"
+    >
+      <div className="pointer-events-none absolute inset-[3px] rounded-full border border-white/[0.055] bg-gradient-to-r from-sky-100/[0.035] via-sky-100/[0.075] to-sky-100/[0.035]" />
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-12 text-center text-[10px] uppercase tracking-[0.12em] text-white/42">
+        {confirmed ? "Preparing repaint..." : "Slide to erase images"}
+      </div>
+      <motion.div
+        drag={confirmed ? false : "x"}
+        dragConstraints={{ left: 0, right: maxX }}
+        dragElastic={0}
+        dragMomentum={false}
+        style={{ x, left: PADDING, width: HANDLE }}
+        onDragEnd={() => {
+          if (x.get() >= maxX - 6) {
+            setConfirmed(true);
+            animate(x, maxX, { type: "spring", stiffness: 420, damping: 38 });
+            void onConfirm();
+          } else {
+            animate(x, 0, { type: "spring", stiffness: 420, damping: 38 });
+          }
+        }}
+        onClick={(event) => event.stopPropagation()}
+        className="absolute top-1 flex h-9 cursor-grab items-center justify-center rounded-full border border-lumina-gold/45 bg-lumina-gold/78 text-[#071525] shadow-[0_8px_22px_rgba(0,0,0,0.35)] active:cursor-grabbing"
+        aria-label="Slide to erase generated images and regenerate from reading anchors"
+      >
+        <RefreshCw size={14} />
+      </motion.div>
+    </div>
   );
 }

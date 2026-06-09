@@ -430,8 +430,13 @@ export default function VisualPanel() {
             activeSemanticMap={activeSemanticMap}
             imageCache={imageCache}
             startSceneId={currentImage?.sceneId}
+            isAnalyzing={isAnalyzing}
+            analysisProgress={analysisProgressDetail?.message || analysisProgress}
+            analysisPercent={analysisProgressDetail?.percent}
             onVisitPassage={visitPassage}
             onGenerateScene={generateForScene}
+            onAnalyze={() => setAnalysisRequested(true)}
+            onRegenerateAll={regenerateAllImages}
             onClose={() => setShowFocal(false)}
           />
         )}
