@@ -25,7 +25,7 @@ import {
 } from "@/utils/imagePosition";
 import {
   findImageForVisualSlot,
-  segmentScenesOnePerSlot,
+  segmentScenesForSemanticMap,
   slotHasQueuedOrCachedImage,
   visualSlotKeyForScene,
 } from "@/utils/sceneDedup";
@@ -131,7 +131,7 @@ export function useImageTrigger() {
     lastQueuePositionRef.current = readerPos;
 
     const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
-    const canonicalScenes = segmentScenesOnePerSlot(activeSemanticMap.scenes, chapters);
+    const canonicalScenes = segmentScenesForSemanticMap(activeSemanticMap.scenes, chapters, activeSemanticMap);
     const scenes = scenePositions(canonicalScenes, getSceneWordPosition);
     const store = useImageStore.getState();
     const cachedImages = Object.values(store.imageCache);
@@ -265,7 +265,7 @@ export function useImageTrigger() {
     }
 
     const slotKey = visualSlotKeyForScene(scene, chapters) ?? next.visualSlotKey ?? null;
-    const mapScenes = segmentScenesOnePerSlot(semanticMap.scenes, chapters);
+    const mapScenes = segmentScenesForSemanticMap(semanticMap.scenes, chapters, semanticMap);
 
     if (!slotKey) {
       store.updateQueueItemStatus(next.sceneId, "complete");

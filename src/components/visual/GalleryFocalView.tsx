@@ -20,7 +20,7 @@ import { toAssetUrl } from "@/utils/tauriBridge";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useBookStore } from "@/store/bookStore";
 import { getImageForScene } from "@/utils/imagePosition";
-import { segmentScenesOnePerSlot } from "@/utils/sceneDedup";
+import { segmentScenesForSemanticMap } from "@/utils/sceneDedup";
 import { EMPTY_BEATS, EMPTY_CHAPTERS, EMPTY_SCENES } from "@/utils/stableEmpty";
 import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
@@ -76,7 +76,7 @@ export default function GalleryFocalView({
   const chapters = useBookStore((state) => state.activeStructure?.chapters ?? EMPTY_CHAPTERS);
   const items: GalleryItem[] = useMemo(() => {
     const allScenes = activeSemanticMap?.scenes ?? EMPTY_SCENES;
-    const scenes = segmentScenesOnePerSlot(allScenes, chapters);
+    const scenes = segmentScenesForSemanticMap(allScenes, chapters, activeSemanticMap);
     const beats = activeSemanticMap?.storyboard?.beats ?? EMPTY_BEATS;
     const cached = Object.values(imageCache);
     return scenes.map((scene) => ({
@@ -142,7 +142,9 @@ export default function GalleryFocalView({
 
   const current = items[index];
   const caption = current
-    ? current.scene.directorBrief?.blocking?.focalPoint ||
+    ? current.scene.expositoryBeat?.centralClaim ||
+      current.scene.expositoryBeat?.sectionTitle ||
+      current.scene.directorBrief?.blocking?.focalPoint ||
       current.scene.symbolicMotifs?.slice(0, 3).join(" · ") ||
       current.scene.emotionalVector?.slice(0, 2).join(" · ") ||
       ""

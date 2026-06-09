@@ -27,7 +27,7 @@ import {
 } from "@/utils/imagePosition";
 import {
   findImageForVisualSlot,
-  segmentScenesOnePerSlot,
+  segmentScenesForSemanticMap,
   visualSlotKeyForScene,
 } from "@/utils/sceneDedup";
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
@@ -236,7 +236,7 @@ export function useBookOrchestration() {
 
       setPhase({
         phase: "preparing",
-        message: `Reading the emotional landscape of ${label}…`,
+        message: `Analyzing ${label}…`,
         percent: 2,
       });
 
@@ -255,25 +255,30 @@ export function useBookOrchestration() {
         }
 
         const baseSemanticMap = await analyzeBook(structure, googleKey, reportProgress);
-        const visualLore = await buildVisualLoreDossier({
-          structure,
-          apiKey: googleKey,
-          onProgress: reportProgress,
-        });
+        const isExpository = baseSemanticMap.analysisProtocol === "expository";
+
+        const visualLore = isExpository
+          ? null
+          : await buildVisualLoreDossier({
+              structure,
+              apiKey: googleKey,
+              onProgress: reportProgress,
+            });
         const loreSemanticMap = visualLore
           ? { ...baseSemanticMap, visualLore }
           : baseSemanticMap;
         const styleSeed = getStyleSeedById(styleSeedId);
-        const directedScenes = styleSeed
-          ? await createVisualDirectorBriefs({
-              semanticMap: loreSemanticMap,
-              structure,
-              styleSeed,
-              interpretationLevel: visualInterpretationLevel,
-              apiKey: googleKey,
-              onProgress: reportProgress,
-            })
-          : loreSemanticMap.scenes;
+        const directedScenes =
+          styleSeed && !isExpository
+            ? await createVisualDirectorBriefs({
+                semanticMap: loreSemanticMap,
+                structure,
+                styleSeed,
+                interpretationLevel: visualInterpretationLevel,
+                apiKey: googleKey,
+                onProgress: reportProgress,
+              })
+            : loreSemanticMap.scenes;
         const semanticMap = { ...loreSemanticMap, scenes: directedScenes };
 
         await storage.saveSemanticMap(semanticMap).catch((e) =>
@@ -390,7 +395,7 @@ export function useBookOrchestration() {
       const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
       const scenePosition = computeSceneWordPosition(scene, chapters);
       const semanticMap = useBookStore.getState().activeSemanticMap;
-      const mapScenes = segmentScenesOnePerSlot(semanticMap?.scenes ?? [scene], chapters);
+      const mapScenes = segmentScenesForSemanticMap(semanticMap?.scenes ?? [scene], chapters, semanticMap);
       const slotKey = visualSlotKeyForScene(scene, chapters);
       const store = useImageStore.getState();
 

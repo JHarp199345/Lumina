@@ -22,6 +22,11 @@ const NEGATIVE_PROMPT =
   "manga, readable text, words, letters, watermarks, graphic gore, mutilation, " +
   "modern objects, low quality, digital art style, 3d render, CGI";
 
+const EXPOSITORY_NEGATIVE_PROMPT =
+  "fantasy art, watercolor painting, symbolic landscape, dramatic narrative scene, monster, creature, " +
+  "boss battle, photorealistic photograph, celebrity likeness, readable text, words, letters, watermarks, " +
+  "low quality, blurry, decorative flourish without information";
+
 // ─── Main Generator ───────────────────────────────────────────────────────────
 
 export interface GenerateImageOptions {
@@ -43,8 +48,11 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
     options;
 
   // Build the full prompt
+  const isExpository = Boolean(scene.expositoryBeat);
   const prompt = buildImagePrompt(scene, styleSeed, priorPaletteContext);
-  const negativePrompt = scene.directorBrief?.negativePrompt ?? NEGATIVE_PROMPT;
+  const negativePrompt =
+    scene.directorBrief?.negativePrompt ??
+    (isExpository ? EXPOSITORY_NEGATIVE_PROMPT : NEGATIVE_PROMPT);
 
   // Try Imagen 3 first
   let imageData: Uint8Array | null = null;
@@ -149,6 +157,10 @@ export function buildImagePrompt(
   styleSeed: StyleSeed,
   priorPaletteContext?: string
 ): string {
+  if (scene.expositoryBeat) {
+    return buildExpositoryImagePrompt(scene, styleSeed, priorPaletteContext);
+  }
+
   if (scene.directorBrief) {
     const directorPrompt = buildFinalImagePrompt(scene.directorBrief, styleSeed);
     return priorPaletteContext
@@ -178,6 +190,37 @@ export function buildImagePrompt(
   );
 
   return parts.join(". ");
+}
+
+function buildExpositoryImagePrompt(
+  scene: IdentifiedScene,
+  styleSeed: StyleSeed,
+  priorPaletteContext?: string
+): string {
+  const beat = scene.expositoryBeat!;
+  const parts: string[] = [];
+
+  parts.push(scene.imageDescription || `Educational diagram: ${beat.centralClaim}`);
+  parts.push(beat.domainStyleHint);
+  parts.push(
+    `Infographic layout type: ${beat.visualType}. Section: "${beat.sectionTitle}". ` +
+      `Key concepts to depict visually: ${beat.keyTerms.join(", ") || beat.centralClaim}.`
+  );
+
+  // Muted palette from seed for series consistency without painterly fiction look
+  parts.push(`Color palette accents: ${styleSeed.paletteKeywords.slice(0, 4).join(", ")}.`);
+
+  if (priorPaletteContext) {
+    parts.push(`Maintain diagram series consistency: ${priorPaletteContext}`);
+  }
+
+  parts.push(
+    "Educational textbook infographic quality. Clear visual hierarchy. Information-dense explanatory diagram. " +
+      "Use abstract label bars and annotation callouts — no readable words or letters. " +
+      "No fantasy illustration, no narrative scene, no symbolic watercolor."
+  );
+
+  return parts.join(" ");
 }
 
 function buildFallbackDescription(scene: IdentifiedScene): string {

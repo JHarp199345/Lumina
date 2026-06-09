@@ -5,7 +5,15 @@
  * anchor, navigation target, and optional generated image.
  */
 
-import type { BookStructure, Chapter, IdentifiedScene, MacroArc, CachedImage } from "@/types";
+import type {
+  AnalysisProtocol,
+  BookStructure,
+  Chapter,
+  IdentifiedScene,
+  MacroArc,
+  CachedImage,
+  SemanticMap,
+} from "@/types";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 
 const MIN_PLANNED_CHAPTER_WORDS = 400;
@@ -35,6 +43,8 @@ export function visualSlotKeyForScene(
   scene: IdentifiedScene,
   chapters: Chapter[]
 ): string | null {
+  if (scene.visualSlotKey) return scene.visualSlotKey;
+
   const chapter =
     chapters.find((ch) => ch.id === scene.chapterId) ??
     chapters.find((ch) => ch.spineIndex === scene.anchor?.spineIndex);
@@ -95,8 +105,15 @@ export function findImageForVisualSlot(
  */
 export function segmentScenesOnePerSlot(
   scenes: IdentifiedScene[],
-  chapters: Chapter[]
+  chapters: Chapter[],
+  options?: { protocol?: AnalysisProtocol }
 ): IdentifiedScene[] {
+  if (options?.protocol === "expository") {
+    return [...scenes].sort(
+      (a, b) => computeSceneWordPosition(a, chapters) - computeSceneWordPosition(b, chapters)
+    );
+  }
+
   const bySlot = pickBestScenePerSlot(scenes, chapters);
   const usedSlots = new Set<string>();
   const result: IdentifiedScene[] = [];
@@ -172,6 +189,15 @@ export function segmentScenesOnePerChapter(
   chapters: Chapter[]
 ): IdentifiedScene[] {
   return segmentScenesOnePerSlot(scenes, chapters);
+}
+
+/** Gallery / read-ahead timeline — respects narrative vs expository protocol. */
+export function segmentScenesForSemanticMap(
+  scenes: IdentifiedScene[],
+  chapters: Chapter[],
+  semanticMap?: Pick<SemanticMap, "analysisProtocol"> | null
+): IdentifiedScene[] {
+  return segmentScenesOnePerSlot(scenes, chapters, { protocol: semanticMap?.analysisProtocol });
 }
 
 export function dedupeScenesForStructure(

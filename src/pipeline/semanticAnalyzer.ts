@@ -8,8 +8,10 @@
  */
 
 import { analyzeStoryShape, type StoryShapeResult } from "./storyShape";
+import { analyzeExpositoryBook } from "@/pipeline/expositoryAnalyzer";
 import { pickSceneAnchor, isGutenbergEdition } from "@/pipeline/gutenbergAnchors";
 import { refreshGutenbergStructureSections } from "@/pipeline/gutenbergAnalysis";
+import { resolveWorkProtocol } from "@/pipeline/workProtocol";
 import { buildVisualStoryboard } from "./visualStoryboard";
 import {
   buildNarrativeBlueprint,
@@ -38,8 +40,29 @@ export async function analyzeBook(
   apiKey: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<SemanticMap> {
-  let analysisStructure = storyOnlyStructure(structure);
   const report = makeProgressReporter(onProgress);
+
+  report({
+    phase: "preparing",
+    message: `Reading "${structure.title}" to choose the right analysis path…`,
+    percent: 2,
+  });
+
+  const workProtocol = await resolveWorkProtocol(structure, apiKey);
+  if (workProtocol.protocol === "expository") {
+    return analyzeExpositoryBook(structure, apiKey, workProtocol, report);
+  }
+
+  return analyzeNarrativeBook(structure, apiKey, report, workProtocol);
+}
+
+async function analyzeNarrativeBook(
+  structure: BookStructure,
+  apiKey: string,
+  report: AnalysisProgressReporter,
+  workProtocol: Awaited<ReturnType<typeof resolveWorkProtocol>>
+): Promise<SemanticMap> {
+  let analysisStructure = storyOnlyStructure(structure);
   report({
     phase: "preparing",
     message: `Preparing ${analysisStructure.chapters.length} story chapters for analysis…`,
@@ -158,9 +181,14 @@ export async function analyzeBook(
   return {
     bookId: analysisStructure.bookId,
     visualPlanVersion: VISUAL_PLAN_VERSION,
+    analysisProtocol: "narrative",
+    workType: workProtocol.workType,
     arcShape: macroArc.arcShape,
     inflectionPoints: macroArc.inflectionPoints,
-    scenes: plannedScenes,
+    scenes: plannedScenes.map((scene) => ({
+      ...scene,
+      visualSlotKey: scene.visualSlotKey ?? scene.chapterId,
+    })),
     goldenNumber,
     analyzedAt: new Date().toISOString(),
     storyboard,

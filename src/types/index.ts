@@ -147,11 +147,52 @@ export interface NarrativeBlueprint {
   threads: NarrativeThread[];
 }
 
+/** Invisible analysis routing — not a user-facing mode. */
+export type AnalysisProtocol = "narrative" | "expository";
+
+export type ExpositoryVisualType =
+  | "definition"
+  | "contrast"
+  | "mechanism"
+  | "flowchart"
+  | "anatomy_diagram"
+  | "concept_map"
+  | "timeline"
+  | "case_study"
+  | "synthesis"
+  | "infographic";
+
+export type ExpositoryDomain =
+  | "neuroscience"
+  | "medical"
+  | "biology"
+  | "psychology"
+  | "physics"
+  | "economics"
+  | "history"
+  | "technology"
+  | "general";
+
+/** Idea beat for expository / technical works — drives diagram-style visuals. */
+export interface ExpositoryBeat {
+  sectionTitle: string;
+  centralClaim: string;
+  keyTerms: string[];
+  visualType: ExpositoryVisualType;
+  domain: ExpositoryDomain;
+  domainStyleHint: string;
+  /** Cleaned, idea-focused prose sent to image generation (not the raw section). */
+  focusedExcerpt: string;
+  importance: number;
+}
+
 export interface IdentifiedScene {
   id: string;
   inflectionPointId: string;
   chapterId: string;
   sectionId: string;
+  /** Cache / generation dedup key — chapter id (narrative) or section id (expository). */
+  visualSlotKey?: string;
   /** Legacy: kept for DB compat but may be empty. Use anchor instead. */
   anchorCfi: string;
   /** Reliable location: href + spineIndex + wordOffset. */
@@ -162,6 +203,8 @@ export interface IdentifiedScene {
   narrativeWeight: number; // 0–1
   imageDescription?: string;
   directorBrief?: VisualDirectorBrief;
+  /** Populated when analysisProtocol is expository. */
+  expositoryBeat?: ExpositoryBeat;
   /** Narrative thread this scene serves, set by thread-aware selection. */
   threadId?: string;
   threadRole?: ThreadRole;
@@ -174,6 +217,10 @@ export interface IdentifiedScene {
 export interface SemanticMap {
   bookId: string;
   visualPlanVersion?: number;
+  /** Automatic pipeline routing — narrative (fiction) or expository (ideas/diagrams). */
+  analysisProtocol?: AnalysisProtocol;
+  workType?: WorkType;
+  expositoryDomain?: ExpositoryDomain;
   arcShape: ArcShape;
   inflectionPoints: InflectionPoint[];
   scenes: IdentifiedScene[];

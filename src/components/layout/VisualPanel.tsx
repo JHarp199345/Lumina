@@ -18,7 +18,7 @@ import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useUiStore } from "@/store/uiStore";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { getImageForScene } from "@/utils/imagePosition";
-import { segmentScenesOnePerSlot, visualSlotKeyForScene } from "@/utils/sceneDedup";
+import { segmentScenesForSemanticMap, visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 import type { CachedImage, SemanticMap } from "@/types";
 
@@ -580,7 +580,7 @@ function VisualPlanFilmstrip({
 }) {
   const chapters = useBookStore((state) => state.activeStructure?.chapters ?? EMPTY_CHAPTERS);
   const allScenes = activeSemanticMap.scenes;
-  const scenes = segmentScenesOnePerSlot(allScenes, chapters);
+  const scenes = segmentScenesForSemanticMap(allScenes, chapters, activeSemanticMap);
   const cached = Object.values(imageCache);
   const generatedCount = scenes.filter((scene) =>
     getImageForScene(scene, cached, chapters, allScenes)

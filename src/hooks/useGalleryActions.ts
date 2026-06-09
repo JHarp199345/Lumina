@@ -8,7 +8,7 @@ import { getStyleSeedById } from "@/data/styleSeeds";
 import { storage } from "@/storage";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import {
-  segmentScenesOnePerSlot,
+  segmentScenesForSemanticMap,
   slotHasQueuedOrCachedImage,
   visualSlotKeyForScene,
 } from "@/utils/sceneDedup";
@@ -45,7 +45,7 @@ export function useGalleryActions() {
     if (!scene) return;
 
     const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
-    const canonicalScenes = segmentScenesOnePerSlot(activeSemanticMap.scenes, chapters);
+    const canonicalScenes = segmentScenesForSemanticMap(activeSemanticMap.scenes, chapters, activeSemanticMap);
     const slotKey = visualSlotKeyForScene(scene, chapters);
     const store = useImageStore.getState();
     if (
