@@ -27,11 +27,12 @@ export function useGalleryActions() {
       luminaNavigateToScene?: (target: string, wordOffset?: number) => void;
       luminaNavigate?: (target: string) => void;
     };
-    const target = scene.anchor?.href || scene.chapterId;
+    const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
+    const chapterIndex = chapters.find((ch) => ch.id === scene.chapterId)?.index;
     if (win.luminaNavigateToScene) {
-      win.luminaNavigateToScene(target, scene.anchor?.wordOffset ?? 0);
-    } else {
-      win.luminaNavigate?.(target);
+      win.luminaNavigateToScene(scene.chapterId, scene.anchor?.wordOffset ?? 0);
+    } else if (chapterIndex !== undefined) {
+      win.luminaNavigate?.(`lumina://chapter/${chapterIndex}/page/0`);
     }
     useUiStore.getState().closeGallery();
   }, []);

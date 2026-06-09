@@ -243,7 +243,7 @@ async function searchBookArtifacts({
       const text = chapter.rawText || "";
       for (const match of findTextMatches(text, lower, 4)) {
         results.push({
-          target: chapter.href || chapter.startCfi || chapter.id,
+          target: `lumina://chapter/${chapter.index}/page/0`,
           wordOffset: countWords(text.slice(0, match.index)),
           excerpt: excerptAround(text, match.index, q.length),
           source: "book",

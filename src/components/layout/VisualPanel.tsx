@@ -220,11 +220,15 @@ export default function VisualPanel() {
       luminaNavigateToScene?: (target: string, wordOffset?: number) => void;
       luminaNavigate?: (target: string) => void;
     };
-    const target = currentScene.anchor?.href || currentScene.chapterId;
     if (win.luminaNavigateToScene) {
-      win.luminaNavigateToScene(target, currentScene.anchor?.wordOffset ?? 0);
+      win.luminaNavigateToScene(currentScene.chapterId, currentScene.anchor?.wordOffset ?? 0);
     } else {
-      win.luminaNavigate?.(target);
+      const chapterIndex = useBookStore.getState().activeStructure?.chapters.find(
+        (ch) => ch.id === currentScene.chapterId
+      )?.index;
+      if (chapterIndex !== undefined) {
+        win.luminaNavigate?.(`lumina://chapter/${chapterIndex}/page/0`);
+      }
     }
     setShowRegenerate(false);
   }, [currentScene, rememberReadingSpot]);

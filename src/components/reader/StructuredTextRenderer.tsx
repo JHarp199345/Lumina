@@ -6,6 +6,7 @@ import { useImageStore } from "@/store/imageStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useUiStore } from "@/store/uiStore";
 import { useAudioStore } from "@/store/audioStore";
+import { resolveChapterIndex } from "@/utils/chapterNavigation";
 import { parseChapterDisplay } from "@/utils/titleUtils";
 import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
@@ -515,23 +516,11 @@ export default function StructuredTextRenderer({
         goTo(chapterIndex, page);
         return;
       }
-      const index = activeStructure?.chapters.findIndex(
-        (chapter) =>
-          chapter.id === target ||
-          chapter.href === target ||
-          chapter.startCfi === target ||
-          Boolean(chapter.href && target.endsWith(chapter.href.split("/").pop() ?? ""))
-      );
-      if (index !== undefined && index >= 0) goTo(index, 0);
+      const index = resolveChapterIndex(activeStructure, target);
+      if (index >= 0) goTo(index, 0);
     };
     win.luminaNavigateToScene = (target: string, wordOffset = 0) => {
-      const index = activeStructure?.chapters.findIndex(
-        (chapter) =>
-          chapter.id === target ||
-          chapter.href === target ||
-          chapter.startCfi === target ||
-          Boolean(chapter.href && target.endsWith(chapter.href.split("/").pop() ?? ""))
-      );
+      const index = resolveChapterIndex(activeStructure, target);
       if (index === undefined || index < 0) return;
       const chapter = activeStructure?.chapters[index];
       const pagesInChapter = Math.max(1, chapterPages[index]?.length ?? 1);

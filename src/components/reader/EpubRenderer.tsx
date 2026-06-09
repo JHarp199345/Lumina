@@ -17,6 +17,7 @@ import { useAnnotationStore } from "@/store/annotationStore";
 import { useSelectionStore } from "@/store/selectionStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { storage } from "@/storage";
+import { chapterEpubHref, resolveChapterIndex } from "@/utils/chapterNavigation";
 import { toAssetUrl } from "@/utils/tauriBridge";
 import { epubLensClassName, lensSvgFill, lensThemeProperties, useLensStore } from "@/store/lensStore";
 import type { Highlight, HighlightColor } from "@/types";
@@ -258,10 +259,7 @@ export default function EpubRenderer({
   const findChapterIndex = useCallback(
     (href: string | undefined): number => {
       if (!activeStructure || !href) return 0;
-      const baseName = href.split("/").pop() ?? "";
-      const idx = activeStructure.chapters.findIndex(
-        (ch) => ch.href && (ch.href === href || ch.href.endsWith(baseName))
-      );
+      const idx = resolveChapterIndex(activeStructure, href);
       return idx >= 0 ? idx : 0;
     },
     [activeStructure]
@@ -298,7 +296,7 @@ export default function EpubRenderer({
     if (nextIndex === currentChapterIndex) return false;
 
     const chapter = structure.chapters[nextIndex];
-    const target = chapter.startCfi || chapter.href;
+    const target = chapter.startCfi || chapterEpubHref(chapter);
     if (!target) return false;
 
     const before = useReaderStore.getState().currentCfi;
@@ -618,9 +616,25 @@ export default function EpubRenderer({
     };
 
     win.luminaNavigate = (target: string) => {
+      const structure = useBookStore.getState().activeStructure;
+      const index = resolveChapterIndex(structure, target);
+      if (index >= 0 && structure?.chapters[index]) {
+        const chapter = structure.chapters[index];
+        setCurrentChapterIndex(index);
+        navigateToTarget(chapter.startCfi || chapterEpubHref(chapter));
+        return;
+      }
       navigateToTarget(target);
     };
-    win.luminaNavigateToScene = (target: string) => {
+    win.luminaNavigateToScene = (target: string, wordOffset = 0) => {
+      const structure = useBookStore.getState().activeStructure;
+      const index = resolveChapterIndex(structure, target);
+      if (index >= 0 && structure?.chapters[index]) {
+        const chapter = structure.chapters[index];
+        setCurrentChapterIndex(index);
+        navigateToTarget(chapter.startCfi || chapterEpubHref(chapter));
+        return;
+      }
       navigateToTarget(target);
     };
 

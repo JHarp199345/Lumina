@@ -138,6 +138,7 @@ export default function HighlightLayer() {
       anchorCfi: "",
       anchor: {
         href: chapter.href,
+        fragment: chapter.fragment,
         spineIndex: chapter.spineIndex,
         wordOffset,
       },

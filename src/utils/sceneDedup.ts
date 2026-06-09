@@ -1,8 +1,8 @@
 /**
- * sceneDedup — one visual slot per EPUB HTML section (spine + href).
+ * sceneDedup — one visual slot per parser chapter (the EPUB ingestion backbone).
  *
- * Gutenberg TOC junk often creates many chapter IDs pointing at the same file.
- * The semantic map and gallery must never carry more than one scene per slot.
+ * Junk TOC rows are filtered at parse time; each remaining chapter gets its own
+ * anchor, navigation target, and optional generated image.
  */
 
 import type { BookStructure, Chapter, IdentifiedScene, MacroArc, CachedImage } from "@/types";
@@ -26,13 +26,9 @@ export function shouldPreferScene(candidate: IdentifiedScene, incumbent: Identif
   return (candidate.narrativeWeight ?? 0) > (incumbent.narrativeWeight ?? 0);
 }
 
-/**
- * One slot per physical EPUB HTML file (fragment stripped).
- * TOC rows that point at the same file with different anchors must not multiply slots.
- */
+/** One slot per parser chapter — matches the TOC row the reader sees. */
 export function visualSlotKey(chapter: Chapter): string {
-  const fileHref = chapter.href.split("#")[0] || chapter.href;
-  return fileHref;
+  return chapter.id;
 }
 
 export function visualSlotKeyForScene(
@@ -95,7 +91,7 @@ export function findImageForVisualSlot(
 }
 
 /**
- * Timeline / gallery: exactly one entry per EPUB section, in reading order.
+ * Timeline / gallery: exactly one entry per parser chapter, in reading order.
  */
 export function segmentScenesOnePerSlot(
   scenes: IdentifiedScene[],
@@ -133,7 +129,7 @@ export interface BuildPlannedChapterScene {
 }
 
 /**
- * Analysis output: one scene in the stored semantic map per EPUB HTML section.
+ * Analysis output: one scene in the stored semantic map per parser chapter.
  */
 export function buildVisualSlotPlan(
   structure: BookStructure,

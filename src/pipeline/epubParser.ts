@@ -57,6 +57,7 @@ interface NavChapterCandidate {
   title: string;
   wordCount: number;
   href: string;
+  fragment: string;
   spineIndex: number;
   rawText: string;
   hasChildren: boolean;
@@ -389,6 +390,7 @@ function chaptersFromNavSlices(
       title: slice.title,
       wordCount,
       href,
+      fragment: slice.fragment,
       spineIndex: spineIndex >= 0 ? spineIndex : 0,
       rawText: text,
       hasChildren: slice.hasChildren,
@@ -404,6 +406,7 @@ function chaptersFromNavSlices(
     title: chapter.title,
     wordCount: chapter.wordCount,
     href: chapter.href,
+    fragment: chapter.fragment || undefined,
     spineIndex:
       chapter.spineIndex >= 0
         ? chapter.spineIndex

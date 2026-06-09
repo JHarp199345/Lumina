@@ -184,6 +184,7 @@ function buildPlannedChapterScene(
     sectionId: anchorSection.id,
     anchor: {
       href: chapter.href,
+      fragment: chapter.fragment,
       spineIndex: chapter.spineIndex,
       wordOffset: anchorSection.startWordOffset ?? targetOffset,
     },
@@ -335,6 +336,7 @@ function buildFallbackScene(
     anchorCfi: "",
     anchor: {
       href: chapter.href,
+      fragment: chapter.fragment,
       spineIndex: chapter.spineIndex,
       wordOffset: anchorSection.startWordOffset ?? targetOffset,
     },
@@ -379,6 +381,7 @@ JSON response:
     anchorCfi: "",
     anchor: {
       href: chapter.href,
+      fragment: chapter.fragment,
       spineIndex: chapter.spineIndex,
       wordOffset: 0,
     },
@@ -441,6 +444,7 @@ JSON response:
     anchorCfi: "",
     anchor: {
       href: chapter.href,
+      fragment: chapter.fragment,
       spineIndex: chapter.spineIndex,
       wordOffset: anchorSection.startWordOffset ?? targetOffset,
     },

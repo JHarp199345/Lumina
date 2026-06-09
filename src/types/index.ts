@@ -26,7 +26,9 @@ export interface Chapter {
   index: number;
   title: string;
   wordCount: number;
-  href: string;        // real spine item href — use for EPUB.js navigation
+  href: string;        // spine HTML file path (no fragment)
+  /** NCX anchor id within href — distinguishes chapters that share one HTML file. */
+  fragment?: string;
   spineIndex: number;  // position in spine — use for CFI-to-chapter mapping
   startCfi: string;    // best-effort CFI (may be empty)
   endCfi: string;
@@ -55,8 +57,9 @@ export interface CollectionGroup {
 /** Reliable scene location without fake CFIs. */
 export interface SceneAnchor {
   href: string;          // spine item href — matches Chapter.href
+  fragment?: string;     // NCX anchor when chapter shares an HTML file
   spineIndex: number;    // matches Chapter.spineIndex
-  wordOffset: number;    // estimated word offset into the spine item
+  wordOffset: number;    // estimated word offset into the chapter's rawText
 }
 
 export interface BookStructure {

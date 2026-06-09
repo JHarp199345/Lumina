@@ -144,9 +144,7 @@ function ChapterList({
             }`}
             onClick={() => {
               const nav = (window as Window & { luminaNavigate?: (target: string) => void }).luminaNavigate;
-              // Prefer real href for navigation; fall back to CFI if set
-              const target = chapter.href || chapter.startCfi;
-              if (nav && target) nav(target);
+              if (nav) nav(`lumina://chapter/${chapter.index}/page/0`);
               onNavigate?.();
             }}
           >
