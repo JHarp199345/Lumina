@@ -433,6 +433,7 @@ export default function VisualPanel() {
             isAnalyzing={isAnalyzing}
             analysisProgress={analysisProgressDetail?.message || analysisProgress}
             analysisPercent={analysisProgressDetail?.percent}
+            analysisPhase={analysisProgressDetail?.phase}
             onVisitPassage={visitPassage}
             onGenerateScene={generateForScene}
             onAnalyze={() => setAnalysisRequested(true)}

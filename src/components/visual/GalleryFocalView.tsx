@@ -12,11 +12,11 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { animate, motion, useMotionValue } from "framer-motion";
-import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, RefreshCw } from "lucide-react";
+import { animate, AnimatePresence, motion, useMotionValue } from "framer-motion";
+import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, RefreshCw, Check, AlertTriangle } from "lucide-react";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
-import type { CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
+import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
 function displaySrc(src: string): string {
   const isUrl =
@@ -41,6 +41,8 @@ interface GalleryFocalViewProps {
   isAnalyzing: boolean;
   analysisProgress?: string;
   analysisPercent?: number;
+  /** Current analysis phase — used to tell a finished run from a failed one. */
+  analysisPhase?: AnalysisProgressPhase;
   /** Navigate the reader to a passage and CLOSE the gallery (go read it). */
   onVisitPassage: (sceneId: string) => void;
   /** Generate the image for a planned scene. */
@@ -57,6 +59,7 @@ export default function GalleryFocalView({
   isAnalyzing,
   analysisProgress,
   analysisPercent,
+  analysisPhase,
   onVisitPassage,
   onGenerateScene,
   onAnalyze,
@@ -80,6 +83,36 @@ export default function GalleryFocalView({
   const [showBookMenu, setShowBookMenu] = useState(false);
   const selectedThumbRef = useRef<HTMLButtonElement>(null);
   const generatedCount = items.filter((item) => item.image).length;
+
+  // Surface a calm, always-visible status for re-analysis — independent of the
+  // Book Visuals menu. The orchestration clears its "complete" detail in the same
+  // tick it flips isAnalyzing→false, so we observe that transition ourselves to
+  // hold a brief done/failed confirmation that the reader can actually see.
+  const wasAnalyzingRef = useRef(false);
+  const [outcome, setOutcome] = useState<{ kind: "done" | "error"; message: string } | null>(null);
+  const analysisPct = Math.max(6, Math.min(100, analysisPercent ?? 12));
+
+  useEffect(() => {
+    if (isAnalyzing) {
+      wasAnalyzingRef.current = true;
+      setOutcome(null);
+      return;
+    }
+    if (!wasAnalyzingRef.current) return;
+    wasAnalyzingRef.current = false;
+    setOutcome(
+      analysisPhase === "error"
+        ? { kind: "error", message: analysisProgress || "Analysis didn't finish. Try again." }
+        : { kind: "done", message: "Visual plan refreshed." }
+    );
+  }, [isAnalyzing, analysisPhase, analysisProgress]);
+
+  useEffect(() => {
+    if (!outcome) return;
+    const ms = outcome.kind === "error" ? 6000 : 4000;
+    const t = window.setTimeout(() => setOutcome(null), ms);
+    return () => window.clearTimeout(t);
+  }, [outcome]);
 
   const clamp = (i: number) => Math.max(0, Math.min(items.length - 1, i));
 
@@ -183,27 +216,16 @@ export default function GalleryFocalView({
             </div>
 
             <button
-              onClick={onAnalyze}
+              onClick={() => {
+                onAnalyze();
+                setShowBookMenu(false);
+              }}
               disabled={isAnalyzing}
               className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/[0.075] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-lumina-gold/88 transition-colors hover:border-lumina-gold/50 hover:bg-lumina-gold/[0.11] disabled:cursor-default disabled:opacity-70"
             >
               {isAnalyzing ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
               {isAnalyzing ? "Analyzing" : activeSemanticMap ? "Re-analyze This Book" : "Analyze This Book"}
             </button>
-
-            {isAnalyzing && (
-              <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-2">
-                <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
-                  <div
-                    className="h-full rounded-full bg-lumina-gold/72 transition-all duration-500"
-                    style={{ width: `${Math.max(6, Math.min(100, analysisPercent ?? 12))}%` }}
-                  />
-                </div>
-                <p className="mt-2 truncate text-center text-[10px] tracking-wide text-white/42">
-                  {analysisProgress || "Preparing the visual story..."}
-                </p>
-              </div>
-            )}
 
             {generatedCount > 0 && !isAnalyzing && (
               <div className="mt-3 border-t border-white/10 pt-3">
@@ -220,6 +242,53 @@ export default function GalleryFocalView({
             )}
           </div>
         )}
+      </div>
+
+      {/* Re-analysis status — floats below the top bar, always visible while a
+          run is in flight (or just finished), regardless of the menu state. */}
+      <div className="pointer-events-none absolute inset-x-0 top-16 z-40 flex justify-center px-4">
+        <AnimatePresence>
+          {(isAnalyzing || outcome) && (
+            <motion.div
+              key={isAnalyzing ? "analyzing" : outcome?.kind}
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              onClick={(e) => e.stopPropagation()}
+              className="pointer-events-auto w-[min(440px,calc(100vw-32px))] rounded-xl border border-white/12 bg-[#081522]/92 px-4 py-3 shadow-2xl shadow-black/45 backdrop-blur-xl"
+            >
+              {isAnalyzing ? (
+                <>
+                  <div className="flex items-center gap-2.5">
+                    <Loader size={14} className="shrink-0 animate-spin text-lumina-gold/85" />
+                    <p className="flex-1 truncate text-[12px] text-white/80">
+                      {analysisProgress || "Reading the book's emotional landscape…"}
+                    </p>
+                    <span className="shrink-0 text-[11px] tabular-nums text-white/45">
+                      {Math.round(analysisPct)}%
+                    </span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+                    <div
+                      className="h-full rounded-full bg-lumina-gold/75 transition-all duration-500"
+                      style={{ width: `${analysisPct}%` }}
+                    />
+                  </div>
+                </>
+              ) : outcome?.kind === "done" ? (
+                <div className="flex items-center gap-2.5">
+                  <Check size={14} className="shrink-0 text-emerald-300/90" />
+                  <p className="text-[12px] text-white/80">{outcome.message}</p>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle size={14} className="shrink-0 text-rose-300/90" />
+                  <p className="text-[12px] text-white/80">{outcome?.message}</p>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Hero: the piece on the wall ─ matte frame + soft shadow, no lamp */}
