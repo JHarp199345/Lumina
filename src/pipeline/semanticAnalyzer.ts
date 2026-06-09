@@ -25,6 +25,7 @@ import type {
 import { LUMINA_CONFIG } from "@/config";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
+import { dedupeScenesForStructure, isWordPositionCovered } from "@/utils/sceneDedup";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -115,11 +116,12 @@ export async function analyzeBook(
 
   // Whole-book plan: merge directed scenes with one-per-uncovered-chapter scenes,
   // then re-annotate so the planned chapter scenes also carry thread membership.
+  const mergedScenes = mergeScenesForWholeBookPlan(
+    annotatedScenes,
+    buildPlannedChapterScenes(analysisStructure, macroArc, annotatedScenes)
+  );
   const plannedScenes = annotateScenesWithThreads(
-    mergeScenesForWholeBookPlan(
-      annotatedScenes,
-      buildPlannedChapterScenes(analysisStructure, macroArc, annotatedScenes)
-    ),
+    dedupeScenesForStructure(mergedScenes, analysisStructure),
     narrativeBlueprint,
     analysisStructure
   );
@@ -160,14 +162,20 @@ function buildPlannedChapterScenes(
   macroArc: MacroArc,
   existingScenes: IdentifiedScene[]
 ): IdentifiedScene[] {
-  const coveredChapterIds = new Set(existingScenes.map((scene) => scene.chapterId));
   const planned: IdentifiedScene[] = [];
 
   for (const chapter of structure.chapters) {
-    if (coveredChapterIds.has(chapter.id)) continue;
     if (!chapter.rawText || chapter.wordCount < 250) continue;
 
     const targetOffset = Math.floor(chapter.wordCount * 0.42);
+    const wordsBefore = structure.chapters
+      .slice(0, chapter.index)
+      .reduce((sum, ch) => sum + ch.wordCount, 0);
+    const targetPosition = wordsBefore + targetOffset;
+
+    if (isWordPositionCovered(targetPosition, existingScenes, structure.chapters)) {
+      continue;
+    }
     const anchorSection = chapter.sections.reduce((best, section) => {
       const bestDist = Math.abs((best.startWordOffset ?? 0) - targetOffset);
       const sectionDist = Math.abs((section.startWordOffset ?? 0) - targetOffset);

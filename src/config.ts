@@ -14,6 +14,8 @@ export const LUMINA_CONFIG = {
   VISUAL_JUMP_QUEUE_WINDOW_WORDS: 1000,
   /** Reader must advance at least this many words before read-ahead preloads fire. */
   VISUAL_FORWARD_ADVANCE_WORDS: 80,
+  /** Minimum word gap between distinct visual anchor positions in the storyboard. */
+  VISUAL_MIN_SCENE_SEPARATION_WORDS: 350,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words

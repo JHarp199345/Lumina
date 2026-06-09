@@ -119,11 +119,11 @@ export function getImageForScene(
   images: Iterable<CachedImage>,
   chapters: Chapter[]
 ): CachedImage | undefined {
-  const position = computeSceneWordPosition(scene, chapters);
   const imageList = Array.from(images);
-  const byPosition = findImageAtPosition(imageList, position, chapters);
-  if (byPosition) return byPosition;
-  return imageList.find((image) => image.sceneId === scene.id);
+  const bySceneId = imageList.find((image) => image.sceneId === scene.id);
+  if (bySceneId) return bySceneId;
+  const position = computeSceneWordPosition(scene, chapters);
+  return findImageAtPosition(imageList, position, chapters);
 }
 
 export function hydrateImageWordPositions(

@@ -19,6 +19,7 @@ import GalleryFocalView from "@/components/visual/GalleryFocalView";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { getImageForScene } from "@/utils/imagePosition";
+import { dedupeScenesByWordPosition } from "@/utils/sceneDedup";
 import type { CachedImage, SemanticMap, VisualBeat } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -608,9 +609,11 @@ function ImageGalleryModal({
 }) {
   const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
   const chapters = useBookStore((state) => state.activeStructure?.chapters ?? []);
-  const scenes = activeSemanticMap?.scenes ?? [];
+  const scenes = dedupeScenesByWordPosition(activeSemanticMap?.scenes ?? [], chapters);
   const beats: VisualBeat[] =
-    activeSemanticMap?.storyboard?.beats ??
+    activeSemanticMap?.storyboard?.beats?.filter((beat) =>
+      scenes.some((scene) => scene.id === beat.sceneId)
+    ) ??
     scenes.map((scene, index) => ({
       id: `fallback_${scene.id}`,
       sceneId: scene.id,
