@@ -204,6 +204,54 @@ export function useBookOrchestration() {
     [setActiveSemanticMap, clearQueue, addToCache, setCurrentImage, setCurrentThemes]
   );
 
+  // ── Re-Ingest (the single explicit "start a fresh generation" action) ────────
+  // Snapshots the current generation into the archive, clears the active generated
+  // artifacts (images, audio, semantic map, source profile), then re-lays fresh
+  // groundwork. Images fill in one-at-a-time via the read-ahead trigger. User data
+  // (highlights, notes, progress, the EPUB) is never touched.
+
+  const reIngest = useCallback(
+    async (structure: BookStructure) => {
+      const state = useBookStore.getState();
+      const book = state.activeBook;
+      const seedId = state.activeStyleSeed;
+      if (!book || !seedId) return;
+
+      const slice = getAnalysisSlice(structure, 0);
+      diagnosticInfo("reingest.start", "Re-ingesting book", { bookId: book.id });
+
+      // 1. Archive the current generation and clear the active generated artifacts.
+      await storage.archiveAndResetGeneration(book).catch((err) =>
+        diagnosticWarn("reingest.archive_failed", "Archive/reset failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
+
+      // 2. Clear in-memory generation state so nothing old lingers in the gallery.
+      clearQueue();
+      clearImageCache();
+      setActiveSemanticMap(null);
+
+      // 3. Re-lay the groundwork: fresh analysis. The opening image generates;
+      //    the rest fill in one-at-a-time as the reader reaches each slot.
+      await _runAnalysis(slice.structure, seedId, slice.semanticBookId, slice.label, {
+        ensureOpeningImage: true,
+      });
+
+      // 4. Return the reader to the start of the fresh generation.
+      const win = window as Window & { luminaNavigate?: (target: string) => void };
+      win.luminaNavigate?.("lumina://chapter/0/page/0");
+      useReaderStore.getState().setCurrentCfi("lumina://chapter/0/page/0");
+      useReaderStore.getState().setCurrentChapterIndex(0);
+      useReaderStore.getState().setPercentComplete(0);
+      useReaderStore.getState().setWordPosition(0);
+      useImageStore.getState().markNavigationJump();
+
+      diagnosticInfo("reingest.complete", "Re-ingestion complete", { bookId: book.id });
+    },
+    [setActiveSemanticMap, clearQueue, clearImageCache]
+  );
+
   // ── Internal helpers ─────────────────────────────────────────────────────────
 
   const _runAnalysis = useCallback(
@@ -564,5 +612,5 @@ export function useBookOrchestration() {
     });
   }, [clearQueue, clearImageCache, setCurrentImage, setCurrentThemes, _ensureSceneImage]);
 
-  return { startOrchestration, reAnalyzeBook, regenerateAllImages };
+  return { startOrchestration, reAnalyzeBook, regenerateAllImages, reIngest };
 }

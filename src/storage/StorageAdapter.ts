@@ -161,6 +161,13 @@ export interface StorageAdapter {
 
   /** Move generated artifacts to the archive and remove the book from the library. */
   archiveAndRemoveBook(book: Book): Promise<void>;
+  /**
+   * Re-Ingest: snapshot the current generation into the archive (counts), then clear
+   * the active generated artifacts (images, audio, semantic map, source profile) so a
+   * fresh ingestion can re-lay the groundwork. The book stays in the library, and user
+   * data (highlights, notes, progress, the EPUB, study guide) is untouched.
+   */
+  archiveAndResetGeneration(book: Book): Promise<void>;
   loadArchiveBooks(): Promise<ArchiveBook[]>;
   /** Permanently delete archived artifacts and the archive entry for a book. */
   purgeArchive(bookId: string): Promise<void>;

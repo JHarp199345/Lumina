@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Key, Image, Type, Trash2, RefreshCw, Palette, FolderOpen } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -134,9 +134,8 @@ function VisualSection() {
   const { activeBook, activeStyleSeed, activeStructure, setAnalysisProgressDetail } = useBookStore();
   const { currentChapterIndex } = useReaderStore();
   const { clearQueue } = useImageStore();
-  const { reAnalyzeBook, regenerateAllImages } = useBookOrchestration();
-  const [isReanalyzing, setIsReanalyzing] = useState(false);
-  const [isRegeneratingAll, setIsRegeneratingAll] = useState(false);
+  const { reIngest } = useBookOrchestration();
+  const [isReingesting, setIsReingesting] = useState(false);
 
   const currentSeed = activeStyleSeed ? getStyleSeedById(activeStyleSeed) : null;
   const analysisSlice = activeStructure
@@ -144,38 +143,22 @@ function VisualSection() {
     : null;
   const isCollection = Boolean(analysisSlice?.group);
 
-  const handleReanalyze = async () => {
+  // Re-Ingest replaces Re-analyze + Regenerate-all + Regenerate-single: it archives the
+  // current generation and re-lays fresh groundwork, with images filling in as you read.
+  const handleReIngest = async () => {
     if (!activeBook || !activeStructure) return;
-    setIsReanalyzing(true);
+    setIsReingesting(true);
     try {
-      await reAnalyzeBook(activeStructure);
+      await reIngest(activeStructure);
     } catch (err) {
-      console.error("[Settings] Re-analysis failed:", err);
+      console.error("[Settings] Re-ingest failed:", err);
       setAnalysisProgressDetail({
         phase: "error",
-        message: err instanceof Error ? err.message : "Re-analysis failed before it could finish.",
+        message: err instanceof Error ? err.message : "Re-ingestion failed before it could finish.",
         percent: 0,
       });
     } finally {
-      setIsReanalyzing(false);
-    }
-  };
-
-  const handleRegenerateAll = async () => {
-    if (!activeBook) return;
-    setIsRegeneratingAll(true);
-    try {
-      // Keeps the semantic map — only re-generates image files
-      await regenerateAllImages();
-    } catch (err) {
-      console.error("[Settings] Image regeneration queue failed:", err);
-      setAnalysisProgressDetail({
-        phase: "error",
-        message: err instanceof Error ? err.message : "Image regeneration could not start.",
-        percent: 0,
-      });
-    } finally {
-      setIsRegeneratingAll(false);
+      setIsReingesting(false);
     }
   };
 
@@ -238,41 +221,95 @@ function VisualSection() {
           </p>
         </div>
 
-        {/* Book-specific actions */}
+        {/* Re-Ingest — one explicit action. Archives the current generation and re-lays
+            fresh groundwork; new images fill in as you read. */}
         {activeBook && imageGenerationEnabled && (
-          <div className="space-y-2">
-            <div>
-              <button
-                onClick={handleRegenerateAll}
-                disabled={isRegeneratingAll}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-ink/[0.04] border border-hair text-xs text-ink-faint hover:text-ink-soft hover:border-hair transition-colors disabled:opacity-40"
-              >
-                <RefreshCw size={11} className={isRegeneratingAll ? "animate-spin" : ""} />
-                {isRegeneratingAll
-                  ? "Queuing…"
-                  : isCollection
-                    ? "Queue New Images for Current Book"
-                    : "Queue New Images for All Scenes"}
-              </button>
-              <p className="text-xs text-ink-faint mt-1 px-1">
-                Clears cached images for {isCollection ? analysisSlice?.label : "this book"} and re-generates as you read.
-              </p>
-            </div>
-            <button
-              onClick={handleReanalyze}
-              disabled={isReanalyzing}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-ink/[0.04] border border-hair text-xs text-ink-faint hover:text-ink-soft hover:border-hair transition-colors disabled:opacity-40"
-            >
-              <RefreshCw size={11} className={isReanalyzing ? "animate-spin" : ""} />
-              {isReanalyzing
-                ? "Analyzing…"
-                : isCollection
-                  ? "Analyze Current Book"
-                  : "Re-analyze Book"}
-            </button>
+          <div className="space-y-1.5">
+            <ReIngestSlider onConfirm={handleReIngest} busy={isReingesting} />
+            <p className="px-1 text-xs leading-relaxed text-ink-faint">
+              Archives this {isCollection ? `book (${analysisSlice?.label})` : "book"}’s current
+              images, audio, and analysis, then re-analyzes fresh. Your highlights, notes, and
+              reading position are kept. Archived items live in the Archive.
+            </p>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ReIngestSlider({ onConfirm, busy }: { onConfirm: () => void; busy: boolean }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const [pct, setPct] = useState(0);
+  const CONFIRM_AT = 90;
+
+  const setFromPointer = (clientX: number) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const p = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+    setPct(p);
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (busy) return;
+    draggingRef.current = true;
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    setFromPointer(e.clientX);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    setFromPointer(e.clientX);
+  };
+  const onPointerUp = () => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    if (pct >= CONFIRM_AT) onConfirm();
+    setPct(0);
+  };
+
+  const fill = busy ? 100 : pct;
+  const label = busy
+    ? "Re-ingesting…"
+    : pct >= CONFIRM_AT
+      ? "Release to confirm"
+      : pct > 4
+        ? "Keep sliding…"
+        : "Slide to Re-Ingest";
+
+  return (
+    <div
+      ref={trackRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className="relative h-11 w-full select-none overflow-hidden rounded-lg border border-lumina-gold/30 bg-ink/[0.05] touch-none"
+      role="button"
+      aria-label="Slide to re-ingest this book"
+    >
+      {/* fill */}
+      <div
+        className="absolute inset-y-0 left-0 bg-lumina-gold/18 transition-[width] duration-75"
+        style={{ width: `${fill}%` }}
+      />
+      {/* label */}
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-lumina-gold/90">
+          {busy && <RefreshCw size={12} className="animate-spin" />}
+          {label}
+          {!busy && pct <= 4 && <span className="text-lumina-gold/55">→</span>}
+        </span>
+      </div>
+      {/* knob */}
+      {!busy && (
+        <div
+          className="pointer-events-none absolute top-1 bottom-1 flex w-9 items-center justify-center rounded-md border border-lumina-gold/40 bg-lumina-gold/25"
+          style={{ left: `calc(${fill}% - ${fill > 0 ? 38 : 2}px)` }}
+        >
+          <RefreshCw size={13} className="text-lumina-gold/90" />
+        </div>
+      )}
     </div>
   );
 }

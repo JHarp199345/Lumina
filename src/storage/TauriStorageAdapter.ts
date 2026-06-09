@@ -425,6 +425,28 @@ export class TauriStorageAdapter implements StorageAdapter {
     await Promise.all(highlights.map((highlight) => this.deleteHighlight(highlight.id)));
   }
 
+  async archiveAndResetGeneration(book: Book): Promise<void> {
+    const bookId = book.id;
+    // 1. Snapshot the current generation's counts into the archive.
+    await this._materializeNotesForArchive(bookId).catch(() => {});
+    const counts = await this._archiveCounts(bookId);
+    await this._saveArchiveEntry(bookId, book.title, book.author, counts);
+
+    // 2. Clear the active generated artifacts (book + user data stay).
+    await this.deleteSemanticMap(bookId).catch(() => {});
+    await this.deleteSourceProfile(bookId).catch(() => {});
+    await this.deleteImages(bookId).catch(() => {});
+    await this.deleteAudioArtifacts(bookId).catch(() => {});
+
+    const appDataDir = await getAppDataDir().catch(() => "");
+    if (appDataDir) {
+      await Promise.allSettled([
+        deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.IMAGE_CACHE_DIR}/${bookId}`),
+        deleteDirectory(`${appDataDir}/${LUMINA_CONFIG.AUDIO_CACHE_DIR}/${bookId}`),
+      ]);
+    }
+  }
+
   async archiveAndRemoveBook(book: Book): Promise<void> {
     const bookId = book.id;
     await this._materializeNotesForArchive(bookId);

@@ -496,6 +496,32 @@ export class WebStorageAdapter implements StorageAdapter {
     await dbDeleteByIndex(STORES.HIGHLIGHTS, "bookId", bookId);
   }
 
+  async archiveAndResetGeneration(book: Book): Promise<void> {
+    const bookId = book.id;
+    // 1. Snapshot the current generation's counts into the archive.
+    await this._materializeNotesForArchive(bookId).catch(() => {});
+    const counts = await this._archiveCounts(bookId);
+    await this._saveArchiveEntry(book.id, book.title, book.author, counts);
+
+    // 2. Clear the active generated artifacts (book + user data stay).
+    const semanticMaps = await dbGetAll<SemanticMap>(STORES.SEMANTIC_MAPS);
+    await Promise.all(
+      semanticMaps
+        .filter((map) => matchesBookScope(map.bookId, bookId))
+        .map((map) => dbDelete(STORES.SEMANTIC_MAPS, map.bookId))
+    );
+
+    const profiles = await dbGetAll<SourceIntelligenceProfile>(STORES.SOURCE_PROFILES);
+    await Promise.all(
+      profiles
+        .filter((profile) => matchesBookScope(profile.bookId, bookId))
+        .map((profile) => dbDelete(STORES.SOURCE_PROFILES, profile.bookId))
+    );
+
+    await this.deleteImages(bookId);
+    await this.deleteAudioArtifacts(bookId);
+  }
+
   async archiveAndRemoveBook(book: Book): Promise<void> {
     const bookId = book.id;
     await this._materializeNotesForArchive(bookId);
