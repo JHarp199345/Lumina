@@ -9,7 +9,7 @@
  * Books and generated images are stored in IndexedDB by the app — NOT here.
  */
 
-const CACHE_VERSION = "lumina-v3";
+const CACHE_VERSION = "lumina-v4";
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
 const scoped = (path) => `${SCOPE_PATH}${path}`.replace(/\/{2,}/g, "/");
 

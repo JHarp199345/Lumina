@@ -84,23 +84,39 @@ if (!isTauri && import.meta.env.DEV && "serviceWorker" in navigator) {
 }
 
 if (!isTauri && import.meta.env.PROD && "serviceWorker" in navigator) {
+  const SW_BUILD = "v4";
   let refreshing = false;
+  let activeRegistration: ServiceWorkerRegistration | null = null;
+
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (refreshing) return;
     refreshing = true;
     window.location.reload();
   });
 
+  const checkForUpdates = () => {
+    activeRegistration?.update().catch(() => {});
+  };
+
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+      .register(`${import.meta.env.BASE_URL}sw.js?build=${SW_BUILD}`, {
+        scope: import.meta.env.BASE_URL,
+        updateViaCache: "none",
+      })
       .then((reg) => {
+        activeRegistration = reg;
         console.info("[SW] Registered:", reg.scope);
-        reg.update().catch(() => {});
+        checkForUpdates();
       })
       .catch((err) => {
         console.warn("[SW] Registration failed:", err);
       });
+  });
+
+  window.addEventListener("focus", checkForUpdates);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkForUpdates();
   });
 }
 
