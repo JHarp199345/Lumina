@@ -22,13 +22,21 @@ interface OpenLibraryDoc {
 }
 
 const FICTION_SUBJECT_RE =
-  /\b(fiction|novel|short\s+stories|science\s+fiction|sci[- ]?fi|fantasy|romance|mystery|thriller|horror|detective|adventure\s+stories|drama)\b/i;
+  /\b(fiction|novel|novella|short\s+stories|fairy\s+tales?|science\s+fiction|sci[- ]?fi|fantasy|romance|mystery|thriller|horror|detective|adventure\s+stories|drama|literature|literary|comics?|graphic\s+novels?|space\s+opera|mythology|legends?|epic\s+poetry)\b/i;
+
+// Known fiction franchises / shared-universe markers. Library catalogs often tag
+// these works WITHOUT the literal word "fiction" (e.g. only "Warhammer 40K"), so we
+// recognise the franchise itself as a fiction signal.
+const FICTION_FRANCHISE_RE =
+  /\b(warhammer|star\s*wars|star\s*trek|middle[- ]?earth|forgotten\s+realms|dragonlance|discworld|dungeons\s*(&|and)\s*dragons|40\s*0{3}|40k)\b/i;
 
 const SCHOLARLY_SUBJECT_RE =
   /\b(neuroscience|neurosciences|cognitive\s+science|psychology|philosophy|physics|biology|medicine|sociology|economics|epistemology|research|academic)\b/i;
 
+// NOTE: a bare "science" was removed — it collides with "science fiction". Fiction is
+// matched first (precedence) so genre tags never count as nonfiction.
 const NONFICTION_SUBJECT_RE =
-  /\b(nonfiction|non-fiction|biography|autobiography|memoir|history|science|self[- ]?help|business|politics|religion|spirituality|health|medical|education|reference|textbook|handbook|manual|guide|essay)\b/i;
+  /\b(nonfiction|non-fiction|biography|autobiography|memoir|history|self[- ]?help|business|politics|religion|spirituality|health|medical|education|reference|textbook|handbook|manual|guide|essays?|treatise)\b/i;
 
 const DOMAIN_FROM_SUBJECT: Array<{ domain: ExpositoryDomain; re: RegExp }> = [
   { domain: "neuroscience", re: /\b(neuroscience|neurosciences|brain|cognitive\s+science|emotions?\s+and\s+cognition)\b/i },
@@ -70,15 +78,37 @@ function classifySubjects(subjects: string[]): Omit<ExternalClassification, "sou
   const joined = subjects.join(" | ");
   const evidence = subjects.slice(0, 8);
 
-  const fictionHits = subjects.filter((s) => FICTION_SUBJECT_RE.test(s)).length;
-  const nonfictionHits = subjects.filter((s) => NONFICTION_SUBJECT_RE.test(s) || SCHOLARLY_SUBJECT_RE.test(s)).length;
+  // Classify each subject fiction-FIRST: a genre tag like "Science fiction" is fiction,
+  // never nonfiction (the word "science" inside it must not flip the verdict).
+  let fictionHits = 0;
+  let nonfictionHits = 0;
+  let scholarly = false;
+  for (const s of subjects) {
+    if (FICTION_SUBJECT_RE.test(s) || FICTION_FRANCHISE_RE.test(s)) {
+      fictionHits++;
+      continue;
+    }
+    const sch = SCHOLARLY_SUBJECT_RE.test(s);
+    const non = NONFICTION_SUBJECT_RE.test(s);
+    if (sch) scholarly = true;
+    if (sch || non) nonfictionHits++;
+  }
 
-  if (fictionHits > 0 && nonfictionHits === 0) {
+  // No usable signal in either direction → INCONCLUSIVE. Return zero confidence so
+  // the caller discards it and the heuristic / Gemini steps decide instead. (This is
+  // the key fix: absence of a fiction tag must NOT be read as proof of nonfiction.)
+  if (fictionHits === 0 && nonfictionHits === 0) {
+    return { protocol: "narrative", workType: "fiction", domain: "general", confidence: 0, evidence };
+  }
+
+  // Fiction wins on ties — genre fiction frequently carries an incidental nonfiction
+  // tag (e.g. "war", "history") that should not outweigh clear fiction signals.
+  if (fictionHits > 0 && fictionHits >= nonfictionHits) {
     return {
       protocol: "narrative",
       workType: "fiction",
       domain: "general",
-      confidence: Math.min(0.95, 0.72 + fictionHits * 0.08),
+      confidence: Math.min(0.95, 0.78 + fictionHits * 0.05),
       evidence,
     };
   }
@@ -91,7 +121,6 @@ function classifySubjects(subjects: string[]): Omit<ExternalClassification, "sou
     }
   }
 
-  const scholarly = subjects.some((s) => SCHOLARLY_SUBJECT_RE.test(s));
   const workType: WorkType = scholarly ? "scholarly" : "nonfiction";
   const confidence = Math.min(
     0.98,
@@ -102,7 +131,8 @@ function classifySubjects(subjects: string[]): Omit<ExternalClassification, "sou
     protocol: "expository",
     workType,
     domain,
-    confidence: fictionHits > 0 ? confidence * 0.6 : confidence,
+    // Some fiction signal present but outnumbered → soften confidence.
+    confidence: fictionHits > 0 ? confidence * 0.75 : confidence,
     evidence: [...evidence, joined.slice(0, 120)],
   };
 }
