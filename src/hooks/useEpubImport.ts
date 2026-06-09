@@ -267,34 +267,44 @@ export function useEpubImport() {
       // Mount this book's Voice Studio audio artifacts (PLANVI).
       useAudioStore.getState().mount(book.id, audioArtifacts);
 
-      // 4b. Restore the contextually correct display image.
-      //     Find the most recently passed scene that already has a generated image.
-      if (semanticMap && cachedImages.length > 0) {
+      // 4b. Restore the display image. Prefer the most recently passed scene that
+      //     has a generated image — but NEVER blank the panel when the book has
+      //     stored images. If the images don't line up with the current analysis
+      //     (re-analyzed, or the map is missing/empty), still show the reader's
+      //     art instead of nothing.
+      if (cachedImages.length > 0) {
         const imageMap: Record<string, CachedImage> = {};
         cachedImages.forEach((img) => { imageMap[img.sceneId] = img; });
 
-        const chapters = structure?.chapters ?? [];
-        const totalWords = chapters.reduce((s, c) => s + c.wordCount, 0);
-        const progressPercent = progress?.percentComplete ?? 0;
-        const estimatedWordPos = totalWords > 0 ? (totalWords * progressPercent) / 100 : 0;
-
         let imageToDisplay: CachedImage | null = null;
-        let bestPos = -1;
 
-        for (const scene of semanticMap.scenes) {
-          const pos = computeSceneWordPosition(scene, chapters);
-          if (pos <= estimatedWordPos && pos > bestPos && imageMap[scene.id]) {
-            imageToDisplay = imageMap[scene.id];
-            bestPos = pos;
+        if (semanticMap) {
+          const chapters = structure?.chapters ?? [];
+          const totalWords = chapters.reduce((s, c) => s + c.wordCount, 0);
+          const progressPercent = progress?.percentComplete ?? 0;
+          const estimatedWordPos = totalWords > 0 ? (totalWords * progressPercent) / 100 : 0;
+
+          let bestPos = -1;
+          for (const scene of semanticMap.scenes) {
+            const pos = computeSceneWordPosition(scene, chapters);
+            if (pos <= estimatedWordPos && pos > bestPos && imageMap[scene.id]) {
+              imageToDisplay = imageMap[scene.id];
+              bestPos = pos;
+            }
           }
+        }
+
+        // Fallback: no scene matched (orphaned images or no/empty map) — show the
+        // most recently generated image so the reader's work is never hidden.
+        if (!imageToDisplay) {
+          imageToDisplay = [...cachedImages].sort(
+            (a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()
+          )[0] ?? null;
         }
 
         if (imageToDisplay) {
           setCurrentImage(imageToDisplay);
           setCurrentThemes(imageToDisplay.emotionalThemes);
-        } else {
-          setCurrentImage(null);
-          setCurrentThemes([]);
         }
       }
 

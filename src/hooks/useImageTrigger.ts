@@ -140,7 +140,11 @@ export function useImageTrigger() {
         }
       }
     } else {
-      if (current) {
+      // Only clear when the book HAS scene-anchored images but none govern this
+      // position yet (reader paged before the first image). If NO cached image
+      // maps to any current scene — orphaned after a re-analysis, or the map is
+      // gone — keep whatever is displayed so the reader's art is never blanked.
+      if (current && cachedScenes.length > 0) {
         diagnosticInfo("image.display.clear_future", "Clearing visual because no cached anchor governs this position", {
           fromSceneId: current.sceneId,
           wordPosition,
