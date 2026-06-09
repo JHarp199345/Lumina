@@ -79,6 +79,14 @@ This principle outranks every feature below it. Three consequences:
    govern. The reader earns the network's authority by building it through use — the app
    never pretends to know more than the data supports.
 
+4. **Optional is not the same as flaky.** "Don't rely on it" governs *whether* a network
+   feature appears — never *how well it works once it does*. The instant the graph is rich
+   enough to surface (a shimmer, a strip, a re-rank), that surface must be **robust and
+   deterministic**: same input + same corpus → same result, no flicker, no random misses,
+   no blocked scroll. Degradation happens only at the tier boundary (present ↔ absent),
+   never as intermittent failure inside the present tier. The reader should trust the
+   network exactly as much as they've built it — and not one notch less.
+
 A reader who never builds a network still has the full Lumina they have today. A reader who
 builds a deep one gets a second brain. There is no cliff between those states — only a slope.
 
@@ -434,6 +442,75 @@ beginning.
 
 ---
 
+## PART 9 — HOW THE SUBCONSCIOUS SURFACES ON THE GLASS (ambient UX)
+
+The network is the app's subconscious. It should not feel like a database the reader
+maintains — it should feel like Lumina is reading *alongside* them and quietly remembering
+everything they have ever cared about. Two concrete manifestations (both bound by the
+Governing Principle — absent at cold start, robust once present):
+
+### 9a. The Echo Margin (the golden shimmer)
+
+While the reader is just reading — not searching, not annotating — the silent match engine
+compares the paragraph(s) currently in view against the stored note/highlight embeddings.
+When a paragraph crosses a **deliberately high resonance floor** (higher than the carousel's,
+e.g. cosine ≥ 0.9), a faint, elegant **gold shimmer** appears in the margin beside it.
+
+- **The moment:** the reader is converging, unprompted, on something their past self already
+  wrote about. Tapping the shimmer slides the film strip up showing the matched older
+  note(s): *"Does this connect?"* → link it (append provenance / forge an edge) or dismiss.
+- **Rare by design:** the high floor keeps it precious, not noisy. A shimmer should feel like
+  the book glancing back at you, not a notification. If everything shimmers, nothing does.
+- **Non-authoritative + reliable:** no graph → no shimmers, ever (cold start is silent). But
+  once present it is deterministic — the same paragraph against the same corpus always
+  shimmers, computed off cached paragraph embeddings, throttled to the visible range, never
+  blocking scroll or flickering as the reader pans.
+- **Hook:** the structured reader already tracks visible word position (the `useImageTrigger`
+  pattern). Reuse it to know which paragraphs are on screen, lazily embed-compare them
+  (paragraph embeddings cached like note embeddings), and render the affordance in the
+  `StructuredTextRenderer` gutter.
+
+### 9b. Node expansion → the Harmony flow (replaces the "nudge widget")
+
+The earlier "you wrote this on a Tuesday" prompt is **cut** — too passive, too much like a
+chore reminder. Reconnection becomes an *active, reader-driven* tool instead:
+
+1. **Every node carries a hint.** In the Constellation / Library, a node shows a short
+   auto-derived descriptor of what it is about (its title or a one-line gist) — enough to
+   know it on sight without opening it.
+2. **Click a node → it expands into a mini window** (a popover/card) with the node's detail:
+   its kind (note · highlight · audio · teaching schema · image), the books it already
+   touches, when it was last touched, and its current connections. A **lone star** opening
+   here simply shows zero connections yet — that's the invitation.
+3. **The Harmony button.** Inside the mini window sits one action — working name **Harmony**
+   (alts: *Resonance* / *Harmonize* / *Connect*; final name TBD). Pressing it:
+   - pulls the node's note up into the full **note view**, and
+   - runs the relevance algorithms across the *entire* library to gather what genuinely
+     relates to it — drawing from **previously ingested book passages, other notes, and audio
+     generations** (and naturally the other node kinds: images, teaching schemas).
+4. **One film strip per category.** The results surface as **parallel film strips, one per
+   artifact type** — a Passages strip, a Notes strip, an Audio strip, etc. — each panned
+   independently (reusing the PART 3 carousel component).
+5. **Curated, never dumped.** Strips are *not* populated with everything. An item qualifies
+   only when it is **literally relevant (lexical/term overlap) and/or strongly semantically
+   relevant (high cosine)** — precision-first, capped and ranked per strip, using the same
+   blend as PART 8. The strips show what *actually* belongs next to this thought, not the
+   whole library.
+6. **Selecting an item** either navigates to it (passage → `luminaNavigate`; audio → play;
+   note → open) or **links it** (append provenance / forge the edge) — so Harmony is both how
+   the reader explores a node's neighborhood *and* the organic mechanism by which lone stars
+   get connected. Serendipity by invitation, not by nagging.
+
+### Reaffirmed elsewhere
+
+- **Gravitational search** (concept-not-string recall) is already specified in PART 8; it is
+  the same engine viewed through the search box rather than a node.
+- **Visual thematic bleed** (a network lending its historical palette to `visualDirector.ts`
+  so a network develops a visual identity across books) is **deferred pending a decision** —
+  see Open Questions. Not assumed in.
+
+---
+
 ## DATA LIFECYCLE (one diagram)
 
 ```
@@ -499,6 +576,16 @@ beginning.
   model). Heterogeneous node glyphs, typed/weighted edges, lone-star orphans, edge-birth
   animation. Ships last; never on the critical path.
 
+### Phase 9 — The Echo Margin (PART 9a)
+- Paragraph-level embed-compare against note/highlight embeddings on the visible range,
+  high resonance floor, gold gutter shimmer in `StructuredTextRenderer` → film strip.
+  Deterministic, throttled, scroll-safe. Depends on Phases 2–3.
+
+### Phase 10 — Node expansion + Harmony (PART 9b)
+- Node hint + click-to-expand mini window; the Harmony action that opens the note view and
+  fans out per-category film strips (passages / notes / audio / …) curated by the PART 8
+  blend; select-to-navigate or select-to-link. Reuses Phases 2–4 + the carousel component.
+
 ---
 
 ## OPEN QUESTIONS / DECISIONS
@@ -522,6 +609,20 @@ beginning.
 9. **Constellation node scope (PART 7a).** Ship with notes + passages + media assets as
    nodes first; fold in highlights/images/teaching-schemas as node kinds once the layout is
    legible. Confirm the v1 node set.
+10. **The Harmony button name (PART 9b).** Working name "Harmony"; alternatives *Resonance*,
+    *Harmonize*, *Connect*. Reader to pick the final term — it sets the vocabulary for the
+    whole reconnection flow.
+11. **Echo-margin resonance floor (PART 9a).** Start cosine ≥ 0.9 (much stricter than the
+    carousel's ≥ 0.78) so shimmers stay rare and precious. Tune so a typical reading session
+    surfaces at most a handful, not a margin full of gold.
+12. **Visual thematic bleed — IN or OUT? (PART 9 reaffirmed).** Should a network lend its
+    historical palette to `visualDirector.ts` so it develops a visual identity that carries
+    across different books? Powerful and on-brand, but it lets the network *steer image
+    generation* — a stronger form of governance than margins/strips/search. Deferred for the
+    reader's explicit call; not assumed in.
+
+**Explicitly cut:** the "Previously On… / custom primer" pre-reading companion — judged too
+heavy/intrusive for the reading entry point. (Recorded so it is not silently re-introduced.)
 
 ---
 
