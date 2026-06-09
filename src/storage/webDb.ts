@@ -37,12 +37,10 @@ let _db: IDBDatabase | null = null;
 export function openDb(): Promise<IDBDatabase> {
   if (_db) return Promise.resolve(_db);
 
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-
+  // Create any stores this build knows about that aren't already present. Runs
+  // inside a versioned upgrade transaction. Adding stores is purely additive —
+  // it never drops or clears existing stores, so user data survives upgrades.
+  const applyUpgrade = (db: IDBDatabase) => {
       const ensure = (name: string, options?: IDBObjectStoreParameters) => {
         if (!db.objectStoreNames.contains(name)) {
           return db.createObjectStore(name, options);
@@ -88,15 +86,44 @@ export function openDb(): Promise<IDBDatabase> {
 
       ensure(STORES.BOOK_SETTINGS);                    // explicit key (bookId)
       ensure(STORES.API_KEYS);                         // explicit key (name)
-    };
+  };
 
-    request.onsuccess = () => {
-      _db = request.result;
+  return new Promise((resolve, reject) => {
+    const attach = (db: IDBDatabase) => {
+      _db = db;
       _db.onclose = () => { _db = null; }; // reset on unexpected close
+      // If another tab opens a newer version, step aside so it isn't blocked.
+      _db.onversionchange = () => { try { _db?.close(); } catch { /* ignore */ } _db = null; };
       resolve(_db);
     };
 
-    request.onerror = () => reject(request.error);
+    // Recovery path: if the database ON DISK is at a HIGHER version than this
+    // build knows (e.g. a stale/cached PWA bundle meeting a database an updated
+    // bundle already upgraded), a versioned open throws VersionError and every
+    // query would fail — blanking the library even though the data is intact.
+    // Re-open WITHOUT a version to attach to the existing database read-compatibly
+    // so the user's books, images, and analysis still load.
+    const openExisting = () => {
+      const req = indexedDB.open(DB_NAME);
+      req.onsuccess = () => attach(req.result);
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => console.warn("[webDb] open blocked by another tab");
+    };
+
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = (event) => applyUpgrade((event.target as IDBOpenDBRequest).result);
+    request.onsuccess = () => attach(request.result);
+    request.onblocked = () => console.warn("[webDb] upgrade blocked by another open tab");
+    request.onerror = () => {
+      if (request.error?.name === "VersionError") {
+        console.warn(
+          "[webDb] Database on disk is newer than this build; opening read-compatible so data still loads."
+        );
+        openExisting();
+      } else {
+        reject(request.error);
+      }
+    };
   });
 }
 
