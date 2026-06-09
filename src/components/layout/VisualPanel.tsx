@@ -123,10 +123,10 @@ export default function VisualPanel() {
   );
 
   useEffect(() => {
-    if (analysisOutcome?.kind === "done") {
+    if (analysisOutcome?.kind === "done" && !showPlanStrip) {
       setShowPlanStrip(true);
     }
-  }, [analysisOutcome?.kind, setShowPlanStrip]);
+  }, [analysisOutcome?.kind, setShowPlanStrip, showPlanStrip]);
 
   // Clicking the image opens the gallery focal view (the art experience).
   const handleImageClick = useCallback(

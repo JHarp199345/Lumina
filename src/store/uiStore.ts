@@ -35,14 +35,20 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   galleryOpen: false,
   galleryStartSceneId: undefined,
   openGallery: (sceneId) =>
-    set({
-      galleryOpen: true,
-      galleryStartSceneId: sceneId,
+    set((state) => {
+      if (state.galleryOpen && state.galleryStartSceneId === sceneId) return state;
+      return { galleryOpen: true, galleryStartSceneId: sceneId };
     }),
-  closeGallery: () => set({ galleryOpen: false, galleryStartSceneId: undefined }),
+  closeGallery: () =>
+    set((state) =>
+      state.galleryOpen || state.galleryStartSceneId !== undefined
+        ? { galleryOpen: false, galleryStartSceneId: undefined }
+        : state
+    ),
 
   showPlanStrip: false,
-  setShowPlanStrip: (showPlanStrip) => set({ showPlanStrip }),
+  setShowPlanStrip: (showPlanStrip) =>
+    set((state) => (state.showPlanStrip === showPlanStrip ? state : { showPlanStrip })),
   togglePlanStrip: () => set({ showPlanStrip: !get().showPlanStrip }),
 
   returnCfi: null,

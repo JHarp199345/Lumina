@@ -27,22 +27,29 @@ export function useAnalysisOutcome(
   errorMessage?: string
 ): AnalysisOutcome | null {
   const wasAnalyzingRef = useRef(false);
+  const errorMessageRef = useRef(errorMessage);
+  errorMessageRef.current = errorMessage;
   const [outcome, setOutcome] = useState<AnalysisOutcome | null>(null);
 
+  // Clear any held banner only when a new analysis run starts — not on every
+  // progress tick (errorMessage changes constantly during analysis).
   useEffect(() => {
-    if (isAnalyzing) {
-      wasAnalyzingRef.current = true;
-      setOutcome(null);
-      return;
-    }
+    if (!isAnalyzing) return;
+    wasAnalyzingRef.current = true;
+    setOutcome((prev) => (prev === null ? prev : null));
+  }, [isAnalyzing]);
+
+  // Capture done/error once when analysis finishes.
+  useEffect(() => {
+    if (isAnalyzing) return;
     if (!wasAnalyzingRef.current) return;
     wasAnalyzingRef.current = false;
     setOutcome(
       analysisPhase === "error"
-        ? { kind: "error", message: errorMessage || "Analysis didn't finish. Try again." }
+        ? { kind: "error", message: errorMessageRef.current || "Analysis didn't finish. Try again." }
         : { kind: "done", message: "Visual plan refreshed." }
     );
-  }, [isAnalyzing, analysisPhase, errorMessage]);
+  }, [isAnalyzing, analysisPhase]);
 
   useEffect(() => {
     if (!outcome) return;

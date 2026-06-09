@@ -21,7 +21,7 @@ import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useBookStore } from "@/store/bookStore";
 import { getImageForScene } from "@/utils/imagePosition";
 import { segmentScenesOnePerSlot } from "@/utils/sceneDedup";
-import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
+import { EMPTY_BEATS, EMPTY_CHAPTERS, EMPTY_SCENES } from "@/utils/stableEmpty";
 import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
 function displaySrc(src: string): string {
@@ -75,9 +75,9 @@ export default function GalleryFocalView({
   // Every planned moment, in reading order — generated and not-yet-generated.
   const chapters = useBookStore((state) => state.activeStructure?.chapters ?? EMPTY_CHAPTERS);
   const items: GalleryItem[] = useMemo(() => {
-    const allScenes = activeSemanticMap?.scenes ?? [];
+    const allScenes = activeSemanticMap?.scenes ?? EMPTY_SCENES;
     const scenes = segmentScenesOnePerSlot(allScenes, chapters);
-    const beats = activeSemanticMap?.storyboard?.beats ?? [];
+    const beats = activeSemanticMap?.storyboard?.beats ?? EMPTY_BEATS;
     const cached = Object.values(imageCache);
     return scenes.map((scene) => ({
       scene,

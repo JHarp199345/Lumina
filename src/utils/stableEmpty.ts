@@ -1,4 +1,6 @@
-import type { Chapter } from "@/types";
+import type { Chapter, IdentifiedScene, VisualBeat } from "@/types";
 
-/** Stable fallback so Zustand selectors never return a fresh [] each render. */
+/** Stable fallbacks so selectors/memos never see a fresh [] each render. */
 export const EMPTY_CHAPTERS: Chapter[] = [];
+export const EMPTY_SCENES: IdentifiedScene[] = [];
+export const EMPTY_BEATS: VisualBeat[] = [];

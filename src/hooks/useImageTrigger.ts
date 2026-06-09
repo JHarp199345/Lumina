@@ -43,11 +43,15 @@ function scenePositions(
 }
 
 export function useImageTrigger() {
-  const { activeBook, activeSemanticMap, activeStyleSeed } = useBookStore();
-  const { wordPosition } = useReaderStore();
-  const { imageCache, setCurrentImage, setCurrentThemes } = useImageStore();
+  const activeBook = useBookStore((s) => s.activeBook);
+  const activeSemanticMap = useBookStore((s) => s.activeSemanticMap);
+  const activeStyleSeed = useBookStore((s) => s.activeStyleSeed);
+  const wordPosition = useReaderStore((s) => s.wordPosition);
+  const imageCache = useImageStore((s) => s.imageCache);
+  const setCurrentImage = useImageStore((s) => s.setCurrentImage);
+  const setCurrentThemes = useImageStore((s) => s.setCurrentThemes);
   const pendingQueueCount = useImageStore((s) => s.queue.filter((q) => q.status === "pending").length);
-  const { imageGenerationEnabled } = useSettingsStore();
+  const imageGenerationEnabled = useSettingsStore((s) => s.imageGenerationEnabled);
 
   const isGeneratingRef = useRef(false);
   const priorPromptRef = useRef<string>("");
@@ -364,28 +368,35 @@ export function useImageTrigger() {
     }
   }, [activeSemanticMap, activeStyleSeed]);
 
-  useEffect(() => {
-    updateDisplay();
-  }, [wordPosition, imageCache, updateDisplay]);
+  const updateDisplayRef = useRef(updateDisplay);
+  const updateQueueRef = useRef(updateQueue);
+  const processQueueRef = useRef(processQueue);
+  updateDisplayRef.current = updateDisplay;
+  updateQueueRef.current = updateQueue;
+  processQueueRef.current = processQueue;
 
   useEffect(() => {
-    updateQueue();
-  }, [wordPosition, updateQueue]);
+    updateDisplayRef.current();
+  }, [wordPosition, imageCache]);
+
+  useEffect(() => {
+    updateQueueRef.current();
+  }, [wordPosition]);
 
   useEffect(() => {
     if (!activeSemanticMap) return;
     lastQueuePositionRef.current = -1;
-    updateQueue();
-  }, [activeSemanticMap?.bookId, activeSemanticMap?.visualPlanVersion, updateQueue]);
+    updateQueueRef.current();
+  }, [activeSemanticMap?.bookId, activeSemanticMap?.visualPlanVersion]);
 
   useEffect(() => {
-    processQueue();
-  }, [processQueue, activeSemanticMap, activeStyleSeed, pendingQueueCount]);
+    processQueueRef.current();
+  }, [activeSemanticMap?.bookId, activeSemanticMap?.visualPlanVersion, activeStyleSeed, pendingQueueCount]);
 
   useEffect(() => {
-    const interval = setInterval(processQueue, 3000);
+    const interval = setInterval(() => processQueueRef.current(), 3000);
     return () => clearInterval(interval);
-  }, [processQueue]);
+  }, []);
 
   return { isGenerating: useImageStore((s) => s.isGenerating) };
 }

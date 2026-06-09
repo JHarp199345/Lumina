@@ -4,8 +4,7 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { useBookStore } from "@/store/bookStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { useBookOrchestration } from "@/hooks/useBookOrchestration";
-import { useReadPosition } from "@/hooks/useReadPosition";
-import { useImageTrigger } from "@/hooks/useImageTrigger";
+import ImageTriggerHost from "@/components/visual/ImageTriggerHost";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { storage } from "@/storage";
 import { parseEpub } from "@/pipeline/epubParser";
@@ -247,10 +246,6 @@ function App() {
     reAnalyzeBook,
   ]);
 
-  // Activate read-position tracking and image triggering
-  useReadPosition();
-  useImageTrigger();
-
   // Apply theme to document root
   useEffect(() => {
     const applyTheme = () => {
@@ -364,6 +359,7 @@ function App() {
 
   return (
     <div className="h-[100dvh] overflow-hidden bg-app p-3 text-ink sm:p-4">
+      <ImageTriggerHost />
       <div className="relative flex h-full overflow-hidden rounded-xl border border-hair bg-surface-dark shadow-2xl shadow-black/35">
         <SideRail
           onImport={handleImport}

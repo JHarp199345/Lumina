@@ -63,20 +63,40 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
     set({ regenerateCooldownUntil: Date.now() + 60_000 }),
 
   pruneQueueOutsideWindow: (wordPosition, aheadWords, behindWords = 0) =>
-    set((state) => ({
-      queue: state.queue.filter((item) => {
+    set((state) => {
+      const queue = state.queue.filter((item) => {
         if (item.status === "generating") return true;
         if (typeof item.wordPosition !== "number") return false;
         const delta = item.wordPosition - wordPosition;
         return delta >= -behindWords && delta <= aheadWords;
-      }),
-    })),
+      });
+      if (queue.length === state.queue.length && queue.every((item, i) => item === state.queue[i])) {
+        return state;
+      }
+      return { queue };
+    }),
 
   setCurrentImage: (currentImage) => {
+    const prev = get().currentImage;
+    if (
+      prev === currentImage ||
+      (prev?.id === currentImage?.id && prev?.filePath === currentImage?.filePath)
+    ) {
+      return;
+    }
     console.info("[ImageStore] setCurrentImage:", currentImage?.sceneId ?? "null");
     set({ currentImage });
   },
-  setCurrentThemes: (currentThemes) => set({ currentThemes }),
+  setCurrentThemes: (currentThemes) => {
+    const prev = get().currentThemes;
+    if (
+      prev.length === currentThemes.length &&
+      prev.every((theme, i) => theme === currentThemes[i])
+    ) {
+      return;
+    }
+    set({ currentThemes });
+  },
   setIsTransitioning: (isTransitioning) => set({ isTransitioning }),
 
   addToCache: (image) =>
@@ -137,14 +157,22 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
         if (slotBusy) return state;
       }
 
-      const queue = existing
+      if (existing?.status === "pending") {
+        const nextPriority = Math.min(existing.priority, item.priority);
+        if (nextPriority === existing.priority && existing.description === item.description) {
+          return state;
+        }
+      }
+
+      const queue = (existing
         ? state.queue.map((q) =>
             q.sceneId === item.sceneId && q.status === "pending"
               ? { ...q, priority: Math.min(q.priority, item.priority), description: item.description }
               : q
           )
-        : [...state.queue, item];
-      return { queue: queue.sort((a, b) => a.priority - b.priority) };
+        : [...state.queue, item]
+      ).sort((a, b) => a.priority - b.priority);
+      return { queue };
     }),
 
   dequeue: () => {
