@@ -10,7 +10,15 @@
 
 import JSZip from "jszip";
 import type { BookStructure, Chapter, CollectionGroup, Section } from "@/types";
+import {
+  applyEditionPipeline,
+  mergeEditionMetadata,
+  resolveEditionPipeline,
+  type ParseEpubOptions,
+} from "@/pipeline/epubEdition";
 import { subdivideOversizedChapters } from "@/utils/chapterSubdivision";
+
+export type { EpubImportContext, ParseEpubOptions } from "@/pipeline/epubEdition";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,11 +62,22 @@ interface NavChapterCandidate {
   hasChildren: boolean;
 }
 
+interface NavSlice {
+  id: string;
+  title: string;
+  href: string;
+  fragment: string;
+  playOrder: number;
+  parentLabels: string[];
+  hasChildren: boolean;
+}
+
 // ─── Main Parser ──────────────────────────────────────────────────────────────
 
 export async function parseEpub(
   epubBytes: Uint8Array,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  options?: ParseEpubOptions
 ): Promise<{ structure: BookStructure; rawTexts: Map<string, string>; zip: JSZip }> {
   onProgress?.("Unpacking EPUB archive…");
   const zip = await JSZip.loadAsync(epubBytes);
@@ -151,6 +170,9 @@ export async function parseEpub(
     confidence = "low";
   }
 
+  const editionPipeline = resolveEditionPipeline(options?.importContext, rawTexts);
+  chapters = applyEditionPipeline(editionPipeline, chapters, options?.importContext, onProgress);
+
   const beforeSplit = chapters.length;
   chapters = subdivideOversizedChapters(chapters);
   if (chapters.length > beforeSplit) {
@@ -162,15 +184,19 @@ export async function parseEpub(
   onProgress?.(`Found ${chapters.length} chapters and ${totalWords.toLocaleString()} words…`);
   const collectionGroups = deriveCollectionGroups(chapters);
 
-  const structure: BookStructure = {
-    bookId,
-    title,
-    author,
-    totalWords,
-    parserConfidence: confidence,
-    chapters,
-    collectionGroups: collectionGroups.length > 1 ? collectionGroups : undefined,
-  };
+  const structure = mergeEditionMetadata(
+    {
+      bookId,
+      title,
+      author,
+      totalWords,
+      parserConfidence: confidence,
+      chapters,
+      collectionGroups: collectionGroups.length > 1 ? collectionGroups : undefined,
+    },
+    editionPipeline,
+    options?.importContext
+  );
 
   return { structure, rawTexts, zip };
 }
@@ -253,44 +279,113 @@ function parseNavPoint(el: Element): NcxNavPoint {
   };
 }
 
-async function navPointsToChapters(
-  navPoints: NcxNavPoint[],
-  rawTexts: Map<string, string>,
-  spine: SpineItem[],
+function parseRawNavHref(
+  rawHref: string,
   base: string,
-  onProgress?: (message: string) => void
-): Promise<Chapter[]> {
-  const flatPoints = flattenNcxNavPoints(navPoints);
-  const seenHrefs = new Set<string>();
+  rawTexts: Map<string, string>,
+  spine: SpineItem[]
+): { href: string; fragment: string } | null {
+  const trimmed = rawHref.trim();
+  if (!trimmed) return null;
+  const hashIndex = trimmed.indexOf("#");
+  const pathPart = hashIndex === -1 ? trimmed : trimmed.slice(0, hashIndex);
+  const fragment = hashIndex === -1 ? "" : trimmed.slice(hashIndex + 1).trim();
+  const href = resolveEpubHref(pathPart, base, rawTexts, spine);
+  if (!href) return null;
+  return { href, fragment };
+}
+
+function extractTextFromAnchorRange(
+  html: string,
+  startFragment: string | null,
+  endFragment: string | null
+): string {
+  const doc = parseXml(html);
+  doc.querySelectorAll("script, style").forEach((el) => el.remove());
+
+  const body = doc.body || doc.documentElement;
+  const range = doc.createRange();
+
+  const startEl =
+    (startFragment ? doc.getElementById(startFragment) : null) ??
+    body.querySelector("h1, h2, h3, p, div") ??
+    body.firstElementChild;
+
+  if (!startEl) return extractText(html);
+
+  const endEl = endFragment ? doc.getElementById(endFragment) : null;
+
+  try {
+    range.setStartBefore(startEl);
+    if (endEl) {
+      range.setEndBefore(endEl);
+    } else {
+      const last = body.lastElementChild;
+      range.setEndAfter(last ?? body);
+    }
+    const holder = doc.createElement("div");
+    holder.appendChild(range.cloneContents());
+    const sliceText = extractText(holder.innerHTML);
+    if (countWords(sliceText) >= 40) return sliceText;
+  } catch {
+    // Range can fail on odd Gutenberg markup — fall through.
+  }
+
+  return extractText(html);
+}
+
+function chaptersFromNavSlices(
+  slices: NavSlice[],
+  rawTexts: Map<string, string>,
+  spine: SpineItem[]
+): Chapter[] {
+  const sorted = [...slices].sort((a, b) => a.playOrder - b.playOrder);
+  const hrefUsesAnchors = new Map<string, boolean>();
+
+  for (const slice of sorted) {
+    if (slice.fragment) hrefUsesAnchors.set(slice.href, true);
+  }
+
+  const seenFullFileHref = new Set<string>();
   const candidates: NavChapterCandidate[] = [];
 
-  const sortedPoints = flatPoints.sort((a, b) => a.playOrder - b.playOrder);
-  onProgress?.(`Reading table of contents: ${sortedPoints.length} entries…`);
+  for (let i = 0; i < sorted.length; i++) {
+    const slice = sorted[i];
+    const href = slice.href;
+    const usesAnchors = hrefUsesAnchors.get(href) ?? false;
 
-  for (let i = 0; i < sortedPoints.length; i++) {
-    const point = sortedPoints[i];
-    const fullHref = resolveEpubHref(point.src, base, rawTexts, spine);
-    if (fullHref && !seenHrefs.has(fullHref)) {
-      seenHrefs.add(fullHref);
-
-      const text = extractText(rawTexts.get(fullHref) || "");
-      const wordCount = countWords(text);
-      const spineIndex = spine.findIndex((s) => s.href === fullHref);
-      candidates.push({
-        id: point.id,
-        title: buildHierarchicalTitle(point.label, point.parentLabels),
-        wordCount,
-        href: fullHref,
-        spineIndex: spineIndex >= 0 ? spineIndex : 0,
-        rawText: text,
-        hasChildren: point.hasChildren,
-      });
+    if (!usesAnchors) {
+      if (seenFullFileHref.has(href)) continue;
+      seenFullFileHref.add(href);
     }
 
-    if ((i + 1) % 25 === 0 || i === sortedPoints.length - 1) {
-      onProgress?.(`Reading table of contents ${i + 1} of ${sortedPoints.length}…`);
-      await yieldToUi();
+    const html = rawTexts.get(href) || "";
+    const spineIndex = spine.findIndex((s) => s.href === href);
+
+    let endFragment: string | null = null;
+    if (usesAnchors) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (sorted[j].href === href) {
+          endFragment = sorted[j].fragment || null;
+          break;
+        }
+      }
     }
+
+    const text = usesAnchors
+      ? extractTextFromAnchorRange(html, slice.fragment || null, endFragment)
+      : extractText(html);
+
+    const wordCount = countWords(text);
+    candidates.push({
+      id: slice.id,
+      title: slice.title,
+      wordCount,
+      href,
+      spineIndex: spineIndex >= 0 ? spineIndex : 0,
+      rawText: text,
+      hasChildren: slice.hasChildren,
+    });
   }
 
   const meaningful = candidates.filter((ch) => isMeaningfulNavChapter(ch.wordCount, ch.hasChildren));
@@ -308,6 +403,43 @@ async function navPointsToChapters(
     sections: buildSections(chapter.rawText || "", chapter.id, index),
     rawText: chapter.rawText,
   }));
+}
+
+async function navPointsToChapters(
+  navPoints: NcxNavPoint[],
+  rawTexts: Map<string, string>,
+  spine: SpineItem[],
+  base: string,
+  onProgress?: (message: string) => void
+): Promise<Chapter[]> {
+  const flatPoints = flattenNcxNavPoints(navPoints);
+  const slices: NavSlice[] = [];
+
+  const sortedPoints = flatPoints.sort((a, b) => a.playOrder - b.playOrder);
+  onProgress?.(`Reading table of contents: ${sortedPoints.length} entries…`);
+
+  for (let i = 0; i < sortedPoints.length; i++) {
+    const point = sortedPoints[i];
+    const resolved = parseRawNavHref(point.src, base, rawTexts, spine);
+    if (!resolved) continue;
+
+    slices.push({
+      id: point.id,
+      title: buildHierarchicalTitle(point.label, point.parentLabels),
+      href: resolved.href,
+      fragment: resolved.fragment,
+      playOrder: point.playOrder,
+      parentLabels: point.parentLabels,
+      hasChildren: point.hasChildren,
+    });
+
+    if ((i + 1) % 25 === 0 || i === sortedPoints.length - 1) {
+      onProgress?.(`Reading table of contents ${i + 1} of ${sortedPoints.length}…`);
+      await yieldToUi();
+    }
+  }
+
+  return chaptersFromNavSlices(slices, rawTexts, spine);
 }
 
 function flattenNcxNavPoints(
@@ -348,30 +480,24 @@ async function parseNav(
   if (!tocNav) return [];
 
   const flatItems = flattenHtmlNav(tocNav);
-  const seenHrefs = new Set<string>();
-  const candidates: NavChapterCandidate[] = [];
+  const slices: NavSlice[] = [];
 
   onProgress?.(`Reading table of contents: ${flatItems.length} entries…`);
 
   for (let itemIndex = 0; itemIndex < flatItems.length; itemIndex++) {
     const item = flatItems[itemIndex];
-    const fullHref = resolveEpubHref(item.href, base, rawTexts, spine);
-    if (fullHref && !seenHrefs.has(fullHref)) {
-      seenHrefs.add(fullHref);
-      const text = extractText(rawTexts.get(fullHref) || "");
-      const wordCount = countWords(text);
-      const spineIndex = spine.findIndex((s) => s.href === fullHref);
+    const resolved = parseRawNavHref(item.href, base, rawTexts, spine);
+    if (!resolved) continue;
 
-      candidates.push({
-        id: generateId(`${item.label}${fullHref}${itemIndex}`),
-        title: buildHierarchicalTitle(item.label, item.parentLabels),
-        wordCount,
-        href: fullHref,
-        spineIndex: spineIndex >= 0 ? spineIndex : 0,
-        rawText: text,
-        hasChildren: item.hasChildren,
-      });
-    }
+    slices.push({
+      id: generateId(`${item.label}${resolved.href}${resolved.fragment}${itemIndex}`),
+      title: buildHierarchicalTitle(item.label, item.parentLabels),
+      href: resolved.href,
+      fragment: resolved.fragment,
+      playOrder: itemIndex,
+      parentLabels: item.parentLabels,
+      hasChildren: item.hasChildren,
+    });
 
     if ((itemIndex + 1) % 25 === 0 || itemIndex === flatItems.length - 1) {
       onProgress?.(`Reading table of contents ${itemIndex + 1} of ${flatItems.length}…`);
@@ -379,21 +505,7 @@ async function parseNav(
     }
   }
 
-  const meaningful = candidates.filter((ch) => isMeaningfulNavChapter(ch.wordCount, ch.hasChildren));
-  const usable = meaningful.length > 0 ? meaningful : candidates.filter((ch) => ch.wordCount > 0);
-
-  return usable.map((chapter, index) => ({
-    id: chapter.id,
-    index,
-    title: chapter.title,
-    wordCount: chapter.wordCount,
-    href: chapter.href,
-    spineIndex: chapter.spineIndex >= 0 ? chapter.spineIndex : index,
-    startCfi: "",
-    endCfi: "",
-    sections: buildSections(chapter.rawText || "", chapter.id, index),
-    rawText: chapter.rawText,
-  }));
+  return chaptersFromNavSlices(slices, rawTexts, spine);
 }
 
 function flattenHtmlNav(

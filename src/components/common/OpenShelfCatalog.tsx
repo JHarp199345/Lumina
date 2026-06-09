@@ -245,7 +245,11 @@ export default function OpenShelfCatalog({
       });
       setImportPhase("importing");
       report(`Step 2 of 2 — Adding “${book.title}” to your library…`);
-      const result = await importEpubFile(file, report);
+      const result = await importEpubFile(file, report, {
+        gutenbergId: book.id,
+        catalogTitle: book.title,
+        catalogAuthor: book.authors.map((author) => author.name).join(", "),
+      });
       setImportPhase("done");
       report(`Added “${result.book.title}” by ${result.book.author}. Choose a visual style next.`);
       onBookImported?.(result.structure);

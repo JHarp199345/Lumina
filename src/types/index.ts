@@ -1,5 +1,8 @@
 // ─── Book & EPUB Structure ────────────────────────────────────────────────────
 
+export type BookImportSource = "file" | "gutenberg";
+export type EditionPipeline = "standard" | "gutenberg";
+
 export interface Book {
   id: string;
   title: string;
@@ -10,6 +13,12 @@ export interface Book {
   parserConfidence: "high" | "medium" | "low";
   importedAt: string;
   lastOpened?: string;
+  /** Where the book entered Lumina (Open Shelf vs file picker). */
+  importSource?: BookImportSource;
+  /** Gutendex / Project Gutenberg ebook id when applicable. */
+  gutenbergId?: number;
+  /** Normalization pipeline used at last parse. */
+  editionPipeline?: EditionPipeline;
 }
 
 export interface Chapter {
@@ -58,6 +67,8 @@ export interface BookStructure {
   parserConfidence: "high" | "medium" | "low";
   chapters: Chapter[];
   collectionGroups?: CollectionGroup[];
+  editionPipeline?: EditionPipeline;
+  gutenbergId?: number;
 }
 
 // ─── Reading Progress ─────────────────────────────────────────────────────────

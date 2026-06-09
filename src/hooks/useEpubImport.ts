@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { readFileBytes } from "@/utils/tauriBridge";
 import { parseEpub, extractCoverImage } from "@/pipeline/epubParser";
+import type { EpubImportContext } from "@/pipeline/epubEdition";
 import { useBookStore } from "@/store/bookStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useImageStore } from "@/store/imageStore";
@@ -51,6 +52,19 @@ function structureLacksParagraphs(structure: Pick<BookStructure, "chapters" | "t
   return !hasAnyParagraphBreak;
 }
 
+function epubImportContextFromBook(book: Book): EpubImportContext | undefined {
+  if (!book.gutenbergId && book.editionPipeline !== "gutenberg") return undefined;
+  return {
+    gutenbergId: book.gutenbergId,
+    catalogTitle: book.title,
+    catalogAuthor: book.author,
+  };
+}
+
+function needsEditionReparse(structure: BookStructure | null): boolean {
+  return structure != null && structure.editionPipeline == null;
+}
+
 export function useEpubImport() {
   const {
     addBook,
@@ -81,7 +95,8 @@ export function useEpubImport() {
   // normal picker flow and the dev test-book loader.
   const runImport = useCallback(async (
     picked: File | string,
-    onProgress?: (message: string) => void
+    onProgress?: (message: string) => void,
+    importContext?: EpubImportContext
   ) => {
     const runStep = async <T,>(label: string, action: () => Promise<T>): Promise<T> => {
       onProgress?.(label);
@@ -107,7 +122,7 @@ export function useEpubImport() {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const { structure, zip } = await runStep("Parsing EPUB structure…", () =>
-      parseEpub(bytes, onProgress)
+      parseEpub(bytes, onProgress, { importContext })
     );
 
     const fileName =
@@ -133,6 +148,9 @@ export function useEpubImport() {
       parserConfidence: structure.parserConfidence,
       importedAt: new Date().toISOString(),
       lastOpened: new Date().toISOString(),
+      importSource: structure.editionPipeline === "gutenberg" ? "gutenberg" : "file",
+      gutenbergId: structure.gutenbergId ?? importContext?.gutenbergId,
+      editionPipeline: structure.editionPipeline,
     };
 
     await runStep("Saving book to library…", () => storage.saveBook(book));
@@ -174,7 +192,8 @@ export function useEpubImport() {
 
   // Dev/test only: import a book directly from a File, bypassing the picker.
   const importEpubFile = useCallback(
-    (file: File, onProgress?: (message: string) => void) => runImport(file, onProgress),
+    (file: File, onProgress?: (message: string) => void, importContext?: EpubImportContext) =>
+      runImport(file, onProgress, importContext),
     [runImport]
   );
 
@@ -211,13 +230,34 @@ export function useEpubImport() {
       //    rawText was flattened into one block) so older books self-heal.
       let structure = await storage.loadBookStructure(book.id);
       try {
-        if (!structure || structureLacksParagraphs(structure)) {
-          onProgress?.(structure ? "Re-reading EPUB for paragraph structure…" : "Reading saved EPUB file…");
+        const shouldReparse =
+          !structure ||
+          structureLacksParagraphs(structure) ||
+          needsEditionReparse(structure);
+
+        if (shouldReparse) {
+          const reason = !structure
+            ? "Reading saved EPUB file…"
+            : needsEditionReparse(structure)
+              ? "Detecting edition and re-reading EPUB…"
+              : "Re-reading EPUB for paragraph structure…";
+          onProgress?.(reason);
           const bytes = await storage.getEpubBytes(book);
           onProgress?.("Parsing saved EPUB structure…");
-          const parsed = await parseEpub(bytes, onProgress);
+          const parsed = await parseEpub(bytes, onProgress, {
+            importContext: epubImportContextFromBook(book),
+          });
           structure = parsed.structure;
           await storage.saveBookStructure(structure);
+          if (structure.editionPipeline !== book.editionPipeline) {
+            const updates: Partial<Book> = {
+              editionPipeline: structure.editionPipeline,
+              gutenbergId: structure.gutenbergId ?? book.gutenbergId,
+              importSource: structure.editionPipeline === "gutenberg" ? "gutenberg" : "file",
+            };
+            updateBook(book.id, updates);
+            await storage.saveBook({ ...book, ...updates });
+          }
         }
       } catch (err) {
         console.warn("[OpenBook] Could not re-parse EPUB:", err);

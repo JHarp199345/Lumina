@@ -1,0 +1,136 @@
+/**
+ * Project Gutenberg edition normalization — runs after generic EPUB extraction.
+ */
+
+import type { Chapter, Section } from "@/types";
+import type { EpubImportContext } from "@/pipeline/epubEdition";
+
+const GUTENBERG_HTML_MARKERS = [
+  /project\s+gutenberg/i,
+  /gutenberg\.org/i,
+  /www\.gutenberg\.org/i,
+  /ebook\s*#\s*\d+/i,
+  /this\s+ebook\s+is\s+for\s+the\s+use\s+of\s+anyone/i,
+];
+
+const GUTENBERG_JUNK_TITLE_PATTERNS = [
+  /\bproject\s+gutenberg\b/i,
+  /\bfull\s+project\s+gutenberg\b/i,
+  /\bgutenberg\s+license\b/i,
+  /\btable\s+of\s+contents\b/i,
+  /\bcontents\b/i,
+  /^the\s+full\s+project/i,
+];
+
+const GUTENBERG_BOILERPLATE_START = [
+  /^the\s+project\s+gutenberg\s+ebook\s+of\b/i,
+  /^project\s+gutenberg/i,
+  /^produced\s+by\b/i,
+  /^updated:\s*/i,
+  /^release\s+date:/i,
+  /^most\s+recently\s+updated:/i,
+  /^ebook\s*#\s*\d+/i,
+  /^language:/i,
+  /^credits?:/i,
+  /^transcriber/i,
+];
+
+function buildSections(text: string, chapterId: string): Section[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const sectionSize = 1200;
+  const sections: Section[] = [];
+
+  for (let i = 0; i < words.length; i += sectionSize) {
+    const sectionWords = words.slice(i, i + sectionSize);
+    const index = Math.floor(i / sectionSize);
+    sections.push({
+      id: `${chapterId}_s${index}`,
+      chapterId,
+      index,
+      wordCount: sectionWords.length,
+      startWordOffset: i,
+      rawText: sectionWords.join(" "),
+    });
+  }
+
+  return sections;
+}
+
+function countWords(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+export function detectGutenbergHtml(html: string): boolean {
+  const sample = html.slice(0, 12000);
+  return GUTENBERG_HTML_MARKERS.some((pattern) => pattern.test(sample));
+}
+
+export function stripGutenbergBoilerplate(text: string): string {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  let start = 0;
+  for (let i = 0; i < Math.min(paragraphs.length, 12); i++) {
+    const line = paragraphs[i];
+    if (GUTENBERG_BOILERPLATE_START.some((pattern) => pattern.test(line))) {
+      start = i + 1;
+      continue;
+    }
+    if (/^chapter\s+\d+\s*$/i.test(line) && i < 4) {
+      start = i + 1;
+      continue;
+    }
+    if (countWords(line) >= 40 && /[.!?]/.test(line)) break;
+    if (countWords(line) >= 80) break;
+  }
+
+  const trimmed = paragraphs.slice(start).join("\n\n").trim();
+  return trimmed || text.trim();
+}
+
+export function isGutenbergJunkChapter(title: string, text: string): boolean {
+  const cleanTitle = title.replace(/\s+/g, " ").trim();
+  if (GUTENBERG_JUNK_TITLE_PATTERNS.some((pattern) => pattern.test(cleanTitle))) {
+    return true;
+  }
+
+  const sample = text.slice(0, 900).toLowerCase();
+  if (sample.includes("project gutenberg license") || sample.includes("www.gutenberg.org/license")) {
+    return true;
+  }
+
+  // Bare "CHAPTER N" stubs with almost no body (Gutenberg TOC artifacts).
+  if (/^chapter\s+\d+\s*$/i.test(cleanTitle) && countWords(text) < 180) {
+    return true;
+  }
+
+  // Roman numeral-only stubs (e.g. "VI" between stories).
+  if (/^[ivxlcdm]+\s*$/i.test(cleanTitle) && countWords(text) < 120) {
+    return true;
+  }
+
+  return false;
+}
+
+export function normalizeGutenbergChapters(
+  chapters: Chapter[],
+  _importContext?: EpubImportContext
+): Chapter[] {
+  const normalized = chapters
+    .map((chapter) => {
+      const rawText = stripGutenbergBoilerplate(chapter.rawText || "");
+      const wordCount = countWords(rawText);
+      return {
+        ...chapter,
+        rawText,
+        wordCount,
+        sections: buildSections(rawText, chapter.id),
+      };
+    })
+    .filter((chapter) => chapter.wordCount >= 120)
+    .filter((chapter) => !isGutenbergJunkChapter(chapter.title, chapter.rawText || ""));
+
+  return normalized.map((chapter, index) => ({ ...chapter, index }));
+}

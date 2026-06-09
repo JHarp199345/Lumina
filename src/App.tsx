@@ -151,7 +151,17 @@ function App() {
           setImportProgress("Rebuilding book structure…");
           const bytes = await storage.getEpubBytes(activeBook).catch(() => null);
           if (bytes) {
-            const parsed = await parseEpub(bytes, (message) => setImportProgress(message)).catch(() => null);
+            const importContext =
+              activeBook.gutenbergId || activeBook.editionPipeline === "gutenberg"
+                ? {
+                    gutenbergId: activeBook.gutenbergId,
+                    catalogTitle: activeBook.title,
+                    catalogAuthor: activeBook.author,
+                  }
+                : undefined;
+            const parsed = await parseEpub(bytes, (message) => setImportProgress(message), {
+              importContext,
+            }).catch(() => null);
             structure = parsed?.structure ?? null;
             if (structure && !cancelled) {
               await storage.saveBookStructure(structure).catch(() => {});
