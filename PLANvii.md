@@ -460,6 +460,25 @@ GEMINI_TTS_DEFAULT_VOICE: "Kore",                    // a clear neutral prebuilt
 - Remember last-used scope/length/voice/angle per book.
 - Optional debug view exposing the raw SIP (developer only, never in the prompt).
 
+### Phase 6 — Source Intelligence Profile v2: searchable knowledge bank
+- Treat ingestion as more than summarization. The SIP should become a clean, queryable
+  book intelligence layer that Audio Overview can pull from later without rediscovering
+  the book every time.
+- Store durable entries for: chapter teaching summaries, chapter-by-chapter progression,
+  entities, relationships, relationship evolution, concepts, key terms, central questions,
+  unresolved mysteries, arguments/evidence, motifs, and important cross-chapter callbacks.
+- Each entry should carry lightweight provenance: chapter ids, approximate word ranges,
+  confidence, and related entity/concept ids. This lets generation gather relevant facts
+  by scope and prompt instead of dumping the whole book profile into one context window.
+- For public-domain or externally recognizable works, add an optional later enrichment
+  pass that can gather outside context or references. Store the resulting distilled facts
+  and source notes as separate profile entries. Do not require web lookup at generation
+  time; generation should read from the cached intelligence layer first.
+- Audio Overview prompt assembly should become retrieval-based: reader prompt + scope
+  → select relevant SIP entries → compose an organized explanation plan → generate script
+  → voice script. The default prompt is then precise because the retrieved facts are clean,
+  thorough, and already organized for teaching.
+
 ---
 
 ## OPEN QUESTIONS (resolve during building, not before)

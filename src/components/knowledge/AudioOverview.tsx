@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AudioLines,
   BookOpen,
@@ -403,33 +403,13 @@ export default function AudioOverview() {
             </div>
           )}
 
-          {/* Ghost overlay: greyed plan behind a transparent textarea, shown only
-              when the field is empty. Tab (desktop) or the ⇥ chip (touch) accepts. */}
-          <div className="relative">
-            {showGhost && (
-              <div
-                aria-hidden
-                onClick={acceptGhost}
-                className="pointer-events-auto absolute inset-0 cursor-pointer overflow-y-auto whitespace-pre-wrap rounded-lg px-3 py-2 text-xs leading-relaxed text-ink-faint/55 scrollbar-thin"
-              >
-                {ghost}
-              </div>
-            )}
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Tab" && showGhost) {
-                  e.preventDefault();
-                  acceptGhost();
-                }
-              }}
-              rows={4}
-              className={`relative w-full resize-none rounded-lg border border-hair bg-surface-dark/60 px-3 py-2 text-xs leading-relaxed text-ink-soft placeholder:text-ink-faint focus:outline-none ${
-                showGhost ? "bg-transparent" : ""
-              }`}
-            />
-          </div>
+          <GhostComposer
+            value={prompt}
+            ghost={ghost}
+            showGhost={showGhost}
+            onChange={setPrompt}
+            onAccept={acceptGhost}
+          />
 
           <div className="mt-1.5 flex items-center justify-between">
             <p className="text-[10px] text-ink-faint">
@@ -439,14 +419,6 @@ export default function AudioOverview() {
                   ? "Tab to accept · type to write your own"
                   : "Clear the field for a full guided overview."}
             </p>
-            {showGhost && (
-              <button
-                onClick={acceptGhost}
-                className="rounded-md border border-lumina-gold/30 bg-lumina-gold/10 px-2 py-0.5 text-[10px] font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/16"
-              >
-                ⇥ accept
-              </button>
-            )}
           </div>
         </div>
 
@@ -552,6 +524,76 @@ function ScopeButton({
     >
       {children}
     </button>
+  );
+}
+
+function GhostComposer({
+  value,
+  ghost,
+  showGhost,
+  onChange,
+  onAccept,
+}: {
+  value: string;
+  ghost: string;
+  showGhost: boolean;
+  onChange: (value: string) => void;
+  onAccept: () => void;
+}) {
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  return (
+    <div
+      role="textbox"
+      aria-multiline="true"
+      tabIndex={-1}
+      onClick={() => inputRef.current?.focus()}
+      className="relative min-h-32 cursor-text overflow-hidden rounded-lg border border-hair bg-surface-dark/62 shadow-inner shadow-black/10 transition-colors focus-within:border-lumina-gold/35 focus-within:bg-surface-dark/72"
+    >
+      {showGhost && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-xs leading-relaxed text-ink-faint/55 scrollbar-thin"
+        >
+          {ghost}
+        </div>
+      )}
+      {!showGhost && value.length === 0 && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 px-3 py-2 text-xs leading-relaxed text-ink-faint/45"
+        >
+          Type what the overview should explain.
+        </div>
+      )}
+      <textarea
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Tab" && showGhost) {
+            e.preventDefault();
+            onAccept();
+          }
+        }}
+        aria-label="Audio overview prompt"
+        rows={5}
+        className="absolute inset-0 h-full w-full resize-none border-0 bg-transparent px-3 py-2 text-xs leading-relaxed text-ink-soft caret-lumina-gold outline-none"
+      />
+      {showGhost && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onAccept();
+            requestAnimationFrame(() => inputRef.current?.focus());
+          }}
+          className="absolute bottom-2 right-2 rounded-md border border-lumina-gold/30 bg-lumina-gold/12 px-2 py-0.5 text-[10px] font-medium text-lumina-gold/90 shadow-sm backdrop-blur-sm transition-colors hover:bg-lumina-gold/18"
+        >
+          ⇥ accept
+        </button>
+      )}
+    </div>
   );
 }
 
