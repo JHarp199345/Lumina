@@ -83,8 +83,47 @@ if (!isTauri && import.meta.env.DEV && "serviceWorker" in navigator) {
   }
 }
 
+const BUILD_STORAGE_KEY = "lumina-app-build";
+
+async function purgeWebCaches(): Promise<void> {
+  if ("serviceWorker" in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  }
+  if ("caches" in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  }
+}
+
+/** Detect a new GitHub Pages deploy and purge stale PWA shells once. */
+async function ensureFreshBuild(): Promise<void> {
+  if (isTauri || import.meta.env.DEV) return;
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}version.json?check=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return;
+    const data = (await res.json()) as { build?: string };
+    const build = data.build?.trim();
+    if (!build) return;
+
+    const prev = localStorage.getItem(BUILD_STORAGE_KEY);
+    if (prev && prev !== build) {
+      console.info("[Lumina] New deploy detected — refreshing shell", { from: prev, to: build });
+      await purgeWebCaches();
+      localStorage.setItem(BUILD_STORAGE_KEY, build);
+      window.location.reload();
+      return;
+    }
+    localStorage.setItem(BUILD_STORAGE_KEY, build);
+  } catch {
+    // Offline or version.json not present yet — continue with cached shell.
+  }
+}
+
 if (!isTauri && import.meta.env.PROD && "serviceWorker" in navigator) {
-  const SW_BUILD = "v4";
+  const SW_BUILD = "v5";
   let refreshing = false;
   let activeRegistration: ServiceWorkerRegistration | null = null;
 
@@ -96,6 +135,9 @@ if (!isTauri && import.meta.env.PROD && "serviceWorker" in navigator) {
 
   const checkForUpdates = () => {
     activeRegistration?.update().catch(() => {});
+    if (activeRegistration?.waiting) {
+      activeRegistration.waiting.postMessage({ type: "SKIP_WAITING" });
+    }
   };
 
   window.addEventListener("load", () => {
@@ -107,6 +149,14 @@ if (!isTauri && import.meta.env.PROD && "serviceWorker" in navigator) {
       .then((reg) => {
         activeRegistration = reg;
         console.info("[SW] Registered:", reg.scope);
+        reg.addEventListener("updatefound", () => {
+          const worker = reg.installing;
+          worker?.addEventListener("statechange", () => {
+            if (worker.state === "installed" && navigator.serviceWorker.controller) {
+              worker.postMessage({ type: "SKIP_WAITING" });
+            }
+          });
+        });
         checkForUpdates();
       })
       .catch((err) => {
@@ -120,10 +170,12 @@ if (!isTauri && import.meta.env.PROD && "serviceWorker" in navigator) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+void ensureFreshBuild().then(() => {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <LuminaCrashBoundary>
       <App />
     </LuminaCrashBoundary>
   </React.StrictMode>
-);
+  );
+});

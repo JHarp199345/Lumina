@@ -9,7 +9,7 @@
  * Books and generated images are stored in IndexedDB by the app — NOT here.
  */
 
-const CACHE_VERSION = "lumina-v4";
+const CACHE_VERSION = "lumina-v5";
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
 const scoped = (path) => `${SCOPE_PATH}${path}`.replace(/\/{2,}/g, "/");
 
@@ -18,16 +18,23 @@ const scoped = (path) => `${SCOPE_PATH}${path}`.replace(/\/{2,}/g, "/");
 // lazily on first fetch, so we don't need to enumerate hashed asset filenames.
 
 self.addEventListener("install", (event) => {
+  // Do NOT precache index.html — a stale shell is the #1 reason PWAs miss deploys.
   event.waitUntil(
     caches
       .open(CACHE_VERSION)
-      .then((cache) => cache.addAll([SCOPE_PATH, scoped("manifest.webmanifest"), scoped("icons/icon.svg")]))
+      .then((cache) => cache.addAll([scoped("manifest.webmanifest"), scoped("icons/icon.svg")]))
       .then(() => self.skipWaiting())
   );
 });
 
 // ─── Activate ────────────────────────────────────────────────────────────────
 // Remove caches from older versions so stale assets don't pile up.
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
@@ -55,17 +62,17 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Navigation requests (HTML pages): network-first so updates land immediately,
-  // falling back to cached index.html for offline use.
+  // version.json must always hit the network — the app uses it to detect deploys.
+  if (url.pathname.endsWith("/version.json")) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  // Navigation: network-only when online (never write a cached shell on success).
+  // Offline fallback uses the last cached copy if one exists.
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_VERSION).then((cache) => cache.put(request, clone));
-          return response;
-        })
-        .catch(() => caches.match(SCOPE_PATH))
+      fetch(request).catch(() => caches.match(SCOPE_PATH) ?? caches.match(request))
     );
     return;
   }

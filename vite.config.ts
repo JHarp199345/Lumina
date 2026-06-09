@@ -1,7 +1,30 @@
-import { defineConfig } from "vite";
+import { writeFileSync } from "fs";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+
+function luminaBuildVersion(isPages: boolean): Plugin {
+  let buildId = "";
+  return {
+    name: "lumina-build-version",
+    config() {
+      // @ts-expect-error process is a nodejs global
+      buildId = process.env.GITHUB_SHA?.slice(0, 12) || String(Date.now());
+    },
+    transformIndexHtml(html) {
+      if (!isPages) return html;
+      return html.replace(
+        "<head>",
+        `<head>\n    <meta name="lumina-build" content="${buildId}" />\n    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />`
+      );
+    },
+    closeBundle() {
+      if (!isPages) return;
+      writeFileSync("dist/version.json", JSON.stringify({ build: buildId }));
+    },
+  };
+}
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -12,7 +35,7 @@ const isGitHubPages = process.env.GITHUB_PAGES === "true";
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), luminaBuildVersion(isGitHubPages)],
   base: isGitHubPages ? "/Lumina/" : "/",
   resolve: {
     alias: {

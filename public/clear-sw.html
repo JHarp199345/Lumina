@@ -46,7 +46,7 @@
   <body>
     <main>
       <h1>Refreshing Lumina</h1>
-      <p>Clearing the old PWA shell and loading a fresh reader.</p>
+      <p>Clearing the old PWA shell and loading the latest build. You only need this when the installed app shows an outdated screen.</p>
     </main>
 
     <script>
@@ -59,9 +59,12 @@
 
           if ("caches" in window) {
             const keys = await caches.keys();
-            await Promise.all(
-              keys.filter((key) => key.startsWith("lumina-")).map((key) => caches.delete(key))
-            );
+            await Promise.all(keys.map((key) => caches.delete(key)));
+          }
+          try {
+            localStorage.removeItem("lumina-app-build");
+          } catch {
+            /* ignore */
           }
         } catch (error) {
           console.warn("[Lumina Recovery] Could not fully clear cache:", error);
