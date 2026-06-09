@@ -250,7 +250,8 @@ export default function StructuredTextRenderer({
   const listenAlongMode = useAudioStore((s) => s.listenAlongMode);
   const isFocused = useUiStore((s) => s.focusMode === "reader");
   const { isTablet } = useDeviceLayout();
-  const useFocusColumns = isFocused && !listenAlongMode && !isTablet;
+  // Desktop focus spread only — never apply column layout on tablet.
+  const useFocusColumns = !isTablet && isFocused && !listenAlongMode;
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   // Word offset within the current chapter, preserved across re-pagination so
@@ -265,11 +266,15 @@ export default function StructuredTextRenderer({
     const el = contentRef.current;
     if (!el) return;
     const measure = () => {
-      const style = getComputedStyle(el);
-      const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-      const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-      const w = el.clientWidth - padX;
-      const h = el.clientHeight - padY;
+      let w = el.clientWidth;
+      let h = el.clientHeight;
+      if (isTablet) {
+        const style = getComputedStyle(el);
+        const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+        const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+        w -= padX;
+        h -= padY;
+      }
       if (w < 60 || h < 60) return;
       const lineH = fontSize * lineHeight;
       const linesPerPage = Math.max(4, Math.floor(h / lineH));
@@ -281,15 +286,16 @@ export default function StructuredTextRenderer({
       const charsPerLine = Math.max(24, Math.floor(columnWidth / (fontSize * 0.5)));
       // ~6 characters per word (including the trailing space).
       const approxWords = Math.round((linesPerPage * charsPerLine * columnCount) / 6);
-      // Fill ~90% of the page so it reads full but never overflows.
-      const target = Math.max(90, Math.min(700, Math.round(approxWords * 0.9)));
+      // Fill the page without clipping; tablet uses a tighter fill for the right gutter.
+      const fillRatio = isTablet ? 0.82 : 0.9;
+      const target = Math.max(90, Math.min(700, Math.round(approxWords * fillRatio)));
       setWordsPerPage((prev) => (Math.abs(prev - target) >= 12 ? target : prev));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [fontSize, lineHeight, currentChapterIndex, useFocusColumns]);
+  }, [fontSize, lineHeight, currentChapterIndex, useFocusColumns, isTablet]);
 
   const chapterPageSegments = useMemo(
     () =>
@@ -642,13 +648,15 @@ export default function StructuredTextRenderer({
         </div>
       ) : (
         <div
-          className={`relative z-10 flex h-full flex-col overflow-hidden ${
+          className={
             isTablet
-              ? "w-full max-w-full"
-              : isFocused
-                ? "mx-auto w-full max-w-[min(100%,50%)]"
-                : "mx-auto w-full max-w-[min(100%,810px)]"
-          }`}
+              ? "relative z-10 flex h-full w-full max-w-full flex-col overflow-hidden"
+              : `relative z-10 flex h-full flex-col overflow-hidden ${
+                  isFocused
+                    ? "mx-auto w-full max-w-[min(100%,50%)]"
+                    : "mx-auto w-full max-w-[min(100%,810px)]"
+                }`
+          }
         >
           <div className="mb-4 flex items-center justify-between border-b border-hair pb-3">
             <p className="text-[10px] uppercase tracking-[0.22em] text-lumina-gold/58">
@@ -662,13 +670,17 @@ export default function StructuredTextRenderer({
           </div>
           <div
             ref={contentRef}
-            className={`min-h-0 flex-1 overscroll-contain font-serif text-ink [text-wrap:pretty] ${
-              useFocusColumns
-                ? "overflow-hidden columns-2 gap-12 [column-fill:auto]"
-                : isTablet
-                  ? `pr-[0.25in] ${listenAlongMode ? "overflow-y-auto" : "overflow-hidden"}`
-                  : "overflow-y-auto pr-2"
-            }`}
+            className={
+              isTablet
+                ? `min-h-0 flex-1 overscroll-contain pr-[0.25in] font-serif text-ink [text-wrap:pretty] ${
+                    listenAlongMode ? "overflow-y-auto" : "overflow-hidden"
+                  }`
+                : `min-h-0 flex-1 overscroll-contain font-serif text-ink [text-wrap:pretty] ${
+                    useFocusColumns
+                      ? "overflow-hidden columns-2 gap-12 [column-fill:auto]"
+                      : "overflow-y-auto pr-2"
+                  }`
+            }
           >
             {currentText.split(/\n{2,}/).map((paragraph, index) => (
               <ReadAlongParagraph

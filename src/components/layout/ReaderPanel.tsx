@@ -44,7 +44,11 @@ export default function ReaderPanel({ onImport }: ReaderPanelProps) {
       {/* EPUB Renderer */}
       <div
         className={`flex-1 overflow-hidden w-full ${
-          isTablet || isExpanded ? "" : `mx-auto ${READING_WIDTH_CLASSES[readingWidth]}`
+          isTablet
+            ? ""
+            : isExpanded
+              ? ""
+              : `mx-auto ${READING_WIDTH_CLASSES[readingWidth]}`
         }`}
         style={{ fontSize: `${fontSize}px`, lineHeight }}
       >
