@@ -10,6 +10,8 @@ import { useStructuredHighlights } from "@/hooks/useStructuredHighlights";
 import type { Chapter } from "@/types";
 
 const DEFAULT_WORDS_PER_PAGE = 220;
+const FOCUS_COLUMN_COUNT = 2;
+const FOCUS_COLUMN_GAP_PX = 48;
 
 interface PageSegment {
   text: string;
@@ -191,7 +193,7 @@ function ReadAlongParagraph({
   const parts = paragraph.split(/(\s+)/);
   return (
     <p
-      className={`mb-5 text-ink ${
+      className={`mb-5 break-inside-avoid-column text-ink ${
         paragraphIndex === 0
           ? "first-letter:float-left first-letter:mr-2 first-letter:font-serif first-letter:text-[3.1em] first-letter:leading-[0.85] first-letter:text-lumina-gold/80"
           : ""
@@ -265,9 +267,14 @@ export default function StructuredTextRenderer({
       if (w < 60 || h < 60) return;
       const lineH = fontSize * lineHeight;
       const linesPerPage = Math.max(4, Math.floor(h / lineH));
-      const charsPerLine = Math.max(24, Math.floor(w / (fontSize * 0.5)));
+      const columnCount = isFocused ? FOCUS_COLUMN_COUNT : 1;
+      const columnWidth =
+        columnCount === 1
+          ? w
+          : Math.max(120, (w - FOCUS_COLUMN_GAP_PX * (columnCount - 1)) / columnCount);
+      const charsPerLine = Math.max(24, Math.floor(columnWidth / (fontSize * 0.5)));
       // ~6 characters per word (including the trailing space).
-      const approxWords = Math.round((linesPerPage * charsPerLine) / 6);
+      const approxWords = Math.round((linesPerPage * charsPerLine * columnCount) / 6);
       // Fill ~90% of the page so it reads full but never overflows.
       const target = Math.max(90, Math.min(700, Math.round(approxWords * 0.9)));
       setWordsPerPage((prev) => (Math.abs(prev - target) >= 12 ? target : prev));
@@ -564,7 +571,9 @@ export default function StructuredTextRenderer({
 
   return (
     <div
-      className="reader-paper-surface relative h-full w-full overflow-hidden bg-reader px-[clamp(1rem,3vw,2rem)] py-5 text-ink"
+      className={`reader-paper-surface relative h-full w-full overflow-hidden bg-reader py-5 text-ink ${
+        isFocused ? "px-[clamp(2rem,5vw,4rem)]" : "px-6"
+      }`}
       onClick={(event) => {
         // Don't turn the page while the reader is selecting text.
         const sel = window.getSelection();
@@ -622,7 +631,11 @@ export default function StructuredTextRenderer({
           )}
         </div>
       ) : (
-        <div className="relative z-10 flex h-full w-full max-w-full flex-col overflow-hidden">
+        <div
+          className={`relative z-10 flex h-full flex-col overflow-hidden ${
+            isFocused ? "w-full max-w-full" : "mx-auto w-full max-w-[680px]"
+          }`}
+        >
           <div className="mb-4 flex items-center justify-between border-b border-hair pb-3">
             <p className="text-[10px] uppercase tracking-[0.22em] text-lumina-gold/58">
               {activeBook.title}
@@ -635,7 +648,11 @@ export default function StructuredTextRenderer({
           </div>
           <div
             ref={contentRef}
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 font-serif text-ink [text-wrap:pretty]"
+            className={`min-h-0 flex-1 overscroll-contain font-serif text-ink [text-wrap:pretty] ${
+              isFocused && !listenAlongMode
+                ? "overflow-hidden columns-2 gap-12 [column-fill:auto]"
+                : "overflow-y-auto pr-2"
+            }`}
           >
             {currentText.split(/\n{2,}/).map((paragraph, index) => (
               <ReadAlongParagraph

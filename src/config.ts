@@ -47,12 +47,12 @@ export const LUMINA_CONFIG = {
   // Reader defaults
   DEFAULT_FONT_SIZE: 18,
   DEFAULT_LINE_HEIGHT: 1.7,
-  DEFAULT_READING_WIDTH: "wide" as const,
+  DEFAULT_READING_WIDTH: "medium" as const,
   DEFAULT_THEME: "dark" as const,
 
   // Panel layout defaults (percentages)
   // TOC is 0 by default — hidden until summoned via the rail button
-  DEFAULT_PANEL_LAYOUT: { toc: 0, visual: 35, reader: 65 },
+  DEFAULT_PANEL_LAYOUT: { toc: 0, visual: 40, reader: 60 },
 } as const;
 
 export type ReadingWidth = "narrow" | "medium" | "wide";

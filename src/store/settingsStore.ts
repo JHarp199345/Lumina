@@ -40,10 +40,10 @@ export const useSettingsStore = create<SettingsStore>()(
       theme: LUMINA_CONFIG.DEFAULT_THEME,
       fontSize: LUMINA_CONFIG.DEFAULT_FONT_SIZE,
       lineHeight: LUMINA_CONFIG.DEFAULT_LINE_HEIGHT,
-      readingWidth: LUMINA_CONFIG.DEFAULT_READING_WIDTH, // wide — fills the reader panel
+      readingWidth: LUMINA_CONFIG.DEFAULT_READING_WIDTH,
       imageGenerationEnabled: true,
       layoutPreset: "classic",
-      panelLayout: { toc: 0, visual: 35, reader: 65 },
+      panelLayout: { toc: 0, visual: 40, reader: 60 },
       panelOrder: { panels: ["toc", "visual", "reader"] },
       hasCompletedOnboarding: false,
       apiKeyConfigured: false,
@@ -77,15 +77,6 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: "lumina-settings",
-      version: 1,
-      migrate: (persisted) => {
-        const state = persisted as Partial<SettingsStore>;
-        // v1: use the full reader width — old medium/narrow left too much dead space.
-        if (state.readingWidth === "medium" || state.readingWidth === undefined) {
-          state.readingWidth = "wide";
-        }
-        return state as SettingsStore;
-      },
     }
   )
 );
