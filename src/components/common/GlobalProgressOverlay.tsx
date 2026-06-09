@@ -4,7 +4,7 @@ import type { AnalysisProgressDetail, AnalysisProgressPhase } from "@/types";
 
 export type GlobalProgressMode = "import" | "analysis";
 
-const PHASE_LABELS: Record<AnalysisProgressPhase, string> = {
+const NARRATIVE_PHASE_LABELS: Record<AnalysisProgressPhase, string> = {
   preparing: "Preparing chapters",
   scoring: "Scoring emotional tone",
   mapping: "Mapping story arc",
@@ -12,6 +12,18 @@ const PHASE_LABELS: Record<AnalysisProgressPhase, string> = {
   prompts: "Writing visual briefs",
   "opening-image": "Composing opening image",
   queueing: "Saving visual plan",
+  complete: "Complete",
+  error: "Error",
+};
+
+const EXPOSITORY_PHASE_LABELS: Record<AnalysisProgressPhase, string> = {
+  preparing: "Catalog & structure",
+  scoring: "Reading sections",
+  mapping: "Mapping ideas",
+  scenes: "Extracting teaching beats",
+  prompts: "Writing diagram briefs",
+  "opening-image": "Composing first diagram",
+  queueing: "Saving idea map",
   complete: "Complete",
   error: "Error",
 };
@@ -80,9 +92,11 @@ export default function GlobalProgressOverlay({
       ? "Visual Analysis"
       : importTitle(message);
 
+  const phaseLabels =
+    detail?.analysisProtocol === "expository" ? EXPOSITORY_PHASE_LABELS : NARRATIVE_PHASE_LABELS;
   const phaseLabel =
     mode === "analysis" && detail?.phase
-      ? PHASE_LABELS[detail.phase] ?? detail.phase.replace(/-/g, " ")
+      ? phaseLabels[detail.phase] ?? detail.phase.replace(/-/g, " ")
       : mode === "import"
         ? "Import pipeline"
         : "Working";

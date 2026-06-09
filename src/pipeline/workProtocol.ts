@@ -1,15 +1,20 @@
 /**
  * Automatic work-protocol routing — invisible to the reader.
  * Decides whether analysis runs the narrative (fiction) or expository (ideas) pipeline.
+ *
+ * Priority: Open Library catalog lookup → local heuristics → Gemini (TOC only).
  */
 
 import { LUMINA_CONFIG } from "@/config";
+import { lookupExternalClassification } from "@/pipeline/bookClassificationLookup";
 import type {
   AnalysisProtocol,
+  AnalysisProgressReporter,
   BookStructure,
   ExpositoryDomain,
   WorkType,
 } from "@/types";
+import { diagnosticInfo } from "@/utils/diagnostics";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -26,6 +31,8 @@ export interface WorkProtocolResult {
   workType: WorkType;
   domain: ExpositoryDomain;
   domainStyleHint: string;
+  classificationSource?: string;
+  classificationEvidence?: string[];
 }
 
 const DOMAIN_KEYWORDS: Record<ExpositoryDomain, string[]> = {
@@ -127,12 +134,59 @@ function heuristicProtocol(structure: BookStructure): WorkProtocolResult | null 
   return null;
 }
 
+function fromExternal(
+  external: NonNullable<Awaited<ReturnType<typeof lookupExternalClassification>>>
+): WorkProtocolResult {
+  return {
+    protocol: external.protocol,
+    workType: external.workType,
+    domain: external.domain,
+    domainStyleHint: external.protocol === "expository" ? domainStyleHint(external.domain) : "",
+    classificationSource: external.source,
+    classificationEvidence: external.evidence,
+  };
+}
+
 export async function resolveWorkProtocol(
   structure: BookStructure,
-  apiKey: string
+  apiKey: string,
+  onProgress?: AnalysisProgressReporter
 ): Promise<WorkProtocolResult> {
+  onProgress?.({
+    phase: "preparing",
+    message: `Looking up "${structure.title}" in book catalogs…`,
+    percent: 1,
+    analysisProtocol: undefined,
+  });
+
+  const external = await lookupExternalClassification(structure.title, structure.author);
+  if (external && external.confidence >= 0.72) {
+    const result = fromExternal(external);
+    diagnosticInfo("work_protocol.catalog", "Work protocol from Open Library", {
+      title: structure.title,
+      author: structure.author,
+      protocol: result.protocol,
+      workType: result.workType,
+      domain: result.domain,
+      confidence: external.confidence,
+      source: external.source,
+      matchedTitle: external.matchedTitle,
+      evidence: external.evidence,
+    });
+    onProgress?.({
+      phase: "preparing",
+      message:
+        result.protocol === "expository"
+          ? `Catalog match: expository (${external.matchedTitle ?? structure.title})`
+          : `Catalog match: narrative (${external.matchedTitle ?? structure.title})`,
+      percent: 4,
+      analysisProtocol: result.protocol,
+    });
+    return result;
+  }
+
   const heuristic = heuristicProtocol(structure);
-  if (heuristic && heuristic.protocol === "narrative") return heuristic;
+  if (heuristic && heuristic.protocol === "narrative" && !external) return heuristic;
 
   const sampleChapters = structure.chapters
     .filter((ch) => (ch.rawText || "").trim().length > 100)
@@ -142,20 +196,18 @@ export async function resolveWorkProtocol(
     .map((ch) => `"${ch.title}" (${ch.wordCount} words)`)
     .join("\n");
 
-  const proseSample = sampleChapters
-    .slice(0, 4)
-    .map((ch) => `## ${ch.title}\n${(ch.rawText || "").split(/\s+/).slice(0, 180).join(" ")}`)
-    .join("\n\n");
+  const catalogHint = external
+    ? `Open Library hint (low confidence ${external.confidence.toFixed(2)}): ${external.protocol}, subjects: ${external.evidence.join("; ")}`
+    : "No catalog match found.";
 
   const prompt = `Classify this book for an invisible reading-analysis pipeline.
 
 Book: "${structure.title}" by ${structure.author}
 
-Chapter outline:
-${outline}
+External catalog: ${catalogHint}
 
-Prose sample:
-${proseSample}
+Chapter outline (table of contents only — do NOT infer from opening anecdotes):
+${outline}
 
 Return STRICT JSON:
 {
@@ -166,8 +218,9 @@ Return STRICT JSON:
 }
 
 Rules:
+- Trust the external catalog hint when present — it reflects publisher/library metadata, not opening prose.
+- Popular science / psychology / neuroscience (e.g. "How Emotions Are Made") → scholarly or nonfiction, subjectHierarchy, even if the introduction uses narrative anecdotes.
 - memoir with narrative scenes → workType memoir, structureKind narrative
-- popular science / psychology / neuroscience → scholarly or nonfiction, subjectHierarchy
 - novels and short fiction → fiction, narrative
 - manuals and references → manual/reference, subjectHierarchy`;
 
@@ -187,30 +240,73 @@ Rules:
         parsed.structureKind === "subjectHierarchy" ||
         workType === "scholarly");
 
-    const domain = parsed.domain && parsed.domain in DOMAIN_KEYWORDS ? parsed.domain : inferDomainFromSignals(structure.title, proseSample);
+    const domain =
+      parsed.domain && parsed.domain in DOMAIN_KEYWORDS
+        ? parsed.domain
+        : external?.domain ?? inferDomainFromSignals(structure.title, outline);
 
-    if (isExpository) {
+    if (isExpository || external?.protocol === "expository") {
+      const result: WorkProtocolResult = {
+        protocol: "expository",
+        workType: external?.workType ?? workType,
+        domain: external?.domain ?? domain,
+        domainStyleHint: domainStyleHint(external?.domain ?? domain),
+        classificationSource: external ? `${external.source}+gemini` : "gemini",
+        classificationEvidence: external?.evidence,
+      };
+      diagnosticInfo("work_protocol.gemini", "Work protocol from Gemini", {
+        title: structure.title,
+        protocol: result.protocol,
+        workType: result.workType,
+        domain: result.domain,
+      });
+      return result;
+    }
+
+    if (external?.protocol === "narrative" && external.confidence >= 0.6) {
+      return fromExternal(external);
+    }
+
+    const result: WorkProtocolResult = {
+      protocol: "narrative",
+      workType: workType === "memoir" ? "memoir" : "fiction",
+      domain: "general",
+      domainStyleHint: "",
+      classificationSource: "gemini",
+    };
+    diagnosticInfo("work_protocol.gemini", "Work protocol from Gemini", {
+      title: structure.title,
+      protocol: result.protocol,
+      workType: result.workType,
+    });
+    return result;
+  } catch {
+    if (external && external.confidence >= 0.6) return fromExternal(external);
+    if (heuristic) return { ...heuristic, classificationSource: "heuristic" };
+
+    const scholarlyToc = /introduction|chapter\s+\d|appendix|conclusion/i.test(
+      structure.chapters.map((ch) => ch.title).join(" ")
+    );
+    if (scholarlyToc) {
+      const domain = inferDomainFromSignals(structure.title, "");
+      diagnosticInfo("work_protocol.fallback", "Defaulting ambiguous scholarly TOC to expository", {
+        title: structure.title,
+      });
       return {
         protocol: "expository",
-        workType,
+        workType: "nonfiction",
         domain,
         domainStyleHint: domainStyleHint(domain),
+        classificationSource: "fallback-scholarly-toc",
       };
     }
 
     return {
       protocol: "narrative",
-      workType: workType === "memoir" ? "memoir" : "fiction",
-      domain: "general",
-      domainStyleHint: "",
-    };
-  } catch {
-    if (heuristic) return heuristic;
-    return {
-      protocol: "narrative",
       workType: "fiction",
       domain: "general",
       domainStyleHint: "",
+      classificationSource: "fallback-fiction",
     };
   }
 }

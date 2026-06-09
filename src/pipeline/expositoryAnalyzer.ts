@@ -70,7 +70,15 @@ export async function analyzeExpositoryBook(
 ): Promise<SemanticMap> {
   const report = (p: Parameters<AnalysisProgressReporter>[0]) => {
     if (!onProgress) return;
-    onProgress(typeof p === "string" ? p : { ...p, percent: Math.max(0, Math.min(100, Math.round(p.percent))) });
+    if (typeof p === "string") {
+      onProgress({ phase: "preparing", message: p, percent: 0, analysisProtocol: "expository" });
+      return;
+    }
+    onProgress({
+      ...p,
+      analysisProtocol: "expository",
+      percent: Math.max(0, Math.min(100, Math.round(p.percent))),
+    });
   };
 
   report({

@@ -277,6 +277,8 @@ export interface AnalysisProgressDetail {
   current?: number;
   total?: number;
   itemLabel?: string;
+  /** Set once catalog routing picks narrative vs expository. */
+  analysisProtocol?: AnalysisProtocol;
 }
 
 export type AnalysisProgressUpdate = string | AnalysisProgressDetail;

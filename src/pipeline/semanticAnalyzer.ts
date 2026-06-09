@@ -48,10 +48,23 @@ export async function analyzeBook(
     percent: 2,
   });
 
-  const workProtocol = await resolveWorkProtocol(structure, apiKey);
+  const workProtocol = await resolveWorkProtocol(structure, apiKey, report);
   if (workProtocol.protocol === "expository") {
+    report({
+      phase: "preparing",
+      message: `Expository work — mapping ideas and diagrams for "${structure.title}"…`,
+      percent: 5,
+      analysisProtocol: "expository",
+    });
     return analyzeExpositoryBook(structure, apiKey, workProtocol, report);
   }
+
+  report({
+    phase: "preparing",
+    message: `Narrative work — mapping story and emotional arc for "${structure.title}"…`,
+    percent: 5,
+    analysisProtocol: "narrative",
+  });
 
   return analyzeNarrativeBook(structure, apiKey, report, workProtocol);
 }
@@ -59,9 +72,17 @@ export async function analyzeBook(
 async function analyzeNarrativeBook(
   structure: BookStructure,
   apiKey: string,
-  report: AnalysisProgressReporter,
+  baseReport: AnalysisProgressReporter,
   workProtocol: Awaited<ReturnType<typeof resolveWorkProtocol>>
 ): Promise<SemanticMap> {
+  const report: AnalysisProgressReporter = (progress) => {
+    if (typeof progress === "string") {
+      baseReport({ phase: "preparing", message: progress, percent: 0, analysisProtocol: "narrative" });
+      return;
+    }
+    baseReport({ ...progress, analysisProtocol: progress.analysisProtocol ?? "narrative" });
+  };
+
   let analysisStructure = storyOnlyStructure(structure);
   report({
     phase: "preparing",
