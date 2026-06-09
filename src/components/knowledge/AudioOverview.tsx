@@ -20,10 +20,11 @@ import {
   GOOGLE_KEY_NAME,
   generateAudioOverview,
   scopeLabel,
-  suggestOutline,
+  suggestFullerPrompt,
   type OverviewScope,
 } from "@/pipeline/audioOverview";
 import { buildSourceProfile, fallbackSuggestions } from "@/pipeline/sourceProfile";
+import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import type { AudioArtifact, SourceIntelligenceProfile, SourceProfileSuggestion } from "@/types";
 
 export default function AudioOverview() {
@@ -179,8 +180,8 @@ export default function AudioOverview() {
     setPrompt(plan);
   };
 
-  // Ask Gemini for a richer plan and drop it straight into the editor.
-  const requestFullerSuggestion = async () => {
+  // Expand the current ghost angle (or a fresh one) into a fuller directive.
+  const requestFullerSuggestion = async (ghostAngle?: SourceProfileSuggestion | null) => {
     if (!activeStructure) return;
     const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
     if (!apiKey) {
@@ -189,9 +190,14 @@ export default function AudioOverview() {
     }
     setIsSuggesting(true);
     try {
-      const fuller = await suggestOutline(scope, activeStructure, activeSemanticMap, apiKey);
+      const enrichedProfile = profile ?? (await ensureProfile(apiKey));
+      const fuller = await suggestFullerPrompt(scope, activeStructure, activeSemanticMap, apiKey, {
+        angleLabel: ghostAngle?.label,
+        seedPlan: ghostAngle?.planText ?? prompt,
+        profile: enrichedProfile,
+      });
       if (fuller) {
-        setSelectedAngleId(null);
+        setSelectedAngleId(ghostAngle?.id ?? null);
         setPrompt(fuller);
       }
     } catch (err) {
@@ -390,7 +396,7 @@ export default function AudioOverview() {
               What should it cover?
             </p>
             <button
-              onClick={requestFullerSuggestion}
+              onClick={() => requestFullerSuggestion()}
               disabled={isSuggesting || !activeStructure}
               className="flex items-center gap-1 rounded border border-hair px-2 py-1 text-[10px] text-lumina-gold/75 transition-colors hover:text-lumina-gold disabled:opacity-40"
             >
@@ -405,12 +411,15 @@ export default function AudioOverview() {
             suggestions={suggestions}
             selectedId={selectedAngleId}
             onPick={pickSuggestion}
+            onRequestFuller={requestFullerSuggestion}
+            isSuggesting={isSuggesting}
             tailored={tailored}
             building={profileBuilding}
           />
 
           <p className="mt-1.5 text-[10px] text-ink-faint">
-            Pick a starting point, write your own, or leave it blank for a full guided overview.
+            A suggestion appears as ghost text — press Tab (desktop) or tap Use to accept it, edit
+            freely, or leave blank for a full guided overview.
           </p>
         </div>
 
@@ -520,15 +529,9 @@ function ScopeButton({
 }
 
 /**
- * SuggestionComposer — a hybrid surface that is a *window* of overview angles
- * when idle and a *text editor* once the reader picks one or writes their own.
- *
- *   browse mode → scannable list of real suggestions (label + plan preview)
- *   edit mode   → a normal multiline editor with a way back to the suggestions
- *
- * One surface, no separate suggestion box. The field is never dead: even before
- * a Source Intelligence Profile exists, the parent feeds title-grounded
- * fallbacks so there is always something to pick.
+ * SuggestionComposer — default view is a text field with ghost-text suggestions
+ * from the Source Intelligence Profile bank. Ghost text is not committed until
+ * the reader accepts it (Tab on desktop, Use button on touch devices).
  */
 function SuggestionComposer({
   value,
@@ -536,6 +539,8 @@ function SuggestionComposer({
   suggestions,
   selectedId,
   onPick,
+  onRequestFuller,
+  isSuggesting,
   tailored,
   building,
 }: {
@@ -544,25 +549,50 @@ function SuggestionComposer({
   suggestions: SourceProfileSuggestion[];
   selectedId: string | null;
   onPick: (id: string) => void;
+  onRequestFuller: (ghostAngle?: SourceProfileSuggestion | null) => void | Promise<void>;
+  isSuggesting: boolean;
   tailored: boolean;
   building: boolean;
 }) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const [mode, setMode] = useState<"browse" | "edit">(value.trim() ? "edit" : "browse");
-  const prevValueRef = useRef(value);
+  const ghostRef = useRef<HTMLDivElement | null>(null);
+  const { isTablet, isPhone } = useDeviceLayout();
+  const showTouchAccept = isTablet || isPhone;
 
-  // When an external action fills an empty field (a pick or "Suggest fuller"),
-  // move into edit mode so the reader can trim it. Reopening suggestions over
-  // existing text (value already non-empty) is left alone.
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [ghostIndex, setGhostIndex] = useState(0);
+
+  const hasValue = Boolean(value.trim());
+  const ghostSuggestion = suggestions[ghostIndex] ?? null;
+  const ghostText = ghostSuggestion?.planText ?? "";
+  const showGhost = !hasValue && Boolean(ghostText) && !browseOpen;
+
   useEffect(() => {
-    const was = prevValueRef.current;
-    prevValueRef.current = value;
-    if (!was.trim() && value.trim()) setMode("edit");
-  }, [value]);
+    if (selectedId) {
+      const idx = suggestions.findIndex((s) => s.id === selectedId);
+      if (idx >= 0) setGhostIndex(idx);
+    }
+  }, [selectedId, suggestions]);
+
+  useEffect(() => {
+    if (ghostIndex >= suggestions.length) setGhostIndex(0);
+  }, [ghostIndex, suggestions.length]);
 
   const focusSoon = () => requestAnimationFrame(() => inputRef.current?.focus());
 
-  if (mode === "browse") {
+  const acceptGhost = () => {
+    if (!ghostSuggestion || !ghostText) return;
+    onPick(ghostSuggestion.id);
+    focusSoon();
+  };
+
+  const syncGhostScroll = () => {
+    if (ghostRef.current && inputRef.current) {
+      ghostRef.current.scrollTop = inputRef.current.scrollTop;
+    }
+  };
+
+  if (browseOpen) {
     return (
       <div className="overflow-hidden rounded-lg border border-hair bg-surface-dark/62 shadow-inner shadow-black/10">
         <div className="flex items-center gap-1.5 border-b border-hair px-3 py-1.5">
@@ -576,30 +606,28 @@ function SuggestionComposer({
           </p>
         </div>
 
-        <div className="max-h-48 space-y-1 overflow-y-auto p-2 scrollbar-thin">
+        <div className="max-h-64 space-y-1 overflow-y-auto p-2 scrollbar-thin">
           {suggestions.length === 0 ? (
             <p className="px-1 py-3 text-center text-[11px] text-ink-faint">
               Suggestions will appear once the book is ready.
             </p>
           ) : (
-            suggestions.map((s) => (
+            suggestions.map((s, i) => (
               <button
                 key={s.id}
                 onClick={() => {
-                  onPick(s.id);
-                  setMode("edit");
+                  setGhostIndex(i);
+                  setBrowseOpen(false);
                   focusSoon();
                 }}
                 className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                  selectedId === s.id
+                  ghostIndex === i
                     ? "border-lumina-gold/45 bg-lumina-gold/[0.1]"
                     : "border-hair bg-ink/[0.02] hover:border-lumina-gold/30 hover:bg-ink/[0.04]"
                 }`}
               >
                 <p className="text-[12px] font-medium text-ink/85">{s.label}</p>
-                <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-ink-faint">
-                  {s.planText}
-                </p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">{s.planText}</p>
               </button>
             ))
           )}
@@ -607,38 +635,123 @@ function SuggestionComposer({
 
         <button
           onClick={() => {
-            onChange("");
-            setMode("edit");
+            setBrowseOpen(false);
             focusSoon();
           }}
           className="flex w-full items-center gap-1.5 border-t border-hair px-3 py-2 text-[11px] text-ink-soft transition-colors hover:bg-ink/[0.03] hover:text-ink"
         >
           <Pencil size={11} className="text-lumina-gold/70" />
-          Write my own
+          Back to editor
         </button>
       </div>
     );
   }
 
-  // ── Edit mode ──────────────────────────────────────────────────────────────
   return (
     <div className="overflow-hidden rounded-lg border border-hair bg-surface-dark/62 shadow-inner shadow-black/10 transition-colors focus-within:border-lumina-gold/35 focus-within:bg-surface-dark/72">
-      <textarea
-        ref={inputRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label="Audio overview prompt"
-        rows={5}
-        placeholder="Describe what the overview should explain…"
-        className="block max-h-56 min-h-28 w-full resize-y border-0 bg-transparent px-3 py-2.5 text-xs leading-relaxed text-ink-soft caret-lumina-gold outline-none placeholder:text-ink-faint/45"
-      />
-      <button
-        onClick={() => setMode("browse")}
-        className="flex w-full items-center gap-1.5 border-t border-hair px-3 py-2 text-[11px] text-ink-faint transition-colors hover:bg-ink/[0.03] hover:text-ink-soft"
-      >
-        <Sparkles size={11} className="text-lumina-gold/70" />
-        {suggestions.length > 0 ? "Browse suggestions" : "Suggestions"}
-      </button>
+      <div className="flex items-center justify-between gap-2 border-b border-hair px-3 py-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Sparkles size={11} className="shrink-0 text-lumina-gold/70" />
+          <p className="truncate text-[10px] text-ink-faint">
+            {building
+              ? "Tailoring suggestions…"
+              : showGhost && ghostSuggestion
+                ? `${ghostSuggestion.label} · suggestion`
+                : hasValue
+                  ? "Your instruction"
+                  : "Write your own instruction"}
+          </p>
+        </div>
+        {suggestions.length > 1 && showGhost && (
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setGhostIndex((i) => (i - 1 + suggestions.length) % suggestions.length)}
+              className="rounded border border-hair px-1.5 py-0.5 text-[10px] text-ink-faint hover:text-ink-soft"
+              aria-label="Previous suggestion"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={() => setGhostIndex((i) => (i + 1) % suggestions.length)}
+              className="rounded border border-hair px-1.5 py-0.5 text-[10px] text-ink-faint hover:text-ink-soft"
+              aria-label="Next suggestion"
+            >
+              ›
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="relative">
+        {showGhost && (
+          <div
+            ref={ghostRef}
+            aria-hidden
+            className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-2.5 text-xs leading-relaxed text-ink-faint/42 whitespace-pre-wrap"
+          >
+            {ghostText}
+          </div>
+        )}
+        <textarea
+          ref={inputRef}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onScroll={syncGhostScroll}
+          onKeyDown={(e) => {
+            if (e.key === "Tab" && showGhost && !showTouchAccept) {
+              e.preventDefault();
+              acceptGhost();
+            }
+          }}
+          aria-label="Audio overview prompt"
+          rows={8}
+          className={`block max-h-80 min-h-36 w-full resize-y border-0 bg-transparent px-3 py-2.5 text-xs leading-relaxed caret-lumina-gold outline-none ${
+            showGhost ? "text-transparent selection:bg-lumina-gold/25" : "text-ink-soft"
+          }`}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t border-hair px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setBrowseOpen(true)}
+          className="flex items-center gap-1.5 text-[11px] text-ink-faint transition-colors hover:text-ink-soft"
+        >
+          <Sparkles size={11} className="text-lumina-gold/70" />
+          {suggestions.length > 0 ? "Browse suggestions" : "Suggestions"}
+        </button>
+
+        {showGhost && (
+          <div className="flex items-center gap-2">
+            {!showTouchAccept && (
+              <span className="hidden text-[10px] text-ink-faint/70 sm:inline">Tab to use</span>
+            )}
+            {showTouchAccept && (
+              <button
+                type="button"
+                onClick={acceptGhost}
+                className="flex items-center gap-1 rounded border border-lumina-gold/35 bg-lumina-gold/[0.08] px-2 py-1 text-[10px] font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/[0.14]"
+              >
+                Use
+                <kbd className="rounded border border-hair/80 bg-ink/[0.06] px-1 py-px text-[9px] text-ink-faint">
+                  Tab
+                </kbd>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onRequestFuller(ghostSuggestion)}
+              disabled={isSuggesting}
+              className="flex items-center gap-1 rounded border border-hair px-2 py-1 text-[10px] text-lumina-gold/75 transition-colors hover:text-lumina-gold disabled:opacity-40"
+            >
+              <Wand2 size={10} className={isSuggesting ? "animate-pulse" : ""} />
+              {isSuggesting ? "…" : "Expand"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -114,13 +114,14 @@ Return STRICT JSON with this shape:
     { "id": "story|themes|relationships|chapter|first-time|lecture|by-subject|key-arguments|methods",
       "label": "short chip label",
       "workTypes": ["fiction"],
-      "planText": "a 1-3 sentence overview instruction a reader could accept as-is, written about THIS book's actual content (name real entities/ideas), e.g. 'Explain how X and Y...'" }
+      "planText": "a detailed overview instruction (4-8 sentences) a reader could accept as-is: state the angle, what to explain, which real entities/ideas/conflicts to foreground, what the listener should understand by the end, and how to organize the explanation. Purposeful and specific — never generic." }
   ]
 }
 
 Rules:
-- planText must reference this book's real content (entities, ideas), never generic phrasing
-  and never chapter opening lines.
+- planText must reference this book's real content (entities, ideas, conflicts), never generic
+  phrasing and never chapter opening lines. Each planText should be a complete, actionable
+  directive — long enough to shape a ~20 minute spoken overview, not a one-liner.
 - For fiction use narrative angles (as a story / themes / relationships / chapter-by-chapter /
   for a first-time reader / like a lecture). For nonfiction/scholarly use by-subject /
   key-arguments / methods & evidence plus first-time and lecture.
@@ -221,15 +222,45 @@ export function fallbackSuggestions(structure: BookStructure, workType: WorkType
   const isScholarly = workType === "nonfiction" || workType === "scholarly" || workType === "reference";
   if (isScholarly) {
     return [
-      { id: "by-subject", label: "By subject", workTypes: [workType], planText: `Explain "${structure.title}" by its major subjects and the hierarchy of ideas, with key terms and evidence.` },
-      { id: "key-arguments", label: "Key arguments", workTypes: [workType], planText: `Explain the central thesis and main arguments of "${structure.title}", with supporting evidence and implications.` },
-      { id: "first-time", label: "For a first-time reader", workTypes: [workType], planText: `Introduce "${structure.title}" for a first-time reader: what it is about, why it matters, and what to expect.` },
+      {
+        id: "by-subject",
+        label: "By subject",
+        workTypes: [workType],
+        planText: `Give a structured audio overview of "${structure.title}" organized by its major subjects and the hierarchy of ideas. Open by framing what this work is and who it is for, then walk through the central concepts in a logical order — defining key terms as you go, showing how subtopics connect, and citing the main evidence or examples that support each branch. Close by summarizing what a listener should now understand about the field this work addresses and why the author's organization matters.`,
+      },
+      {
+        id: "key-arguments",
+        label: "Key arguments",
+        workTypes: [workType],
+        planText: `Explain the central thesis and main arguments of "${structure.title}" as a teaching overview. State the core claim up front, then develop each major argument in sequence: what evidence supports it, what objections or complications the author addresses, and how the conclusions follow. Name the real ideas, figures, and examples the work depends on. End with what a listener should take away about the argument's stakes and implications.`,
+      },
+      {
+        id: "first-time",
+        label: "For a first-time reader",
+        workTypes: [workType],
+        planText: `Introduce "${structure.title}" for someone encountering it for the first time. Explain what kind of work this is, what problem or question it tackles, and why it matters. Preview the main parts of the book without dumping every detail — orient the listener so they know what to listen for, which ideas are foundational, and what understanding they should have by the end.`,
+      },
     ];
   }
   return [
-    { id: "story", label: "As a story", workTypes: [workType], planText: `Explain the main story of "${structure.title}": the arc, the major characters and conflicts, and the turning points.` },
-    { id: "themes", label: "Major themes", workTypes: [workType], planText: `Explain the major themes of "${structure.title}" and how they develop across the work.` },
-    { id: "first-time", label: "For a first-time reader", workTypes: [workType], planText: `Introduce "${structure.title}" for a first-time reader: what it is about and what to expect.` },
+    {
+      id: "story",
+      label: "As a story",
+      workTypes: [workType],
+      planText: `Explain the main story of "${structure.title}" as a clear narrative overview. Open with the premise and setting, then follow the arc through its major movements: introduce the central characters and factions, trace the key conflicts and turning points in order, and show how relationships and stakes evolve. Name the real characters, places, and events — do not summarize chapter openings. Close with where the story stands and what the throughline means for a listener who has not read the book.`,
+    },
+    {
+      id: "themes",
+      label: "Major themes",
+      workTypes: [workType],
+      planText: `Explain the major themes of "${structure.title}" and how they develop across the work. For each theme, show where it emerges, how it is tested or complicated through the story's events and relationships, and what it means by the end. Connect themes to specific characters, conflicts, and turning points rather than speaking in abstractions. The listener should finish understanding not just what the themes are, but how the book argues for them through its narrative.`,
+    },
+    {
+      id: "first-time",
+      label: "For a first-time reader",
+      workTypes: [workType],
+      planText: `Introduce "${structure.title}" for a first-time reader or listener. Explain what kind of story this is, who the important players are, what world or situation they inhabit, and what central tension drives the book forward. Give enough plot orientation that someone new can follow an overview without getting lost, but focus on clarity and anticipation rather than exhaustive detail. End with what to expect emotionally and thematically as the work unfolds.`,
+    },
   ];
 }
 

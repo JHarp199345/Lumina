@@ -139,21 +139,52 @@ function buildSourceContext(
 
 // ─── Tier 2: richer outline suggestion (one Gemini call) ────────────────────────
 
+/** Expand or refine an overview angle into a full, actionable instruction paragraph. */
+export async function suggestFullerPrompt(
+  scope: OverviewScope,
+  structure: BookStructure,
+  semanticMap: SemanticMap | null,
+  apiKey: string,
+  options: {
+    angleLabel?: string;
+    seedPlan?: string;
+    profile?: SourceIntelligenceProfile | null;
+  } = {}
+): Promise<string> {
+  const { angleLabel, seedPlan, profile } = options;
+  const context = profile
+    ? `${profileGroundingText(profile)}\n\n${buildSourceContext(scope, structure, semanticMap)}`
+    : buildSourceContext(scope, structure, semanticMap);
+
+  const angleLine = angleLabel ? `Angle: "${angleLabel}".` : "";
+  const seedLine = seedPlan?.trim()
+    ? `Build on this starting instruction (expand and sharpen it, do not shorten it):\n${seedPlan.trim()}`
+    : "Write a fresh, book-specific instruction from the material below.";
+
+  const prompt = `You are helping a reader shape what an audio overview should explain.
+${angleLine}
+${seedLine}
+
+Write ONE continuous instruction paragraph (4–8 sentences) that a narrator could follow directly.
+It must be purposeful and specific to THIS material: name real entities, conflicts, ideas, and
+developments; state what to explain, in what order, and what the listener should understand by
+the end. No bullet points, no preamble, no headings — only the instruction text.
+
+MATERIAL:
+${truncateWords(context, 5000)}`;
+
+  const text = await geminiText(prompt, apiKey, 1400);
+  return text.trim();
+}
+
+/** @deprecated Use suggestFullerPrompt — kept as alias for callers. */
 export async function suggestOutline(
   scope: OverviewScope,
   structure: BookStructure,
   semanticMap: SemanticMap | null,
   apiKey: string
 ): Promise<string> {
-  const context = buildSourceContext(scope, structure, semanticMap);
-  const prompt = `You are helping a reader decide what an audio overview of this material should cover.
-Write a short, readable outline (5–9 bullet points) of the key things an explanatory overview COULD cover.
-Be concrete and specific to this material. Output only the outline, no preamble.
-
-MATERIAL:
-${truncateWords(context, 4000)}`;
-  const text = await geminiText(prompt, apiKey, 700);
-  return text.trim();
+  return suggestFullerPrompt(scope, structure, semanticMap, apiKey);
 }
 
 // ─── Script generation (the shaped summarizer) ──────────────────────────────────
