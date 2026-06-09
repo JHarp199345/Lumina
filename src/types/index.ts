@@ -443,6 +443,8 @@ export interface CachedImage {
   id: string;
   bookId: string;
   sceneId: string;
+  /** Absolute word position (0…N) in the book — stable across re-analysis. */
+  wordPosition?: number;
   filePath: string;
   descriptionUsed: string;
   styleSeed: StyleSeedId;
@@ -540,6 +542,7 @@ export type GenerationStatus = "pending" | "generating" | "complete" | "failed";
 export interface GenerationQueueItem {
   sceneId: string;
   bookId: string;
+  wordPosition?: number;
   priority: number;
   status: GenerationStatus;
   description: string;

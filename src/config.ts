@@ -4,6 +4,8 @@ export const LUMINA_CONFIG = {
   // Read-ahead generation distances (in words)
   GENERATION_TRIGGER_DISTANCE_WORDS: 2000,
   GENERATION_APPROACH_DISTANCE_WORDS: 5000,
+  /** Pre-generate planned images when the reader is within this many words. */
+  VISUAL_PRELOAD_DISTANCE_WORDS: 1000,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words

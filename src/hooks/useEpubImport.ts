@@ -10,7 +10,7 @@ import { useAudioStore } from "@/store/audioStore";
 import { storage } from "@/storage";
 import type { Book, BookStructure, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
-import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { getGoverningImage, hydrateImageWordPositions } from "@/utils/imagePosition";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { diagnosticInfo } from "@/utils/diagnostics";
 
@@ -261,7 +261,10 @@ export function useEpubImport() {
       if (semanticMap) setActiveSemanticMap(semanticMap);
       if (seedId) setActiveStyleSeed(seedId);
       loadAnnotations(highlights, notes);
-      cachedImages.forEach((img) => addToCache(img));
+      const hydratedImages = semanticMap && structure
+        ? hydrateImageWordPositions(cachedImages, semanticMap.scenes, structure.chapters)
+        : cachedImages;
+      hydratedImages.forEach((img) => addToCache(img));
       // Mount this book's Study Guide (PLANv) — opt-in artifact, may be null.
       useStudyStore.getState().mount(book.id, studyGuide);
       // Mount this book's Voice Studio audio artifacts (PLANVI).
@@ -272,32 +275,19 @@ export function useEpubImport() {
       //     stored images. If the images don't line up with the current analysis
       //     (re-analyzed, or the map is missing/empty), still show the reader's
       //     art instead of nothing.
-      if (cachedImages.length > 0) {
-        const imageMap: Record<string, CachedImage> = {};
-        cachedImages.forEach((img) => { imageMap[img.sceneId] = img; });
+      if (hydratedImages.length > 0) {
+        const chapters = structure?.chapters ?? [];
+        const totalWords = chapters.reduce((s, c) => s + c.wordCount, 0);
+        const progressPercent = progress?.percentComplete ?? 0;
+        const estimatedWordPos = totalWords > 0 ? (totalWords * progressPercent) / 100 : 0;
 
-        let imageToDisplay: CachedImage | null = null;
+        let imageToDisplay = chapters.length > 0
+          ? getGoverningImage(hydratedImages, estimatedWordPos, chapters)
+          : null;
 
-        if (semanticMap) {
-          const chapters = structure?.chapters ?? [];
-          const totalWords = chapters.reduce((s, c) => s + c.wordCount, 0);
-          const progressPercent = progress?.percentComplete ?? 0;
-          const estimatedWordPos = totalWords > 0 ? (totalWords * progressPercent) / 100 : 0;
-
-          let bestPos = -1;
-          for (const scene of semanticMap.scenes) {
-            const pos = computeSceneWordPosition(scene, chapters);
-            if (pos <= estimatedWordPos && pos > bestPos && imageMap[scene.id]) {
-              imageToDisplay = imageMap[scene.id];
-              bestPos = pos;
-            }
-          }
-        }
-
-        // Fallback: no scene matched (orphaned images or no/empty map) — show the
-        // most recently generated image so the reader's work is never hidden.
+        // Fallback: no position-matched image — show the most recently generated.
         if (!imageToDisplay) {
-          imageToDisplay = [...cachedImages].sort(
+          imageToDisplay = [...hydratedImages].sort(
             (a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()
           )[0] ?? null;
         }

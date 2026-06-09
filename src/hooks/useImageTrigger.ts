@@ -4,6 +4,9 @@
  * Monitors reader position and fires image generation when the reader
  * is approaching a scene's anchor point. Never generates all at once.
  * Maximum 1 generation in flight at a time.
+ *
+ * Display is governed by word position: the latest cached image at or
+ * before the reader's word number wins — forward and backward.
  */
 
 import { useEffect, useRef, useCallback } from "react";
@@ -14,12 +17,17 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { generateImage, extractPaletteContext } from "@/pipeline/imageGenerator";
 import { getStyleSeedById } from "@/data/styleSeeds";
 import { storage } from "@/storage";
+import { LUMINA_CONFIG } from "@/config";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import {
+  findImageAtPosition,
+  getGoverningImage,
+  hasPositionedImages,
+  resolveImageWordPosition,
+} from "@/utils/imagePosition";
 import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import type { IdentifiedScene, CachedImage } from "@/types";
-
-const VISUAL_PRELOAD_DISTANCE_WORDS = 500;
 
 function scenePositions(
   scenes: IdentifiedScene[],
@@ -44,23 +52,21 @@ export function useImageTrigger() {
     updateQueueItemStatus,
     isGenerating,
     setIsGenerating,
+    getCachedImageAtPosition,
   } = useImageStore();
   const { imageGenerationEnabled } = useSettingsStore();
 
   const isGeneratingRef = useRef(false);
   const priorPromptRef = useRef<string>("");
   const generatedCountRef = useRef(0);
-  const activeVisualSceneIdRef = useRef<string | null>(null);
   const lastDisplayDecisionRef = useRef<string>("");
 
   useEffect(() => {
     priorPromptRef.current = "";
     generatedCountRef.current = 0;
-    activeVisualSceneIdRef.current = null;
     lastDisplayDecisionRef.current = "";
   }, [activeBook?.id]);
 
-  // Calculate word position of each scene using real anchor data
   const getSceneWordPosition = useCallback(
     (scene: IdentifiedScene): number => {
       const { chapters } = useBookStore.getState().activeStructure || { chapters: [] };
@@ -69,91 +75,84 @@ export function useImageTrigger() {
     [activeBook]
   );
 
-  // Check if reader is approaching or past a scene
   const checkProximity = useCallback(() => {
     if (!activeSemanticMap || !imageGenerationEnabled || !activeBook) return;
 
+    const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
     const scenes = scenePositions(activeSemanticMap.scenes, getSceneWordPosition);
+    const cachedImages = Object.values(imageCache);
     const current = useImageStore.getState().currentImage;
-    if (!activeVisualSceneIdRef.current && current?.sceneId) {
-      activeVisualSceneIdRef.current = current.sceneId;
-    }
 
-    // ── Display pass: governing-section rule ────────────────────────────────
-    // The displayed image is the latest cached scene anchor at or before the
-    // reader's current word position. This works in both directions: reading
-    // forward advances into the next visual section; paging backward restores
-    // the image that governs the section the reader returned to.
-    const cachedScenes = scenes.filter(({ scene }) => Boolean(imageCache[scene.id]));
-    const currentScenePosition = current?.sceneId
-      ? scenes.find(({ scene }) => scene.id === current.sceneId)?.position ?? null
-      : null;
-    const eligible = cachedScenes.filter(({ position }) => position <= wordPosition);
-    const governingScene = eligible[eligible.length - 1] ?? null;
-    const nextCachedAnchor = cachedScenes.find(({ position }) => position > wordPosition) ?? null;
+    // ── Display pass: governing image by word position ─────────────────────
+    const governingImage = getGoverningImage(cachedImages, wordPosition, chapters);
+    const currentImagePosition =
+      current && chapters.length > 0 ? resolveImageWordPosition(current, chapters) : -1;
 
-    if (governingScene) {
-      const cached = imageCache[governingScene.scene.id];
-      if (cached && (current?.sceneId !== governingScene.scene.id || current.filePath !== cached.filePath)) {
+    const nextPositionedImage = cachedImages
+      .map((image) => ({ image, position: resolveImageWordPosition(image, chapters) }))
+      .filter(({ position }) => position > wordPosition)
+      .sort((a, b) => a.position - b.position)[0] ?? null;
+
+    if (governingImage) {
+      if (
+        current?.id !== governingImage.id ||
+        current.filePath !== governingImage.filePath
+      ) {
+        const governingPos = resolveImageWordPosition(governingImage, chapters);
         const reason =
           !current
             ? "initial-anchor"
-            : currentScenePosition !== null && currentScenePosition > governingScene.position
+            : currentImagePosition > governingPos
               ? "returned-to-anchor"
               : "entered-anchor";
         diagnosticInfo("image.display.switch", "Switching visual segment", {
           reason,
           fromSceneId: current?.sceneId ?? null,
-          toSceneId: governingScene.scene.id,
+          toSceneId: governingImage.sceneId,
           wordPosition,
-          sceneWordPosition: governingScene.position,
-          currentScenePosition,
-          nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
-          nextCachedScenePosition: nextCachedAnchor?.position ?? null,
+          imageWordPosition: governingPos,
+          currentImagePosition,
+          nextImagePosition: nextPositionedImage?.position ?? null,
+          nextSceneId: nextPositionedImage?.image.sceneId ?? null,
         });
-        activeVisualSceneIdRef.current = governingScene.scene.id;
-        setCurrentImage(cached);
-        setCurrentThemes(cached.emotionalThemes);
+        setCurrentImage(governingImage);
+        setCurrentThemes(governingImage.emotionalThemes);
       } else {
         const decisionSignature = [
-          governingScene.scene.id,
-          current?.sceneId ?? "none",
+          governingImage.id,
+          current?.id ?? "none",
           wordPosition,
-          nextCachedAnchor?.scene.id ?? "none",
-          nextCachedAnchor?.position ?? "none",
-          cachedScenes.length,
+          nextPositionedImage?.position ?? "none",
+          cachedImages.length,
           "hold",
         ].join("|");
 
         if (decisionSignature !== lastDisplayDecisionRef.current) {
           lastDisplayDecisionRef.current = decisionSignature;
           diagnosticInfo("image.display.hold", "Holding governing visual segment", {
-            governingSceneId: governingScene.scene.id,
+            governingSceneId: governingImage.sceneId,
             currentSceneId: current?.sceneId ?? null,
             wordPosition,
-            currentScenePosition,
-            governingScenePosition: governingScene.position,
-            nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
-            nextCachedScenePosition: nextCachedAnchor?.position ?? null,
-            cachedSceneCount: cachedScenes.length,
+            imageWordPosition: resolveImageWordPosition(governingImage, chapters),
+            currentImagePosition,
+            nextImagePosition: nextPositionedImage?.position ?? null,
+            cachedImageCount: cachedImages.length,
           });
         }
       }
     } else {
-      // Only clear when the book HAS scene-anchored images but none govern this
-      // position yet (reader paged before the first image). If NO cached image
-      // maps to any current scene — orphaned after a re-analysis, or the map is
-      // gone — keep whatever is displayed so the reader's art is never blanked.
-      if (current && cachedScenes.length > 0) {
-        diagnosticInfo("image.display.clear_future", "Clearing visual because no cached anchor governs this position", {
+      const positioned = hasPositionedImages(cachedImages, chapters);
+      // Only clear when positioned images exist but none govern yet (reader
+      // is before the first anchor). Orphaned legacy images without positions
+      // are left on screen so the reader's art is never blanked.
+      if (current && positioned) {
+        diagnosticInfo("image.display.clear_future", "Clearing visual because no positioned anchor governs this position", {
           fromSceneId: current.sceneId,
           wordPosition,
-          currentScenePosition,
-          nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
-          nextCachedScenePosition: nextCachedAnchor?.position ?? null,
-          cachedSceneCount: cachedScenes.length,
+          currentImagePosition,
+          nextImagePosition: nextPositionedImage?.position ?? null,
+          cachedImageCount: cachedImages.length,
         });
-        activeVisualSceneIdRef.current = null;
         setCurrentImage(null);
         setCurrentThemes([]);
       }
@@ -162,9 +161,8 @@ export function useImageTrigger() {
         "none",
         current?.sceneId ?? "none",
         wordPosition,
-        nextCachedAnchor?.scene.id ?? "none",
-        nextCachedAnchor?.position ?? "none",
-        cachedScenes.length,
+        nextPositionedImage?.position ?? "none",
+        cachedImages.length,
       ].join("|");
 
       if (decisionSignature !== lastDisplayDecisionRef.current) {
@@ -173,18 +171,14 @@ export function useImageTrigger() {
           governingSceneId: null,
           currentSceneId: current?.sceneId ?? null,
           wordPosition,
-          currentScenePosition,
-          governingScenePosition: null,
-          nextCachedSceneId: nextCachedAnchor?.scene.id ?? null,
-          nextCachedScenePosition: nextCachedAnchor?.position ?? null,
-          cachedSceneCount: cachedScenes.length,
+          currentImagePosition,
+          nextImagePosition: nextPositionedImage?.position ?? null,
+          cachedImageCount: cachedImages.length,
         });
       }
     }
 
     // ── Queue pass: generate only what the reader actually needs ──────────────
-    // Display never happens early. Generation may happen for the current missing
-    // anchor, or for the next anchor within a tight 500-word runway.
     const generatableScenes = scenes.filter(({ scene }) => {
       const beat = activeSemanticMap.storyboard?.beats.find((item) => item.sceneId === scene.id);
       return beat?.generationIntent !== "planned_only";
@@ -192,13 +186,20 @@ export function useImageTrigger() {
     const passedGeneratableScenes = generatableScenes.filter(({ position }) => position <= wordPosition);
     const governingPlannedScene = passedGeneratableScenes[passedGeneratableScenes.length - 1] ?? null;
 
-    if (governingPlannedScene && !imageCache[governingPlannedScene.scene.id]) {
+    if (
+      governingPlannedScene &&
+      !getCachedImageAtPosition(governingPlannedScene.position, chapters)
+    ) {
       enqueue({
         sceneId: governingPlannedScene.scene.id,
         bookId: activeSemanticMap.bookId,
+        wordPosition: governingPlannedScene.position,
         priority: 0,
         status: "pending",
-        description: governingPlannedScene.scene.directorBrief?.finalPrompt || governingPlannedScene.scene.imageDescription || "",
+        description:
+          governingPlannedScene.scene.directorBrief?.finalPrompt ||
+          governingPlannedScene.scene.imageDescription ||
+          "",
       });
       diagnosticInfo("image.queue.enqueue", "Queued current missing visual anchor", {
         sceneId: governingPlannedScene.scene.id,
@@ -208,18 +209,17 @@ export function useImageTrigger() {
       });
     }
 
+    const preloadDistance = LUMINA_CONFIG.VISUAL_PRELOAD_DISTANCE_WORDS;
     for (const { scene, position: scenePos } of generatableScenes) {
-      if (imageCache[scene.id]) continue; // already generated
+      if (getCachedImageAtPosition(scenePos, chapters)) continue;
 
       const distance = scenePos - wordPosition;
 
-      if (
-        distance > 0 &&
-        distance <= VISUAL_PRELOAD_DISTANCE_WORDS
-      ) {
+      if (distance > 0 && distance <= preloadDistance) {
         enqueue({
           sceneId: scene.id,
           bookId: activeSemanticMap.bookId,
+          wordPosition: scenePos,
           priority: distance,
           status: "pending",
           description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
@@ -242,9 +242,9 @@ export function useImageTrigger() {
     enqueue,
     setCurrentImage,
     setCurrentThemes,
+    getCachedImageAtPosition,
   ]);
 
-  // Process generation queue (one at a time)
   const processQueue = useCallback(async () => {
     if (isGeneratingRef.current) return;
 
@@ -257,21 +257,27 @@ export function useImageTrigger() {
     const scene = semanticMap.scenes.find((s) => s.id === next.sceneId);
     if (!scene) return;
 
-    const existingMemoryImage = useImageStore.getState().imageCache[scene.id];
+    const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
+    const scenePosition =
+      typeof next.wordPosition === "number"
+        ? next.wordPosition
+        : computeSceneWordPosition(scene, chapters);
+
+    const existingMemoryImage = getCachedImageAtPosition(scenePosition, chapters);
     if (existingMemoryImage) {
       updateQueueItemStatus(next.sceneId, "complete");
       return;
     }
 
-    const existingPersistedImage = (await storage.loadImages(next.bookId).catch(() => [] as CachedImage[])).find(
-      (image) => image.sceneId === scene.id
-    );
+    const persistedImages = await storage.loadImages(next.bookId).catch(() => [] as CachedImage[]);
+    const existingPersistedImage = findImageAtPosition(persistedImages, scenePosition, chapters);
     if (existingPersistedImage) {
       addToCache(existingPersistedImage);
       updateQueueItemStatus(next.sceneId, "complete");
       diagnosticInfo("image.generation.persisted_cache", "Using persisted image instead of regenerating", {
         sceneId: scene.id,
         bookId: next.bookId,
+        wordPosition: scenePosition,
       });
       return;
     }
@@ -283,6 +289,7 @@ export function useImageTrigger() {
     diagnosticInfo("image.generation.start", "Image generation started", {
       sceneId: next.sceneId,
       bookId: next.bookId,
+      wordPosition: scenePosition,
     });
     setIsGenerating(true);
     updateQueueItemStatus(next.sceneId, "generating");
@@ -303,27 +310,23 @@ export function useImageTrigger() {
         scene,
         styleSeed,
         bookId: next.bookId,
+        wordPosition: scenePosition,
         googleApiKey: googleKey,
         falApiKey: falKey || undefined,
         priorPaletteContext: priorContext,
         onComplete: async (img) => {
           addToCache(img);
           generatedCountRef.current++;
-          // Persistence handled inside storage.saveImage() — no extra save needed
-
-          // Update prior palette context for next generation
-          priorPromptRef.current = extractPaletteContext(
-            styleSeed,
-            [img.descriptionUsed]
-          );
+          priorPromptRef.current = extractPaletteContext(styleSeed, [img.descriptionUsed]);
         },
       });
 
       addToCache(cachedImage);
-      console.info("[ImageTrigger] Generated image committed:", cachedImage.sceneId);
+      console.info("[ImageTrigger] Generated image committed:", cachedImage.sceneId, "at word", scenePosition);
       diagnosticInfo("image.generation.complete", "Image generation complete", {
         sceneId: cachedImage.sceneId,
         bookId: cachedImage.bookId,
+        wordPosition: scenePosition,
         filePath: cachedImage.filePath,
       });
       updateQueueItemStatus(next.sceneId, "complete");
@@ -346,14 +349,13 @@ export function useImageTrigger() {
     updateQueueItemStatus,
     addToCache,
     setIsGenerating,
+    getCachedImageAtPosition,
   ]);
 
-  // Run proximity check when position changes
   useEffect(() => {
     checkProximity();
   }, [wordPosition, checkProximity]);
 
-  // Process queue periodically
   useEffect(() => {
     processQueue();
   }, [processQueue, activeSemanticMap, activeStyleSeed, queue]);

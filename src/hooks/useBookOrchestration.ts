@@ -20,6 +20,11 @@ import { getStyleSeedById } from "@/data/styleSeeds";
 import { storage } from "@/storage";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import {
+  findImageAtPosition,
+  getGoverningImage,
+  hydrateImageWordPositions,
+} from "@/utils/imagePosition";
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import type {
@@ -102,32 +107,29 @@ export function useBookOrchestration() {
         // may be empty because importEpub doesn't pre-load DB images.
         // Load from DB here if the cache is cold before attempting restore.
         let { imageCache } = useImageStore.getState();
+        const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
         if (Object.keys(imageCache).length === 0) {
           const dbImages = await storage.loadImages(slice.semanticBookId).catch(() => [] as CachedImage[]);
-          dbImages.forEach((img) => addToCache(img));
+          const hydrated = hydrateImageWordPositions(dbImages, existingMap.scenes, chapters);
+          hydrated.forEach((img) => addToCache(img));
           imageCache = useImageStore.getState().imageCache;
         }
 
         const { wordPosition } = useReaderStore.getState();
-        const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
-
-        let imageToDisplay: CachedImage | null = null;
-        let bestSceneWordPos = -1;
-
-        for (const scene of existingMap.scenes) {
-          const sceneWordPos = computeSceneWordPosition(scene, chapters);
-          if (sceneWordPos <= wordPosition && sceneWordPos > bestSceneWordPos) {
-            const cached = imageCache[scene.id];
-            if (cached) {
-              imageToDisplay = cached;
-              bestSceneWordPos = sceneWordPos;
-            }
-          }
-        }
+        const cachedImages = Object.values(imageCache);
+        const imageToDisplay = getGoverningImage(cachedImages, wordPosition, chapters);
 
         if (imageToDisplay) {
           setCurrentImage(imageToDisplay);
           setCurrentThemes(imageToDisplay.emotionalThemes);
+        } else if (cachedImages.length > 0) {
+          const fallback = [...cachedImages].sort(
+            (a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()
+          )[0] ?? null;
+          if (fallback) {
+            setCurrentImage(fallback);
+            setCurrentThemes(fallback.emotionalThemes);
+          }
         } else {
           setCurrentImage(null);
           setCurrentThemes([]);
@@ -394,7 +396,11 @@ export function useBookOrchestration() {
       if (!scene) return;
       const shouldDisplay = options.display !== false;
 
-      const cached = useImageStore.getState().imageCache[scene.id];
+      const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
+      const scenePosition = computeSceneWordPosition(scene, chapters);
+      const { getCachedImageAtPosition } = useImageStore.getState();
+
+      const cached = getCachedImageAtPosition(scenePosition, chapters);
       if (cached) {
         if (shouldDisplay) {
           setCurrentImage(cached);
@@ -403,9 +409,8 @@ export function useBookOrchestration() {
         return;
       }
 
-      const persisted = (await storage.loadImages(semanticBookId).catch(() => [] as CachedImage[])).find(
-        (image) => image.sceneId === scene.id
-      );
+      const persistedImages = await storage.loadImages(semanticBookId).catch(() => [] as CachedImage[]);
+      const persisted = findImageAtPosition(persistedImages, scenePosition, chapters);
       if (persisted) {
         addToCache(persisted);
         if (shouldDisplay) {
@@ -430,6 +435,7 @@ export function useBookOrchestration() {
           scene,
           styleSeed,
           bookId: semanticBookId,
+          wordPosition: scenePosition,
           googleApiKey: googleKey,
           falApiKey: falKey ?? undefined,
           onComplete: async (img) => {

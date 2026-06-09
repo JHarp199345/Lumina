@@ -17,6 +17,8 @@ import { useLongPress } from "@/hooks/useLongPress";
 import AmbientSceneLayer, { type AmbientPhase } from "@/components/visual/AmbientSceneLayer";
 import GalleryFocalView from "@/components/visual/GalleryFocalView";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
+import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { getImageForScene } from "@/utils/imagePosition";
 import type { CachedImage, SemanticMap, VisualBeat } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -157,6 +159,7 @@ export default function VisualPanel() {
     if (!activeBook || !activeSemanticMap || !activeStyleSeed) return;
     const scene = activeSemanticMap.scenes.find((s) => s.id === sceneId);
     if (!scene) return;
+    const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
     const googleKey = await storage.loadApiKey("lumina_google_ai_key");
     const falKey = await storage.loadApiKey("lumina_fal_key");
     const styleSeed = getStyleSeedById(activeStyleSeed);
@@ -165,6 +168,7 @@ export default function VisualPanel() {
       scene,
       styleSeed,
       bookId: activeBook.id,
+      wordPosition: computeSceneWordPosition(scene, chapters),
       googleApiKey: googleKey,
       falApiKey: falKey ?? undefined,
       onComplete: async (img) => { addToCache(img); },
@@ -187,13 +191,22 @@ export default function VisualPanel() {
       const styleSeed = getStyleSeedById(activeStyleSeed);
       if (!googleKey || !styleSeed) return;
 
-      const scene = activeSemanticMap.scenes.find((s) => s.id === currentImage.sceneId);
+      const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
+      const scene =
+        activeSemanticMap.scenes.find((s) => s.id === currentImage.sceneId) ??
+        activeSemanticMap.scenes.find(
+          (s) => computeSceneWordPosition(s, chapters) === currentImage.wordPosition
+        );
       if (!scene) return;
 
       const newImage = await generateImage({
         scene,
         styleSeed,
         bookId: activeBook.id,
+        wordPosition:
+          typeof currentImage.wordPosition === "number"
+            ? currentImage.wordPosition
+            : computeSceneWordPosition(scene, chapters),
         googleApiKey: googleKey,
         falApiKey: falKey ?? undefined,
         onComplete: async (img) => {
@@ -594,6 +607,7 @@ function ImageGalleryModal({
   onClose: () => void;
 }) {
   const [orientation, setOrientation] = useState<"horizontal" | "vertical">("horizontal");
+  const chapters = useBookStore((state) => state.activeStructure?.chapters ?? []);
   const scenes = activeSemanticMap?.scenes ?? [];
   const beats: VisualBeat[] =
     activeSemanticMap?.storyboard?.beats ??
@@ -620,7 +634,7 @@ function ImageGalleryModal({
     return {
       beat,
       scene,
-      image: scene ? imageCache[scene.id] : undefined,
+      image: scene ? getImageForScene(scene, Object.values(imageCache), chapters) : undefined,
     };
   });
   const generatedCount = timeline.filter((item) => item.image).length;

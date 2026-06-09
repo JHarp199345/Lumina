@@ -4,6 +4,7 @@ import { useBookStore } from "@/store/bookStore";
 import { useImageStore } from "@/store/imageStore";
 import { useReaderStore } from "@/store/readerStore";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { getImageForScene } from "@/utils/imagePosition";
 import { getDiagnosticEntries, type DiagnosticEntry } from "@/utils/diagnostics";
 
 type VisualAnchorDebug = {
@@ -58,20 +59,22 @@ export default function VisualDebugOverlay() {
   const anchors = useMemo<VisualAnchorDebug[]>(() => {
     const chapters = activeStructure?.chapters ?? [];
     const scenes = activeSemanticMap?.scenes ?? [];
+    const cached = Object.values(imageCache);
     return scenes
       .map((scene) => {
         const queued = queue.find((item) => item.sceneId === scene.id);
+        const image = getImageForScene(scene, cached, chapters);
         return {
           sceneId: scene.id,
           label: scene.threadLabel || scene.imageDescription || scene.directorBrief?.composition || sceneLabel(scene.id),
           position: computeSceneWordPosition(scene, chapters),
-          cached: Boolean(imageCache[scene.id]),
-          current: currentImage?.sceneId === scene.id,
+          cached: Boolean(image),
+          current: currentImage?.id === image?.id,
           queuedStatus: queued?.status ?? "-",
         };
       })
       .sort((a, b) => a.position - b.position);
-  }, [activeSemanticMap, activeStructure, currentImage?.sceneId, imageCache, queue]);
+  }, [activeSemanticMap, activeStructure, currentImage?.id, imageCache, queue]);
 
   const currentAnchor =
     [...anchors].reverse().find((anchor) => anchor.position <= wordPosition && anchor.cached) ?? null;

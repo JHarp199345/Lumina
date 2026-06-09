@@ -107,6 +107,7 @@ async function initSchema(db: Database): Promise<void> {
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN storyboard TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN visual_lore TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN narrative_blueprint TEXT`).catch(() => {});
+  await db.execute(`ALTER TABLE image_cache ADD COLUMN word_position INTEGER`).catch(() => {});
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS source_profiles (
@@ -634,12 +635,13 @@ export async function dbSaveImageCache(image: CachedImage): Promise<void> {
   const db = await getDb();
   await db.execute(
     `INSERT OR REPLACE INTO image_cache
-     (id, book_id, scene_id, file_path, description_used, style_seed, generated_at, generation_api, emotional_themes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+     (id, book_id, scene_id, word_position, file_path, description_used, style_seed, generated_at, generation_api, emotional_themes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       image.id,
       image.bookId,
       image.sceneId,
+      typeof image.wordPosition === "number" ? image.wordPosition : null,
       image.filePath,
       image.descriptionUsed,
       image.styleSeed,
@@ -656,17 +658,7 @@ export async function dbLoadImageCache(bookId: string): Promise<CachedImage[]> {
     `SELECT * FROM image_cache WHERE book_id = $1`,
     [bookId]
   );
-  return rows.map((row) => ({
-    id: String(row.id),
-    bookId: String(row.book_id),
-    sceneId: String(row.scene_id),
-    filePath: String(row.file_path),
-    descriptionUsed: String(row.description_used),
-    styleSeed: String(row.style_seed) as StyleSeedId,
-    generatedAt: String(row.generated_at),
-    generationApi: String(row.generation_api) as CachedImage["generationApi"],
-    emotionalThemes: JSON.parse(String(row.emotional_themes)),
-  }));
+  return rows.map(rowToCachedImage);
 }
 
 export async function dbLoadImageCacheForBookPrefix(bookId: string): Promise<CachedImage[]> {
@@ -675,17 +667,30 @@ export async function dbLoadImageCacheForBookPrefix(bookId: string): Promise<Cac
     `SELECT * FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`,
     [bookId, `${bookId}::%`]
   );
-  return rows.map((row) => ({
+  return rows.map(rowToCachedImage);
+}
+
+function rowToCachedImage(row: Record<string, unknown>): CachedImage {
+  const wordPositionRaw = row.word_position;
+  const wordPosition =
+    typeof wordPositionRaw === "number"
+      ? wordPositionRaw
+      : wordPositionRaw != null && wordPositionRaw !== ""
+        ? Number(wordPositionRaw)
+        : undefined;
+
+  return {
     id: String(row.id),
     bookId: String(row.book_id),
     sceneId: String(row.scene_id),
+    ...(typeof wordPosition === "number" && !Number.isNaN(wordPosition) ? { wordPosition } : {}),
     filePath: String(row.file_path),
     descriptionUsed: String(row.description_used),
     styleSeed: String(row.style_seed) as StyleSeedId,
     generatedAt: String(row.generated_at),
     generationApi: String(row.generation_api) as CachedImage["generationApi"],
     emotionalThemes: JSON.parse(String(row.emotional_themes)),
-  }));
+  };
 }
 
 export async function dbDeleteImageCache(bookId: string): Promise<void> {

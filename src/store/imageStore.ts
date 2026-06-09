@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { CachedImage, GenerationQueueItem, GenerationStatus } from "@/types";
+import type { CachedImage, Chapter, GenerationQueueItem, GenerationStatus } from "@/types";
+import { findImageAtPosition } from "@/utils/imagePosition";
 
 interface ImageStore {
   // Current displayed image
@@ -20,6 +21,7 @@ interface ImageStore {
 
   addToCache: (image: CachedImage) => void;
   getCachedImage: (sceneId: string) => CachedImage | undefined;
+  getCachedImageAtPosition: (position: number, chapters: Chapter[]) => CachedImage | undefined;
 
   enqueue: (item: GenerationQueueItem) => void;
   dequeue: () => GenerationQueueItem | undefined;
@@ -49,6 +51,9 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
     set((state) => ({ imageCache: { ...state.imageCache, [image.sceneId]: image } })),
 
   getCachedImage: (sceneId) => get().imageCache[sceneId],
+
+  getCachedImageAtPosition: (position, chapters) =>
+    findImageAtPosition(Object.values(get().imageCache), position, chapters),
 
   enqueue: (item) =>
     set((state) => {

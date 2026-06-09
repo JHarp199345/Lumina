@@ -12,6 +12,7 @@ import { buildVisualStoryboard } from "@/pipeline/visualStoryboard";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { storage } from "@/storage";
 import { lensClassName, lensSwatchStyle, useLensStore } from "@/store/lensStore";
+import { computeSceneWordPosition } from "@/utils/scenePosition";
 import type { HighlightColor, IdentifiedScene } from "@/types";
 
 interface SelectionMenu {
@@ -187,6 +188,7 @@ export default function HighlightLayer() {
         scene: directedScene,
         styleSeed,
         bookId: activeSemanticMap.bookId,
+        wordPosition: computeSceneWordPosition(directedScene, activeStructure.chapters),
         googleApiKey: googleKey,
         falApiKey: falKey ?? undefined,
       });

@@ -17,6 +17,8 @@ import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, Ref
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
+import { useBookStore } from "@/store/bookStore";
+import { getImageForScene } from "@/utils/imagePosition";
 import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
 
 function displaySrc(src: string): string {
@@ -68,15 +70,17 @@ export default function GalleryFocalView({
   onClose,
 }: GalleryFocalViewProps) {
   // Every planned moment, in reading order — generated and not-yet-generated.
+  const chapters = useBookStore((state) => state.activeStructure?.chapters ?? []);
   const items: GalleryItem[] = useMemo(() => {
     const scenes = activeSemanticMap?.scenes ?? [];
     const beats = activeSemanticMap?.storyboard?.beats ?? [];
+    const cached = Object.values(imageCache);
     return scenes.map((scene) => ({
       scene,
-      image: imageCache[scene.id],
+      image: getImageForScene(scene, cached, chapters),
       beat: beats.find((b) => b.sceneId === scene.id),
     }));
-  }, [activeSemanticMap, imageCache]);
+  }, [activeSemanticMap, imageCache, chapters]);
 
   const startIndex = Math.max(0, items.findIndex((it) => it.scene.id === startSceneId));
   const [index, setIndex] = useState(startIndex < 0 ? 0 : startIndex);
