@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Key,
   Pause,
+  Pencil,
   Play,
   Sparkles,
   Wand2,
@@ -22,10 +23,8 @@ import {
   suggestOutline,
   type OverviewScope,
 } from "@/pipeline/audioOverview";
-import { buildSourceProfile } from "@/pipeline/sourceProfile";
+import { buildSourceProfile, fallbackSuggestions } from "@/pipeline/sourceProfile";
 import type { AudioArtifact, SourceIntelligenceProfile, SourceProfileSuggestion } from "@/types";
-
-const SUGGESTION_HISTORY_KEY = "lumina.audioOverview.suggestionHistory";
 
 export default function AudioOverview() {
   const { activeBook, activeStructure, activeSemanticMap } = useBookStore();
@@ -51,20 +50,22 @@ export default function AudioOverview() {
   const [chosenChapterIds, setChosenChapterIds] = useState<Set<string>>(new Set());
   const [minutes, setMinutes] = useState<number>(LUMINA_CONFIG.AUDIO_OVERVIEW_DEFAULT_MIN);
   const [voiceId, setVoiceId] = useState<string>(LUMINA_CONFIG.AUDIO_OVERVIEW_DEFAULT_VOICE);
-  const [prompt, setPrompt] = useState("");           // the real, accepted/typed text
-  const [ghost, setGhost] = useState("");             // greyed proposed plan (Smart Compose)
+  const [prompt, setPrompt] = useState("");           // the editable instruction text
   const [selectedAngleId, setSelectedAngleId] = useState<string | null>(null);
-  const [readerSelectedAngle, setReaderSelectedAngle] = useState(false);
   const [profile, setProfile] = useState<SourceIntelligenceProfile | null>(null);
   const [profileBuilding, setProfileBuilding] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [hasKey, setHasKey] = useState(true);
 
-  const showGhost = prompt.trim().length === 0 && ghost.trim().length > 0;
-  const planFor = (id: string | null): string => {
-    const bank = profile?.suggestionBank ?? [];
-    return (bank.find((s) => s.id === id) ?? bank[0])?.planText ?? "";
-  };
+  // The angles offered in the composer. Tailored ones come from the book's
+  // Source Intelligence Profile; until that exists we still offer real,
+  // title-grounded fallbacks so the field is never dead.
+  const suggestions: SourceProfileSuggestion[] = useMemo(() => {
+    if (profile?.suggestionBank?.length) return profile.suggestionBank;
+    if (activeStructure) return fallbackSuggestions(activeStructure, profile?.workType ?? "fiction");
+    return [];
+  }, [profile, activeStructure]);
+  const tailored = (profile?.suggestionBank?.length ?? 0) > 0;
 
   const scope: OverviewScope = useMemo(
     () => ({
@@ -131,7 +132,6 @@ export default function AudioOverview() {
     let cancelled = false;
     if (!activeBook || !activeStructure) {
       setProfile(null);
-      setGhost("");
       return;
     }
     (async () => {
@@ -162,24 +162,6 @@ export default function AudioOverview() {
     };
   }, [activeBook, activeStructure, activeSemanticMap]);
 
-  // Seed the ghost from the hidden suggestion bank when the profile arrives / scope
-  // changes. If the reader has not chosen a specific angle, rotate through the bank
-  // without repeating recent suggestions too often.
-  useEffect(() => {
-    if (!profile) {
-      setGhost("");
-      return;
-    }
-    if (selectedAngleId && readerSelectedAngle) {
-      setGhost(planFor(selectedAngleId));
-      return;
-    }
-    const suggestion = pickRotatingSuggestion(profile.suggestionBank, activeBook?.id ?? "unknown", scopeType);
-    setGhost(suggestion?.planText ?? planFor(null));
-    if (suggestion) setSelectedAngleId(suggestion.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, selectedAngleId, readerSelectedAngle, scopeType, activeBook?.id]);
-
   const overviewArtifacts = useMemo(
     () =>
       artifacts
@@ -189,18 +171,15 @@ export default function AudioOverview() {
   );
   const activeArtifact = artifacts.find((a) => a.id === activeAudioId) ?? null;
 
-  const acceptGhost = () => {
-    if (showGhost) setPrompt(ghost);
-  };
-
-  const applyAngle = (id: string) => {
-    setReaderSelectedAngle(true);
+  // Load an angle's plan into the editor as real, trimmable text.
+  const pickSuggestion = (id: string) => {
+    const plan = suggestions.find((s) => s.id === id)?.planText ?? "";
+    if (!plan) return;
     setSelectedAngleId(id);
-    const plan = planFor(id);
-    if (prompt.trim()) setPrompt(plan); // already editing → replace outright
-    else setGhost(plan);                // empty → swap the ghost (Tab/⇥ to accept)
+    setPrompt(plan);
   };
 
+  // Ask Gemini for a richer plan and drop it straight into the editor.
   const requestFullerSuggestion = async () => {
     if (!activeStructure) return;
     const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
@@ -212,8 +191,8 @@ export default function AudioOverview() {
     try {
       const fuller = await suggestOutline(scope, activeStructure, activeSemanticMap, apiKey);
       if (fuller) {
-        if (prompt.trim()) setPrompt(fuller);
-        else setGhost(fuller);
+        setSelectedAngleId(null);
+        setPrompt(fuller);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate a suggestion.");
@@ -238,9 +217,9 @@ export default function AudioOverview() {
     setProgress("Preparing source intelligence…");
     try {
       const enrichedProfile = await ensureProfile(apiKey);
-      // A visible ghost the reader didn't dismiss counts as the instruction;
-      // a truly empty field falls back to the type-aware default.
-      const effectivePrompt = prompt.trim() ? prompt.trim() : ghost.trim();
+      // The reader's text is the instruction; a truly empty field falls back to
+      // the hidden, type-aware default (which is grounded on the SIP anyway).
+      const effectivePrompt = prompt.trim();
       const { script, audio } = await generateAudioOverview({
         scope,
         structure: activeStructure,
@@ -404,7 +383,7 @@ export default function AudioOverview() {
           </p>
         </div>
 
-        {/* Prompt — single field with inline ghost suggestion (Smart Compose) */}
+        {/* Prompt — a window of suggestions that becomes an editor */}
         <div className="rounded-xl border border-hair bg-ink/[0.025] p-3">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-[10px] uppercase tracking-[0.14em] text-ink-faint">
@@ -412,7 +391,7 @@ export default function AudioOverview() {
             </p>
             <button
               onClick={requestFullerSuggestion}
-              disabled={isSuggesting || !profile}
+              disabled={isSuggesting || !activeStructure}
               className="flex items-center gap-1 rounded border border-hair px-2 py-1 text-[10px] text-lumina-gold/75 transition-colors hover:text-lumina-gold disabled:opacity-40"
             >
               <Wand2 size={10} className={isSuggesting ? "animate-pulse" : ""} />
@@ -420,42 +399,19 @@ export default function AudioOverview() {
             </button>
           </div>
 
-          {/* Overview-angle chips (swap which discovered plan is ghosted) */}
-          {(profile?.suggestionBank?.length ?? 0) > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {profile!.suggestionBank.map((s: SourceProfileSuggestion) => (
-                <button
-                  key={s.id}
-                  onClick={() => applyAngle(s.id)}
-                  className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
-                    selectedAngleId === s.id
-                      ? "border-lumina-gold/45 bg-lumina-gold/[0.12] text-lumina-gold"
-                      : "border-hair bg-ink/[0.02] text-ink-faint hover:text-ink-soft"
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <GhostComposer
+          <SuggestionComposer
             value={prompt}
-            ghost={ghost}
-            showGhost={showGhost}
             onChange={setPrompt}
-            onAccept={acceptGhost}
+            suggestions={suggestions}
+            selectedId={selectedAngleId}
+            onPick={pickSuggestion}
+            tailored={tailored}
+            building={profileBuilding}
           />
 
-          <div className="mt-1.5 flex items-center justify-between">
-            <p className="text-[10px] text-ink-faint">
-              {profileBuilding
-                ? "Reading the book's intelligence…"
-                : showGhost
-                  ? "Tab to accept · type to write your own"
-                  : "Clear the field for a full guided overview."}
-            </p>
-          </div>
+          <p className="mt-1.5 text-[10px] text-ink-faint">
+            Pick a starting point, write your own, or leave it blank for a full guided overview.
+          </p>
         </div>
 
         {/* Voice */}
@@ -563,72 +519,126 @@ function ScopeButton({
   );
 }
 
-function GhostComposer({
+/**
+ * SuggestionComposer — a hybrid surface that is a *window* of overview angles
+ * when idle and a *text editor* once the reader picks one or writes their own.
+ *
+ *   browse mode → scannable list of real suggestions (label + plan preview)
+ *   edit mode   → a normal multiline editor with a way back to the suggestions
+ *
+ * One surface, no separate suggestion box. The field is never dead: even before
+ * a Source Intelligence Profile exists, the parent feeds title-grounded
+ * fallbacks so there is always something to pick.
+ */
+function SuggestionComposer({
   value,
-  ghost,
-  showGhost,
   onChange,
-  onAccept,
+  suggestions,
+  selectedId,
+  onPick,
+  tailored,
+  building,
 }: {
   value: string;
-  ghost: string;
-  showGhost: boolean;
   onChange: (value: string) => void;
-  onAccept: () => void;
+  suggestions: SourceProfileSuggestion[];
+  selectedId: string | null;
+  onPick: (id: string) => void;
+  tailored: boolean;
+  building: boolean;
 }) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [mode, setMode] = useState<"browse" | "edit">(value.trim() ? "edit" : "browse");
+  const prevValueRef = useRef(value);
 
+  // When an external action fills an empty field (a pick or "Suggest fuller"),
+  // move into edit mode so the reader can trim it. Reopening suggestions over
+  // existing text (value already non-empty) is left alone.
+  useEffect(() => {
+    const was = prevValueRef.current;
+    prevValueRef.current = value;
+    if (!was.trim() && value.trim()) setMode("edit");
+  }, [value]);
+
+  const focusSoon = () => requestAnimationFrame(() => inputRef.current?.focus());
+
+  if (mode === "browse") {
+    return (
+      <div className="overflow-hidden rounded-lg border border-hair bg-surface-dark/62 shadow-inner shadow-black/10">
+        <div className="flex items-center gap-1.5 border-b border-hair px-3 py-1.5">
+          <Sparkles size={11} className="shrink-0 text-lumina-gold/70" />
+          <p className="text-[10px] text-ink-faint">
+            {building
+              ? "Tailoring suggestions to this book…"
+              : tailored
+                ? "Suggested from this book"
+                : "Starting points · analyze the book for tailored ones"}
+          </p>
+        </div>
+
+        <div className="max-h-48 space-y-1 overflow-y-auto p-2 scrollbar-thin">
+          {suggestions.length === 0 ? (
+            <p className="px-1 py-3 text-center text-[11px] text-ink-faint">
+              Suggestions will appear once the book is ready.
+            </p>
+          ) : (
+            suggestions.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  onPick(s.id);
+                  setMode("edit");
+                  focusSoon();
+                }}
+                className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                  selectedId === s.id
+                    ? "border-lumina-gold/45 bg-lumina-gold/[0.1]"
+                    : "border-hair bg-ink/[0.02] hover:border-lumina-gold/30 hover:bg-ink/[0.04]"
+                }`}
+              >
+                <p className="text-[12px] font-medium text-ink/85">{s.label}</p>
+                <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-ink-faint">
+                  {s.planText}
+                </p>
+              </button>
+            ))
+          )}
+        </div>
+
+        <button
+          onClick={() => {
+            onChange("");
+            setMode("edit");
+            focusSoon();
+          }}
+          className="flex w-full items-center gap-1.5 border-t border-hair px-3 py-2 text-[11px] text-ink-soft transition-colors hover:bg-ink/[0.03] hover:text-ink"
+        >
+          <Pencil size={11} className="text-lumina-gold/70" />
+          Write my own
+        </button>
+      </div>
+    );
+  }
+
+  // ── Edit mode ──────────────────────────────────────────────────────────────
   return (
-    <div
-      role="textbox"
-      aria-multiline="true"
-      tabIndex={-1}
-      onClick={() => inputRef.current?.focus()}
-      className="relative min-h-32 cursor-text overflow-hidden rounded-lg border border-hair bg-surface-dark/62 shadow-inner shadow-black/10 transition-colors focus-within:border-lumina-gold/35 focus-within:bg-surface-dark/72"
-    >
-      {showGhost && (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-xs leading-relaxed text-ink-faint/55 scrollbar-thin"
-        >
-          {ghost}
-        </div>
-      )}
-      {!showGhost && value.length === 0 && (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 px-3 py-2 text-xs leading-relaxed text-ink-faint/45"
-        >
-          Type what the overview should explain.
-        </div>
-      )}
+    <div className="overflow-hidden rounded-lg border border-hair bg-surface-dark/62 shadow-inner shadow-black/10 transition-colors focus-within:border-lumina-gold/35 focus-within:bg-surface-dark/72">
       <textarea
         ref={inputRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Tab" && showGhost) {
-            e.preventDefault();
-            onAccept();
-          }
-        }}
         aria-label="Audio overview prompt"
         rows={5}
-        className="absolute inset-0 h-full w-full resize-none border-0 bg-transparent px-3 py-2 text-xs leading-relaxed text-ink-soft caret-lumina-gold outline-none"
+        placeholder="Describe what the overview should explain…"
+        className="block max-h-56 min-h-28 w-full resize-y border-0 bg-transparent px-3 py-2.5 text-xs leading-relaxed text-ink-soft caret-lumina-gold outline-none placeholder:text-ink-faint/45"
       />
-      {showGhost && (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onAccept();
-            requestAnimationFrame(() => inputRef.current?.focus());
-          }}
-          className="absolute bottom-2 right-2 rounded-md border border-lumina-gold/30 bg-lumina-gold/12 px-2 py-0.5 text-[10px] font-medium text-lumina-gold/90 shadow-sm backdrop-blur-sm transition-colors hover:bg-lumina-gold/18"
-        >
-          ⇥ accept
-        </button>
-      )}
+      <button
+        onClick={() => setMode("browse")}
+        className="flex w-full items-center gap-1.5 border-t border-hair px-3 py-2 text-[11px] text-ink-faint transition-colors hover:bg-ink/[0.03] hover:text-ink-soft"
+      >
+        <Sparkles size={11} className="text-lumina-gold/70" />
+        {suggestions.length > 0 ? "Browse suggestions" : "Suggestions"}
+      </button>
     </div>
   );
 }
@@ -643,39 +653,6 @@ function isUsableSourceProfile(profile: SourceIntelligenceProfile | null): profi
       profile.concepts.mainIdeas.length > 0 ||
       profile.concepts.themes.length > 0)
   );
-}
-
-function pickRotatingSuggestion(
-  bank: SourceProfileSuggestion[],
-  bookId: string,
-  scopeType: OverviewScope["type"]
-): SourceProfileSuggestion | null {
-  if (bank.length === 0) return null;
-  const key = `${SUGGESTION_HISTORY_KEY}:${bookId}:${scopeType}`;
-  const recent = readSuggestionHistory(key);
-  const recentSet = new Set(recent.slice(0, Math.min(3, Math.max(1, bank.length - 1))));
-  const available = bank.filter((suggestion) => !recentSet.has(suggestion.id));
-  const pool = available.length > 0 ? available : bank;
-  const picked = pool[Math.floor(Math.random() * pool.length)] ?? bank[0];
-  writeSuggestionHistory(key, [picked.id, ...recent.filter((id) => id !== picked.id)].slice(0, 6));
-  return picked;
-}
-
-function readSuggestionHistory(key: string): string[] {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "[]") as unknown;
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeSuggestionHistory(key: string, value: string[]): void {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Nonessential; rotation can degrade to random if storage is unavailable.
-  }
 }
 
 function Centered({ icon, text }: { icon: React.ReactNode; text: string }) {

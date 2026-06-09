@@ -211,7 +211,12 @@ function normalize(raw: RawProfile, structure: BookStructure): SourceIntelligenc
   };
 }
 
-function fallbackSuggestions(structure: BookStructure, workType: WorkType): SourceProfileSuggestion[] {
+/**
+ * Minimal, title-grounded overview angles. Used inside the SIP builder when the
+ * model omits a bank, and exported so the Audio Overview field can offer real
+ * starting points even before a Source Intelligence Profile has been built.
+ */
+export function fallbackSuggestions(structure: BookStructure, workType: WorkType): SourceProfileSuggestion[] {
   // If the model omitted the bank, provide minimal, still-grounded angles.
   const isScholarly = workType === "nonfiction" || workType === "scholarly" || workType === "reference";
   if (isScholarly) {
