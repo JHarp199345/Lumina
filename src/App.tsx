@@ -27,7 +27,11 @@ import OnboardingModal from "@/components/common/OnboardingModal";
 import SettingsPanel from "@/components/common/SettingsPanel";
 import LibraryPanel from "@/components/common/LibraryPanel";
 import GlobalProgressOverlay from "@/components/common/GlobalProgressOverlay";
+import GalleryFocalView from "@/components/visual/GalleryFocalView";
 import VisualDebugOverlay from "@/components/debug/VisualDebugOverlay";
+import { useGalleryActions } from "@/hooks/useGalleryActions";
+import { useImageStore } from "@/store/imageStore";
+import { useUiStore } from "@/store/uiStore";
 import type { StyleSeedId, BookStructure } from "@/types";
 
 function App() {
@@ -35,6 +39,7 @@ function App() {
   const {
     activeBook,
     activeStructure,
+    activeSemanticMap,
     activeStyleSeed,
     analysisRequested,
     setAnalysisRequested,
@@ -292,12 +297,14 @@ function App() {
   })();
 
   const analysisFailed = analysisProgressDetail?.phase === "error";
-  const showAnalysisOverlay =
-    isAnalyzing ||
-    (analysisProgressDetail != null && analysisProgressDetail.phase !== "complete");
-  const showImportOverlay = Boolean(importProgress) && !showAnalysisOverlay;
+  const showAnalysisOverlay = isAnalyzing;
+  const showImportOverlay = Boolean(importProgress) && !isAnalyzing;
   const showProgressOverlay =
-    showAnalysisOverlay || showImportOverlay || importFailed || analysisFailed;
+    isAnalyzing || showImportOverlay || importFailed || analysisFailed;
+  const { galleryOpen, galleryStartSceneId, closeGallery } = useUiStore();
+  const imageCache = useImageStore((state) => state.imageCache);
+  const { visitPassage, generateForScene } = useGalleryActions();
+  const { regenerateAllImages } = useBookOrchestration();
 
   const handleImport = async () => {
     let failed = false;
@@ -458,6 +465,23 @@ function App() {
         />
       )}
       {visualDebugEnabled && <VisualDebugOverlay />}
+
+      {galleryOpen && (
+        <GalleryFocalView
+          activeSemanticMap={activeSemanticMap}
+          imageCache={imageCache}
+          startSceneId={galleryStartSceneId}
+          isAnalyzing={isAnalyzing}
+          analysisProgress={analysisProgressDetail?.message || analysisProgress}
+          analysisPercent={analysisProgressDetail?.percent}
+          analysisPhase={analysisProgressDetail?.phase}
+          onVisitPassage={visitPassage}
+          onGenerateScene={generateForScene}
+          onAnalyze={() => setAnalysisRequested(true)}
+          onRegenerateAll={regenerateAllImages}
+          onClose={closeGallery}
+        />
+      )}
     </div>
   );
 }

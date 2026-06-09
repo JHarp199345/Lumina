@@ -118,7 +118,12 @@ export function segmentScenesOnePerSlot(
 
   if (result.length > 0) return result;
 
-  return [...bySlot.values()].sort(
+  const canonical = [...bySlot.values()].sort(
+    (a, b) => computeSceneWordPosition(a, chapters) - computeSceneWordPosition(b, chapters)
+  );
+  if (canonical.length > 0) return canonical;
+
+  return [...scenes].sort(
     (a, b) => computeSceneWordPosition(a, chapters) - computeSceneWordPosition(b, chapters)
   );
 }

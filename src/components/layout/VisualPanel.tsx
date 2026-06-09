@@ -7,7 +7,6 @@ import { useReaderStore } from "@/store/readerStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { getStyleSeedById } from "@/data/styleSeeds";
-import { useBookOrchestration } from "@/hooks/useBookOrchestration";
 import { storage } from "@/storage";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
@@ -15,15 +14,11 @@ import { LUMINA_CONFIG } from "@/config";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useLongPress } from "@/hooks/useLongPress";
 import AmbientSceneLayer, { type AmbientPhase } from "@/components/visual/AmbientSceneLayer";
-import GalleryFocalView from "@/components/visual/GalleryFocalView";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
+import { useUiStore } from "@/store/uiStore";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { getImageForScene } from "@/utils/imagePosition";
-import {
-  segmentScenesOnePerSlot,
-  slotHasQueuedOrCachedImage,
-  visualSlotKeyForScene,
-} from "@/utils/sceneDedup";
+import { segmentScenesOnePerSlot } from "@/utils/sceneDedup";
 import type { CachedImage, SemanticMap } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -87,14 +82,11 @@ export default function VisualPanel() {
   const { imageGenerationEnabled, apiKeyConfigured } = useSettingsStore();
   const currentCfi = useReaderStore((s) => s.currentCfi);
   const { isTablet } = useDeviceLayout();
-  const { regenerateAllImages } = useBookOrchestration();
   const [showRegenerate, setShowRegenerate] = useState(false);
-  const [showFocal, setShowFocal] = useState(false);
-  const [focalStartSceneId, setFocalStartSceneId] = useState<string | undefined>();
-  const [showPlanStrip, setShowPlanStrip] = useState(false);
+  const { openGallery, showPlanStrip, setShowPlanStrip, togglePlanStrip, returnCfi, setReturnCfi } =
+    useUiStore();
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
-  const [returnCfi, setReturnCfi] = useState<string | null>(null);
 
   // Brief done/failed confirmation after a (re-)analysis — the in-flight state is
   // already shown by the ambient layer / image overlay; this fills the missing
@@ -122,89 +114,39 @@ export default function VisualPanel() {
     if (!isTablet && currentImage) setShowRegenerate(true);
   }, [isTablet, currentImage]);
 
-  const openGallery = useCallback((sceneId?: string) => {
-    setFocalStartSceneId(sceneId ?? currentImage?.sceneId);
-    setShowFocal(true);
-  }, [currentImage?.sceneId]);
+  const handleOpenGallery = useCallback(
+    (sceneId?: string) => {
+      openGallery(sceneId ?? currentImage?.sceneId);
+    },
+    [openGallery, currentImage?.sceneId]
+  );
 
   useEffect(() => {
     if (analysisOutcome?.kind === "done") {
       setShowPlanStrip(true);
     }
-  }, [analysisOutcome?.kind]);
+  }, [analysisOutcome?.kind, setShowPlanStrip]);
 
   // Clicking the image opens the gallery focal view (the art experience).
-  const handleImageClick = useCallback((e: React.MouseEvent) => {
-    if (!activeSemanticMap) return;
-    e.stopPropagation();
-    openGallery();
-  }, [activeSemanticMap, openGallery]);
+  const handleImageClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!activeBook) return;
+      e.stopPropagation();
+      handleOpenGallery();
+    },
+    [activeBook, handleOpenGallery]
+  );
 
   const rememberReadingSpot = useCallback(() => {
     if (currentCfi) setReturnCfi(currentCfi);
-  }, [currentCfi]);
-
-  // Navigate the reader to a scene's passage (behind whatever is open).
-  const navigateToScene = useCallback((sceneId: string) => {
-    const scene = activeSemanticMap?.scenes.find((s) => s.id === sceneId);
-    if (!scene) return;
-    const win = window as Window & {
-      luminaNavigateToScene?: (target: string, wordOffset?: number) => void;
-      luminaNavigate?: (target: string) => void;
-    };
-    const target = scene.anchor?.href || scene.chapterId;
-    if (win.luminaNavigateToScene) win.luminaNavigateToScene(target, scene.anchor?.wordOffset ?? 0);
-    else win.luminaNavigate?.(target);
-  }, [activeSemanticMap]);
-
-  // Hero "Visit passage": go read it (close the gallery).
-  const visitPassage = useCallback((sceneId: string) => {
-    rememberReadingSpot();
-    navigateToScene(sceneId);
-    setShowFocal(false);
-  }, [navigateToScene, rememberReadingSpot]);
+  }, [currentCfi, setReturnCfi]);
 
   const returnToReadingSpot = useCallback(() => {
     if (!returnCfi) return;
     const win = window as Window & { luminaNavigate?: (target: string) => void };
     win.luminaNavigate?.(returnCfi);
     setReturnCfi(null);
-  }, [returnCfi]);
-
-  // Generate one planned scene's image (from the gallery placeholders).
-  const generateForScene = useCallback(async (sceneId: string) => {
-    if (!activeBook || !activeSemanticMap || !activeStyleSeed) return;
-    const scene = activeSemanticMap.scenes.find((s) => s.id === sceneId);
-    if (!scene) return;
-    const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
-    const canonicalScenes = segmentScenesOnePerSlot(activeSemanticMap.scenes, chapters);
-    const slotKey = visualSlotKeyForScene(scene, chapters);
-    if (
-      slotKey &&
-      slotHasQueuedOrCachedImage(
-        slotKey,
-        Object.values(useImageStore.getState().imageCache),
-        canonicalScenes,
-        chapters,
-        useImageStore.getState().queue
-      )
-    ) {
-      return;
-    }
-    const googleKey = await storage.loadApiKey("lumina_google_ai_key");
-    const falKey = await storage.loadApiKey("lumina_fal_key");
-    const styleSeed = getStyleSeedById(activeStyleSeed);
-    if (!googleKey || !styleSeed) return;
-    await generateImage({
-      scene,
-      styleSeed,
-      bookId: activeBook.id,
-      wordPosition: computeSceneWordPosition(scene, chapters),
-      googleApiKey: googleKey,
-      falApiKey: falKey ?? undefined,
-      onComplete: async (img) => { addToCache(img); },
-    });
-  }, [activeBook, activeSemanticMap, activeStyleSeed, addToCache]);
+  }, [returnCfi, setReturnCfi]);
 
   // Tablet: long-press opens the regenerate menu.
   const longPress = useLongPress(
@@ -285,10 +227,10 @@ export default function VisualPanel() {
           Visual Interpretation
         </span>
         <div className="flex-1" />
-        {activeBook && activeSemanticMap && (
+        {activeBook && (
           <>
             <button
-              onClick={() => setShowPlanStrip((open) => !open)}
+              onClick={togglePlanStrip}
               className={`flex min-h-[28px] min-w-[28px] items-center justify-center rounded transition-colors ${
                 showPlanStrip ? "text-lumina-gold" : "text-ink-faint hover:text-ink-soft"
               }`}
@@ -299,7 +241,7 @@ export default function VisualPanel() {
               <PanelBottom size={14} />
             </button>
             <button
-              onClick={() => openGallery()}
+              onClick={() => handleOpenGallery()}
               className="flex min-h-[28px] min-w-[28px] items-center justify-center rounded text-ink-faint transition-colors hover:text-ink-soft"
               title="Open gallery"
               aria-label="Open gallery"
@@ -316,7 +258,7 @@ export default function VisualPanel() {
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
         {...(isTablet ? longPress : {})}
-        onClick={activeSemanticMap ? handleImageClick : undefined}
+        onClick={activeBook ? handleImageClick : undefined}
       >
         {!activeBook ? (
           <AmbientSceneLayer phase="empty" />
@@ -431,7 +373,7 @@ export default function VisualPanel() {
               activeSemanticMap={activeSemanticMap}
               imageCache={imageCache}
               currentSceneId={currentImage?.sceneId}
-              onSelectScene={(sceneId) => openGallery(sceneId)}
+              onSelectScene={(sceneId) => handleOpenGallery(sceneId)}
               onDismiss={() => setShowPlanStrip(false)}
             />
           )}
@@ -511,25 +453,6 @@ export default function VisualPanel() {
         )}
       </AnimatePresence>
 
-      {/* Gallery focal view — the "piece on the wall" experience */}
-      <AnimatePresence>
-        {showFocal && (
-          <GalleryFocalView
-            activeSemanticMap={activeSemanticMap}
-            imageCache={imageCache}
-            startSceneId={focalStartSceneId ?? currentImage?.sceneId}
-            isAnalyzing={isAnalyzing}
-            analysisProgress={analysisProgressDetail?.message || analysisProgress}
-            analysisPercent={analysisProgressDetail?.percent}
-            analysisPhase={analysisProgressDetail?.phase}
-            onVisitPassage={visitPassage}
-            onGenerateScene={generateForScene}
-            onAnalyze={() => setAnalysisRequested(true)}
-            onRegenerateAll={regenerateAllImages}
-            onClose={() => setShowFocal(false)}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }

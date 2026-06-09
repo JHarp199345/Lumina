@@ -95,6 +95,11 @@ export default function GalleryFocalView({
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [showBookMenu, setShowBookMenu] = useState(false);
   const selectedThumbRef = useRef<HTMLButtonElement>(null);
+  const openedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    openedAtRef.current = Date.now();
+  }, []);
   const generatedCount = items.filter((item) => item.image).length;
 
   // Surface a calm, always-visible status for re-analysis — independent of the
@@ -149,6 +154,11 @@ export default function GalleryFocalView({
   const beatLabel = current?.beat?.beatType?.replace(/_/g, " ") ?? "scene";
   const currentGenerating = current ? generatingId === current.scene.id : false;
 
+  const handleBackdropClose = () => {
+    if (Date.now() - openedAtRef.current < 350) return;
+    onClose();
+  };
+
   return (
     <ModalPortal>
     <motion.div
@@ -156,8 +166,11 @@ export default function GalleryFocalView({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       // Dim "gallery room" surround — kept dark in both themes so the art reads.
-      className="fixed inset-0 z-[88] flex flex-col bg-[#08070a]/96 backdrop-blur-xl"
-      onClick={onClose}
+      className="fixed inset-0 z-[100] flex flex-col bg-[#08070a]/96 backdrop-blur-xl"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Visual gallery"
+      onClick={handleBackdropClose}
     >
       {/* Top bar */}
       <div className="relative flex items-center justify-between px-5 py-3" onClick={(e) => e.stopPropagation()}>
