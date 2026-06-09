@@ -25,7 +25,9 @@ import {
   Headphones,
   AudioLines,
   Presentation,
+  Play,
 } from "lucide-react";
+import WatchAlong from "@/components/knowledge/WatchAlong";
 import { useDrawerStore } from "@/store/drawerStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useBookStore } from "@/store/bookStore";
@@ -96,6 +98,9 @@ export default function AnnotationsDrawer() {
             {view === "presentation-studio" && (
               <PresentationStudioView onBack={() => setView("menu")} onClose={close} />
             )}
+            {view === "watch-along" && (
+              <WatchAlongView onBack={() => setView("menu")} onClose={close} />
+            )}
           </motion.aside>
         </>
       )}
@@ -155,6 +160,7 @@ function MenuView({
       | "voice-studio"
       | "audio-overview"
       | "presentation-studio"
+      | "watch-along"
   ) => void;
   onClose: () => void;
 }) {
@@ -216,6 +222,13 @@ function MenuView({
           count={0}
           onClick={() => onPick("presentation-studio")}
         />
+        <HubButton
+          icon={<Play size={18} />}
+          label="Watch Along"
+          sub="Related lectures, adaptations, and explainers"
+          count={0}
+          onClick={() => onPick("watch-along")}
+        />
       </div>
       <div className="mt-auto px-4 py-4">
         <p className="text-[11px] leading-relaxed text-ink-faint">
@@ -268,6 +281,15 @@ function PresentationStudioView({ onBack, onClose }: { onBack: () => void; onClo
     <>
       <DrawerHeader title="Presentation Studio" onBack={onBack} onClose={onClose} />
       <PresentationStudio />
+    </>
+  );
+}
+
+function WatchAlongView({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
+  return (
+    <>
+      <DrawerHeader title="Watch Along" onBack={onBack} onClose={onClose} />
+      <WatchAlong />
     </>
   );
 }

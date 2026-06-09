@@ -44,6 +44,46 @@ export function getGoverningImage(
   return best;
 }
 
+/** Earliest positioned image strictly after the reader (section preview hold). */
+export function getPreviewImage(
+  images: CachedImage[],
+  wordPosition: number,
+  chapters: Chapter[],
+  scenesById?: Map<string, IdentifiedScene>
+): CachedImage | null {
+  let best: CachedImage | null = null;
+  let bestPos = Infinity;
+
+  for (const image of images) {
+    const scene = scenesById?.get(image.sceneId);
+    const pos = resolveImageWordPosition(image, chapters, scene);
+    if (pos < 0 || pos <= wordPosition) continue;
+    if (pos < bestPos) {
+      best = image;
+      bestPos = pos;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Image to show on the visual panel: the governing anchor at or before the
+ * reader, or — when still before the first anchor — the next upcoming image
+ * so the panel is never blank while art exists for the current section.
+ */
+export function getDisplayImage(
+  images: CachedImage[],
+  wordPosition: number,
+  chapters: Chapter[],
+  scenesById?: Map<string, IdentifiedScene>
+): CachedImage | null {
+  return (
+    getGoverningImage(images, wordPosition, chapters, scenesById) ??
+    getPreviewImage(images, wordPosition, chapters, scenesById)
+  );
+}
+
 export function findImageAtPosition(
   images: Iterable<CachedImage>,
   position: number,

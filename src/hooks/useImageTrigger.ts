@@ -22,6 +22,7 @@ import { LUMINA_CONFIG } from "@/config";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import {
   findImageAtPosition,
+  getDisplayImage,
   getGoverningImage,
   hasPositionedImages,
   resolveImageWordPosition,
@@ -83,7 +84,8 @@ export function useImageTrigger() {
     const cachedImages = Object.values(imageCache);
     const current = useImageStore.getState().currentImage;
 
-    // ── Display pass: governing image by word position ─────────────────────
+    // ── Display pass: governing anchor, or preview the section's next image ──
+    const displayImage = getDisplayImage(cachedImages, wordPosition, chapters);
     const governingImage = getGoverningImage(cachedImages, wordPosition, chapters);
     const currentImagePosition =
       current && chapters.length > 0 ? resolveImageWordPosition(current, chapters) : -1;
@@ -93,89 +95,66 @@ export function useImageTrigger() {
       .filter(({ position }) => position > wordPosition)
       .sort((a, b) => a.position - b.position)[0] ?? null;
 
-    if (governingImage) {
+    if (displayImage) {
+      const displayPos = resolveImageWordPosition(displayImage, chapters);
+      const isPreview = !governingImage || governingImage.id !== displayImage.id;
+
       if (
-        current?.id !== governingImage.id ||
-        current.filePath !== governingImage.filePath
+        current?.id !== displayImage.id ||
+        current.filePath !== displayImage.filePath
       ) {
-        const governingPos = resolveImageWordPosition(governingImage, chapters);
-        const reason =
-          !current
+        const reason = isPreview
+          ? "section-preview"
+          : !current
             ? "initial-anchor"
-            : currentImagePosition > governingPos
+            : currentImagePosition > displayPos
               ? "returned-to-anchor"
               : "entered-anchor";
         diagnosticInfo("image.display.switch", "Switching visual segment", {
           reason,
           fromSceneId: current?.sceneId ?? null,
-          toSceneId: governingImage.sceneId,
+          toSceneId: displayImage.sceneId,
           wordPosition,
-          imageWordPosition: governingPos,
+          imageWordPosition: displayPos,
           currentImagePosition,
           nextImagePosition: nextPositionedImage?.position ?? null,
           nextSceneId: nextPositionedImage?.image.sceneId ?? null,
         });
-        setCurrentImage(governingImage);
-        setCurrentThemes(governingImage.emotionalThemes);
+        setCurrentImage(displayImage);
+        setCurrentThemes(displayImage.emotionalThemes);
       } else {
         const decisionSignature = [
-          governingImage.id,
+          displayImage.id,
           current?.id ?? "none",
           wordPosition,
           nextPositionedImage?.position ?? "none",
           cachedImages.length,
-          "hold",
+          isPreview ? "preview-hold" : "hold",
         ].join("|");
 
         if (decisionSignature !== lastDisplayDecisionRef.current) {
           lastDisplayDecisionRef.current = decisionSignature;
-          diagnosticInfo("image.display.hold", "Holding governing visual segment", {
-            governingSceneId: governingImage.sceneId,
+          diagnosticInfo("image.display.hold", "Holding visual segment", {
+            governingSceneId: displayImage.sceneId,
             currentSceneId: current?.sceneId ?? null,
             wordPosition,
-            imageWordPosition: resolveImageWordPosition(governingImage, chapters),
+            imageWordPosition: displayPos,
             currentImagePosition,
             nextImagePosition: nextPositionedImage?.position ?? null,
             cachedImageCount: cachedImages.length,
+            previewHold: isPreview,
           });
         }
       }
-    } else {
-      const positioned = hasPositionedImages(cachedImages, chapters);
-      // Only clear when positioned images exist but none govern yet (reader
-      // is before the first anchor). Orphaned legacy images without positions
-      // are left on screen so the reader's art is never blanked.
-      if (current && positioned) {
-        diagnosticInfo("image.display.clear_future", "Clearing visual because no positioned anchor governs this position", {
-          fromSceneId: current.sceneId,
-          wordPosition,
-          currentImagePosition,
-          nextImagePosition: nextPositionedImage?.position ?? null,
-          cachedImageCount: cachedImages.length,
-        });
-        setCurrentImage(null);
-        setCurrentThemes([]);
-      }
-
-      const decisionSignature = [
-        "none",
-        current?.sceneId ?? "none",
+    } else if (current && hasPositionedImages(cachedImages, chapters)) {
+      diagnosticInfo("image.display.clear", "Clearing visual because no positioned image is available", {
+        fromSceneId: current.sceneId,
         wordPosition,
-        nextPositionedImage?.position ?? "none",
-        cachedImages.length,
-      ].join("|");
-
-      if (decisionSignature !== lastDisplayDecisionRef.current) {
-        lastDisplayDecisionRef.current = decisionSignature;
-        diagnosticInfo("image.display.hold", "Holding visual segment", {
-          governingSceneId: null,
-          currentSceneId: current?.sceneId ?? null,
-          wordPosition,
-          currentImagePosition,
-          nextImagePosition: nextPositionedImage?.position ?? null,
-          cachedImageCount: cachedImages.length,
-        });
-      }
+        currentImagePosition,
+        cachedImageCount: cachedImages.length,
+      });
+      setCurrentImage(null);
+      setCurrentThemes([]);
     }
 
     // ── Queue pass: generate only what the reader actually needs ──────────────

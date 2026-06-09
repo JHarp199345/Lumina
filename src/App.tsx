@@ -240,16 +240,35 @@ function App() {
     return () => mq.removeEventListener("change", applyTheme);
   }, [theme, resolvedTheme]);
 
+  const reportImportProgress = (message: string) => {
+    setImportProgress(message);
+    setImportDetails((items) => {
+      const next = [...items, message].filter(Boolean);
+      return next.slice(Math.max(0, next.length - 14));
+    });
+    if (message) console.info("[Lumina Import]", message);
+  };
+
+  const importProgressHint = (() => {
+    if (importFailed) return "The failed step is listed below.";
+    const step = importProgress.toLowerCase();
+    if (step.includes("downloading") || step.includes("step 1")) {
+      return "Downloading from Project Gutenberg — keep this screen open.";
+    }
+    if (step.includes("parsing") || step.includes("reading epub") || step.includes("step 2")) {
+      return "Parsing chapters and preparing your library…";
+    }
+    if (step.includes("saving") || step.includes("mounting")) {
+      return "Almost ready — finishing setup.";
+    }
+    if (step.includes("analysis") || step.includes("visual")) {
+      return "Building your visual plan — large books can take a minute.";
+    }
+    return "Working…";
+  })();
+
   const handleImport = async () => {
     let failed = false;
-    const reportImportProgress = (message: string) => {
-      setImportProgress(message);
-      setImportDetails((items) => {
-        const next = [...items, message].filter(Boolean);
-        return next.slice(Math.max(0, next.length - 14));
-      });
-      console.info("[Lumina Import]", message);
-    };
 
     try {
       setImportFailed(false);
@@ -369,11 +388,7 @@ function App() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm text-ink/80">{importProgress}</p>
-                  <p className="mt-1 text-xs text-ink-faint">
-                    {importFailed
-                      ? "The failed step is listed below."
-                      : "Large collections can take a moment."}
-                  </p>
+                  <p className="mt-1 text-xs text-ink-faint">{importProgressHint}</p>
                 </div>
                 {importFailed && (
                   <button
@@ -428,6 +443,13 @@ function App() {
         <LibraryPanel
           onClose={() => setShowLibrary(false)}
           onImport={handleImport}
+          onImportProgress={reportImportProgress}
+          onBookImported={(structure) => {
+            setShowLibrary(false);
+            setImportProgress("");
+            setImportDetails([]);
+            setPendingSeedSelection({ structure });
+          }}
         />
       )}
       {visualDebugEnabled && <VisualDebugOverlay />}

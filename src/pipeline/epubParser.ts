@@ -10,6 +10,7 @@
 
 import JSZip from "jszip";
 import type { BookStructure, Chapter, CollectionGroup, Section } from "@/types";
+import { subdivideOversizedChapters } from "@/utils/chapterSubdivision";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -148,6 +149,12 @@ export async function parseEpub(
     onProgress?.("Building reading chunks…");
     chapters = chunkByWordCount(rawTexts, spine);
     confidence = "low";
+  }
+
+  const beforeSplit = chapters.length;
+  chapters = subdivideOversizedChapters(chapters);
+  if (chapters.length > beforeSplit) {
+    onProgress?.(`Split ${beforeSplit} reading sections into ${chapters.length} chapter-like units…`);
   }
 
   // Calculate totals

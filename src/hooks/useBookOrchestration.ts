@@ -22,7 +22,7 @@ import { storage } from "@/storage";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import {
   findImageAtPosition,
-  getGoverningImage,
+  getDisplayImage,
   hydrateImageWordPositions,
 } from "@/utils/imagePosition";
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
@@ -117,7 +117,7 @@ export function useBookOrchestration() {
 
         const { wordPosition } = useReaderStore.getState();
         const cachedImages = Object.values(imageCache);
-        const imageToDisplay = getGoverningImage(cachedImages, wordPosition, chapters);
+        const imageToDisplay = getDisplayImage(cachedImages, wordPosition, chapters);
 
         if (imageToDisplay) {
           setCurrentImage(imageToDisplay);

@@ -5,13 +5,21 @@ import { useBookStore } from "@/store/bookStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { storage } from "@/storage";
 import OpenShelfCatalog from "@/components/common/OpenShelfCatalog";
+import type { BookStructure } from "@/types";
 
 interface LibraryPanelProps {
   onClose: () => void;
   onImport: () => void;
+  onImportProgress?: (message: string) => void;
+  onBookImported?: (structure: BookStructure) => void;
 }
 
-export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
+export default function LibraryPanel({
+  onClose,
+  onImport,
+  onImportProgress,
+  onBookImported,
+}: LibraryPanelProps) {
   const { library, removeBook, activeBook } = useBookStore();
   const { openBook, unmountActiveBook, importEpubFile } = useEpubImport();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -60,6 +68,8 @@ export default function LibraryPanel({ onClose, onImport }: LibraryPanelProps) {
             onBack={() => setView("library")}
             onClose={onClose}
             onImport={onImport}
+            onImportProgress={onImportProgress}
+            onBookImported={onBookImported}
           />
         ) : (
           <>

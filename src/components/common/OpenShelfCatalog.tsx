@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Download, FolderOpen, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, BookOpen, Loader2, Search, SlidersHorizontal } from "lucide-react";
 import { useEpubImport } from "@/hooks/useEpubImport";
+import type { BookStructure } from "@/types";
 
 interface GutendexBook {
   id: number;
@@ -14,10 +15,15 @@ interface GutendexBook {
 
 type SortMode = "popular" | "title-asc" | "title-desc" | "year-asc" | "year-desc";
 
+type ImportPhase = "idle" | "downloading" | "importing" | "done" | "manual";
+
 interface OpenShelfCatalogProps {
   onBack: () => void;
   onClose: () => void;
+  /** Opens the device file picker for a manually downloaded EPUB. */
   onImport: () => void;
+  onImportProgress?: (message: string) => void;
+  onBookImported?: (structure: BookStructure) => void;
 }
 
 const GENRES = [
@@ -60,7 +66,13 @@ interface CatalogCacheEntry {
 
 const catalogCache = new Map<string, CatalogCacheEntry>();
 
-export default function OpenShelfCatalog({ onBack, onClose, onImport }: OpenShelfCatalogProps) {
+export default function OpenShelfCatalog({
+  onBack,
+  onClose,
+  onImport,
+  onImportProgress,
+  onBookImported,
+}: OpenShelfCatalogProps) {
   const { importEpubFile } = useEpubImport();
   const [query, setQuery] = useState("");
   const [genre, setGenre] = useState("");
@@ -71,7 +83,11 @@ export default function OpenShelfCatalog({ onBack, onClose, onImport }: OpenShel
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [status, setStatus] = useState("");
-  const [showImportPulse, setShowImportPulse] = useState(false);
+  const [importPhase, setImportPhase] = useState<ImportPhase>("idle");
+  const [importingId, setImportingId] = useState<number | null>(null);
+  const [activeTitle, setActiveTitle] = useState("");
+  const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
+  const [manualFallbackTitle, setManualFallbackTitle] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestKey = useMemo(() => `${query.trim().toLowerCase()}|${genre}|${sort}`, [query, genre, sort]);
@@ -197,25 +213,60 @@ export default function OpenShelfCatalog({ onBack, onClose, onImport }: OpenShel
     return copy;
   }, [books, sort]);
 
+  const report = useCallback(
+    (message: string) => {
+      setStatus(message);
+      onImportProgress?.(message);
+    },
+    [onImportProgress]
+  );
+
   const importBook = async (book: GutendexBook) => {
+    if (importingId !== null) return;
+
     const epubUrls = pickEpubUrls(book);
     if (epubUrls.length === 0) {
-      setStatus("No EPUB download is available for that book.");
+      report("No EPUB download is available for that book.");
       return;
     }
 
-    setStatus(`Downloading ${book.title}…`);
-    setShowImportPulse(false);
+    setImportingId(book.id);
+    setActiveTitle(book.title);
+    setImportPhase("downloading");
+    setDownloadPercent(null);
+    setManualFallbackTitle("");
+    report(`Step 1 of 2 — Downloading “${book.title}”…`);
+
+    let needsManualImport = false;
     try {
-      const file = await downloadFirstWorkingEpub(book, epubUrls, setStatus);
-      await importEpubFile(file, setStatus);
-      setStatus(`Imported ${book.title}.`);
-      window.setTimeout(onClose, 900);
+      const file = await downloadFirstWorkingEpub(book, epubUrls, (message, percent) => {
+        setDownloadPercent(percent);
+        report(message);
+      });
+      setImportPhase("importing");
+      report(`Step 2 of 2 — Adding “${book.title}” to your library…`);
+      const result = await importEpubFile(file, report);
+      setImportPhase("done");
+      report(`Added “${result.book.title}” by ${result.book.author}. Choose a visual style next.`);
+      onBookImported?.(result.structure);
+      window.setTimeout(onClose, 1400);
     } catch (err) {
       startBrowserDownload(epubUrls[0], book.title);
       console.warn("[OpenShelf] Automatic import failed; browser download fallback started.", err);
-      setStatus("");
-      setShowImportPulse(true);
+      needsManualImport = true;
+      setImportPhase("manual");
+      setManualFallbackTitle(book.title);
+      report("");
+      onImportProgress?.("");
+    } finally {
+      setImportingId(null);
+      setDownloadPercent(null);
+      if (!needsManualImport) {
+        window.setTimeout(() => {
+          setImportPhase("idle");
+          setActiveTitle("");
+        }, 1500);
+      }
     }
   };
 
@@ -287,23 +338,60 @@ export default function OpenShelfCatalog({ onBack, onClose, onImport }: OpenShel
         )}
       </div>
 
-      {status && (
-        <div className="mx-4 mt-3 rounded-lg border border-hair bg-black/20 px-3 py-2">
-          <p className="break-words text-xs text-ink-soft">{status}</p>
-        </div>
-      )}
-
-      {showImportPulse && (
-        <div className="mx-4 mt-3 flex justify-center">
-          <button
-            type="button"
-            onClick={onImport}
-            className="flex h-12 w-12 animate-pulse items-center justify-center rounded-full border border-lumina-gold/50 bg-lumina-gold/16 text-lumina-gold shadow-[0_0_32px_rgba(196,163,74,0.28)] transition-colors hover:bg-lumina-gold/22"
-            aria-label="Open downloaded EPUB"
-            title="Open downloaded EPUB"
-          >
-            <FolderOpen size={20} />
-          </button>
+      {(status || importPhase !== "idle") && (
+        <div className="mx-4 mt-3 rounded-lg border border-lumina-gold/25 bg-lumina-gold/[0.06] px-3 py-3">
+          {importPhase === "downloading" && (
+            <>
+              <p className="text-xs font-medium text-lumina-gold/90">
+                Downloading{activeTitle ? ` “${activeTitle}”` : ""}…
+              </p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25">
+                <div
+                  className="h-full rounded-full bg-lumina-gold/80 transition-[width] duration-300"
+                  style={{ width: `${downloadPercent ?? 8}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-[11px] text-ink-faint">
+                {downloadPercent !== null
+                  ? `${downloadPercent}% — keep this screen open`
+                  : "Connecting to Project Gutenberg…"}
+              </p>
+            </>
+          )}
+          {importPhase === "importing" && (
+            <p className="flex items-center gap-2 text-xs text-lumina-gold/90">
+              <Loader2 size={14} className="animate-spin" />
+              Adding to library — parsing chapters…
+            </p>
+          )}
+          {importPhase === "done" && (
+            <p className="text-xs font-medium text-lumina-gold">{status}</p>
+          )}
+          {importPhase === "manual" && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-ink/85">
+                iPhone/iPad couldn&apos;t auto-import “{manualFallbackTitle}”.
+              </p>
+              <p className="text-[11px] leading-relaxed text-ink-faint">
+                Safari started a download — usually named like <span className="font-mono text-ink-soft">pg12345.epub</span> in
+                Files → Downloads. Then tap the button below and pick that file. Chrome on iOS works the same way.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setImportPhase("idle");
+                  setManualFallbackTitle("");
+                  onImport();
+                }}
+                className="min-h-[44px] w-full rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
+              >
+                Choose Downloaded EPUB
+              </button>
+            </div>
+          )}
+          {importPhase === "idle" && status && (
+            <p className="break-words text-xs text-ink-soft">{status}</p>
+          )}
         </div>
       )}
 
@@ -314,31 +402,51 @@ export default function OpenShelfCatalog({ onBack, onClose, onImport }: OpenShel
           <p className="px-2 py-6 text-center text-xs text-ink-faint">No free books match that search.</p>
         ) : (
           <div className="space-y-2">
-            {visibleBooks.map((book) => (
-              <div
-                key={book.id}
-                className="flex gap-3 rounded-lg border border-hair bg-ink/[0.05] p-3 transition-colors hover:bg-ink/[0.07]"
-              >
-                <div className="flex h-12 w-10 flex-shrink-0 items-center justify-center rounded-md border border-lumina-gold/20 bg-lumina-gold/8 text-lumina-gold/75">
-                  <BookOpen size={16} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 text-sm font-medium text-ink/78">{book.title}</p>
-                  <p className="mt-0.5 truncate text-xs text-ink-faint">{authorLine(book)}</p>
-                  <p className="mt-1 text-[11px] text-ink-faint">
-                    {publicationYear(book) ? `${publicationYear(book)} · ` : ""}
-                    {book.languages.join(", ").toUpperCase()} · {book.download_count.toLocaleString()} downloads
-                  </p>
-                </div>
-                <button
-                  onClick={() => importBook(book)}
-                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-lumina-gold/25 bg-lumina-gold/10 text-lumina-gold/85 transition hover:bg-lumina-gold/15 hover:text-lumina-gold"
-                  title="Import to Lumina"
+            {visibleBooks.map((book) => {
+              const isImporting = importingId === book.id;
+              const blocked = importingId !== null && !isImporting;
+              return (
+                <div
+                  key={book.id}
+                  className={`rounded-lg border p-3 transition-colors ${
+                    isImporting
+                      ? "border-lumina-gold/35 bg-lumina-gold/[0.08]"
+                      : blocked
+                        ? "border-hair bg-ink/[0.03] opacity-55"
+                        : "border-hair bg-ink/[0.05] hover:bg-ink/[0.07]"
+                  }`}
                 >
-                  <Download size={15} />
-                </button>
-              </div>
-            ))}
+                  <div className="flex gap-3">
+                    <div className="flex h-12 w-10 flex-shrink-0 items-center justify-center rounded-md border border-lumina-gold/20 bg-lumina-gold/8 text-lumina-gold/75">
+                      <BookOpen size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2 text-sm font-medium text-ink/78">{book.title}</p>
+                      <p className="mt-0.5 truncate text-xs text-ink-faint">{authorLine(book)}</p>
+                      <p className="mt-1 text-[11px] text-ink-faint">
+                        {publicationYear(book) ? `${publicationYear(book)} · ` : ""}
+                        {book.languages.join(", ").toUpperCase()} · {book.download_count.toLocaleString()} downloads
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={blocked || isImporting}
+                    onClick={() => void importBook(book)}
+                    className="mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-semibold text-lumina-gold transition hover:bg-lumina-gold/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isImporting ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        Adding to library…
+                      </>
+                    ) : (
+                      "Add to Library"
+                    )}
+                  </button>
+                </div>
+              );
+            })}
             <div ref={sentinelRef} />
             {nextUrl && (
               <button
@@ -426,7 +534,7 @@ function filterFallbackBooks(query: string, genre: string, sort: SortMode): Gute
 async function downloadFirstWorkingEpub(
   book: GutendexBook,
   urls: string[],
-  onProgress: (message: string) => void
+  onProgress: (message: string, percent: number | null) => void
 ): Promise<File> {
   const failures: string[] = [];
   for (let index = 0; index < urls.length; index += 1) {
@@ -434,15 +542,13 @@ async function downloadFirstWorkingEpub(
     try {
       onProgress(
         urls.length > 1
-          ? `Downloading ${book.title}… format ${index + 1} of ${urls.length}`
-          : `Downloading ${book.title}…`
+          ? `Step 1 of 2 — Downloading “${book.title}” (format ${index + 1} of ${urls.length})…`
+          : `Step 1 of 2 — Downloading “${book.title}”…`,
+        null
       );
-      const response = await fetch(url, {
-        credentials: "omit",
-        referrerPolicy: "no-referrer",
+      const blob = await fetchEpubBlob(url, (percent) => {
+        onProgress(`Step 1 of 2 — Downloading “${book.title}”…`, percent);
       });
-      if (!response.ok) throw new Error(`Download returned ${response.status}`);
-      const blob = await response.blob();
       await assertLooksLikeEpub(blob);
       return new File([blob], `${safeFileName(book.title)}.epub`, {
         type: "application/epub+zip",
@@ -452,6 +558,39 @@ async function downloadFirstWorkingEpub(
     }
   }
   throw new Error(`No EPUB format could be imported. ${failures[0] ?? ""}`.trim());
+}
+
+async function fetchEpubBlob(
+  url: string,
+  onPercent: (percent: number | null) => void
+): Promise<Blob> {
+  const response = await fetch(url, {
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+  });
+  if (!response.ok) throw new Error(`Download returned ${response.status}`);
+
+  const total = Number(response.headers.get("Content-Length"));
+  const body = response.body;
+  if (!body || !Number.isFinite(total) || total <= 0) {
+    onPercent(null);
+    return response.blob();
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      received += value.length;
+      onPercent(Math.min(99, Math.round((received / total) * 100)));
+    }
+  }
+  onPercent(100);
+  return new Blob(chunks, { type: "application/epub+zip" });
 }
 
 function startBrowserDownload(url: string | undefined, title: string): void {

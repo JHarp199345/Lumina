@@ -10,7 +10,8 @@ import { useAudioStore } from "@/store/audioStore";
 import { storage } from "@/storage";
 import type { Book, BookStructure, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
-import { getGoverningImage, hydrateImageWordPositions } from "@/utils/imagePosition";
+import { subdivideOversizedChapters, READING_CHAPTER_MIN_SPLIT } from "@/utils/chapterSubdivision";
+import { getDisplayImage, hydrateImageWordPositions } from "@/utils/imagePosition";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { diagnosticInfo } from "@/utils/diagnostics";
 
@@ -225,6 +226,22 @@ export function useEpubImport() {
         );
       }
 
+      if (
+        structure &&
+        structure.chapters.some((chapter) => chapter.wordCount >= READING_CHAPTER_MIN_SPLIT)
+      ) {
+        const split = subdivideOversizedChapters(structure.chapters);
+        if (split.length > structure.chapters.length) {
+          structure = {
+            ...structure,
+            chapters: split,
+            totalWords: split.reduce((sum, chapter) => sum + chapter.wordCount, 0),
+          };
+          await storage.saveBookStructure(structure).catch(() => {});
+          onProgress?.(`Refined ${split.length} reading sections for visual pacing…`);
+        }
+      }
+
       const semanticBookId = structure
         ? getAnalysisSlice(structure, progress?.currentChapterIndex ?? 0).semanticBookId
         : book.id;
@@ -282,7 +299,7 @@ export function useEpubImport() {
         const estimatedWordPos = totalWords > 0 ? (totalWords * progressPercent) / 100 : 0;
 
         let imageToDisplay = chapters.length > 0
-          ? getGoverningImage(hydratedImages, estimatedWordPos, chapters)
+          ? getDisplayImage(hydratedImages, estimatedWordPos, chapters)
           : null;
 
         // Fallback: no position-matched image — show the most recently generated.

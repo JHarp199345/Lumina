@@ -19,7 +19,8 @@ export type DrawerView =
   | "study-guide"
   | "voice-studio"
   | "audio-overview"
-  | "presentation-studio";
+  | "presentation-studio"
+  | "watch-along";
 export type SunburstOrigin = "tray" | "notepad";
 
 interface DrawerStore {
