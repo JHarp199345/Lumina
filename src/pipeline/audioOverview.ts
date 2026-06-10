@@ -322,26 +322,57 @@ async function _synthesizeLocalTts(
   stylePreset: string,
   onProgress?: (msg: string) => void
 ): Promise<SynthResult> {
-  onProgress?.("Voicing with local Kokoro…");
   const base = getOdysseusUrl();
   const token = getOdysseusToken();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${base}/api/tts/kokoro/synthesize`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ text: script, style_preset: stylePreset, speed: 1.0 }),
-  });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(`Local TTS error ${res.status}: ${msg}`);
+  const authHeader: Record<string, string> = token ? { "Authorization": `Bearer ${token}` } : {};
+  const postHeaders = { "Content-Type": "application/json", ...authHeader };
+
+  // Chunk the script — same as Gemini path — so each job fits well under the
+  // Cloudflare 100-second tunnel timeout. Each POST returns a job_id immediately;
+  // we poll until done, then fetch the WAV and extract raw PCM for concatenation.
+  const chunks = chunkText(script, LUMINA_CONFIG.AUDIO_OVERVIEW_TTS_CHUNK_CHARS);
+  const pcmParts: Uint8Array[] = [];
+  let sampleRate = 24000;
+
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress?.(`Voicing part ${i + 1} of ${chunks.length}…`);
+
+    const startRes = await fetch(`${base}/api/tts/kokoro/synthesize`, {
+      method: "POST",
+      headers: postHeaders,
+      body: JSON.stringify({ text: chunks[i], style_preset: stylePreset, speed: 1.0 }),
+    });
+    if (!startRes.ok) {
+      const msg = await startRes.text().catch(() => "");
+      throw new Error(`Local TTS error ${startRes.status}: ${msg}`);
+    }
+    const { job_id } = await startRes.json() as { job_id: string };
+
+    // Poll up to 4 minutes per chunk (120 × 2 s)
+    let audioUrl: string | null = null;
+    for (let attempt = 0; attempt < 120; attempt++) {
+      await new Promise<void>((r) => setTimeout(r, 2000));
+      const pollRes = await fetch(`${base}/api/tts/jobs/${job_id}`, { headers: authHeader });
+      if (!pollRes.ok) continue;
+      const job = await pollRes.json() as { status: string; audio_url?: string; error?: string };
+      if (job.status === "done" && job.audio_url) { audioUrl = job.audio_url; break; }
+      if (job.status === "error") throw new Error(`Local TTS failed: ${job.error ?? "unknown"}`);
+    }
+    if (!audioUrl) throw new Error("Local TTS chunk timed out (4 min)");
+
+    const wavRes = await fetch(`${base}${audioUrl}`, { headers: authHeader });
+    if (!wavRes.ok) throw new Error(`Local TTS audio fetch error ${wavRes.status}`);
+    const wav = new Uint8Array(await wavRes.arrayBuffer());
+    // Read sample rate from WAV header byte 24, extract raw PCM after the 44-byte header.
+    const view = new DataView(wav.buffer, wav.byteOffset);
+    sampleRate = view.getUint32(24, true);
+    pcmParts.push(wav.slice(44));
   }
-  const wav = new Uint8Array(await res.arrayBuffer());
-  // WAV header: sample rate is at byte offset 24 (uint32 LE); PCM data starts at byte 44.
-  const view = new DataView(wav.buffer, wav.byteOffset);
-  const sampleRate = view.getUint32(24, true);
-  const durationSeconds = (wav.length - 44) / (sampleRate * 2);
-  return { data: wav, mimeType: "audio/wav", durationSeconds };
+
+  const pcm = concatBytes(pcmParts);
+  const finalWav = pcmToWav(pcm, sampleRate, 1);
+  const durationSeconds = pcm.length / (sampleRate * 2);
+  return { data: finalWav, mimeType: "audio/wav", durationSeconds };
 }
 
 const TTS_RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
