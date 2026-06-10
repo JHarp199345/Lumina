@@ -24,6 +24,7 @@ interface OverviewJobStore {
 
   start: (params: Omit<AudioOverviewJobParams, "onProgress" | "isStale">) => void;
   dismissError: () => void;
+  dismiss: () => void;
   /** Invalidate an in-flight job for a book being unmounted. */
   cancelForBook: (bookId: string) => void;
   isRunningForBook: (bookId: string) => boolean;
@@ -41,6 +42,7 @@ export const useOverviewJobStore = create<OverviewJobStore>()((set, get) => ({
     get().status === "running" && get().bookId === bookId,
 
   dismissError: () => set({ error: null, status: "idle" }),
+  dismiss: () => set({ status: "idle", progress: "", error: null, completedArtifactId: null }),
 
   cancelForBook: (bookId) => {
     const state = get();
