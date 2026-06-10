@@ -20,7 +20,7 @@ type SortMode = "popular" | "title-asc" | "title-desc" | "year-asc" | "year-desc
 
 type ImportPhase = "idle" | "downloading" | "importing" | "done" | "failed";
 
-type DownloadFailureReason = "source-refused" | "popup-blocked" | "fallback" | "generic";
+type DownloadFailureReason = "source-refused" | "fallback" | "generic";
 
 interface OpenShelfCatalogProps {
   onBack: () => void;
@@ -232,7 +232,7 @@ export default function OpenShelfCatalog({
     return copy;
   }, [books, sort]);
 
-  const report = useCallback(
+  const reportProgress = useCallback(
     (message: string) => {
       setStatus(message);
       onImportProgress?.(message);
@@ -240,12 +240,20 @@ export default function OpenShelfCatalog({
     [onImportProgress]
   );
 
+  const reportLocal = useCallback((message: string) => {
+    setStatus(message);
+  }, []);
+
+  const clearGlobalProgress = useCallback(() => {
+    onImportProgress?.("");
+  }, [onImportProgress]);
+
   const importBook = async (book: GutendexBook) => {
     if (importingId !== null) return;
 
     const epubUrls = pickEpubUrls(book);
     if (epubUrls.length === 0) {
-      report("No EPUB download is available for that book.");
+      reportLocal("No EPUB download is available for that book.");
       return;
     }
 
@@ -258,7 +266,7 @@ export default function OpenShelfCatalog({
     setFallbackDownloadUrl("");
     setManualFallbackFilename("");
     setShowManualFallback(false);
-    report(`Step 1 of 2 — Downloading "${book.title}"…`);
+    reportProgress(`Step 1 of 2 — Downloading "${book.title}"…`);
 
     let persistFailure = false;
     let file: File | undefined;
@@ -266,7 +274,7 @@ export default function OpenShelfCatalog({
     try {
       file = await downloadFirstWorkingEpub(book, epubUrls, (message, percent) => {
         setDownloadPercent(percent);
-        report(message);
+        reportProgress(message);
       });
     } catch (downloadErr) {
       console.warn("[OpenShelf] Download failed.", downloadErr);
@@ -274,43 +282,36 @@ export default function OpenShelfCatalog({
       setFailedBook(book);
       setImportPhase("failed");
       setCopiedFilename(false);
-      onImportProgress?.("");
+      clearGlobalProgress();
 
       if (isRemoteDownloadBlocked(downloadErr)) {
         setFailureReason("source-refused");
-        report(failureMessage("source-refused"));
+        reportLocal(failureMessage("source-refused"));
       } else {
         const downloadUrl = epubUrls[0];
         const filename = await resolveDownloadFilename(downloadUrl);
         setFallbackDownloadUrl(downloadUrl);
         setManualFallbackFilename(filename);
-
-        const launch = startBrowserDownload(downloadUrl);
-        if (launch === "popup-blocked") {
-          setFailureReason("popup-blocked");
-          setShowManualFallback(true);
-          report(failureMessage("popup-blocked"));
-        } else {
-          setFailureReason("fallback");
-          setShowManualFallback(true);
-          recordImportHistory({
-            gutenbergId: book.id,
-            title: book.title,
-            author: book.authors.map((a) => a.name).join(", "),
-            filename,
-            downloadedAt: new Date().toISOString(),
-          });
-          onHistoryUpdated?.();
-          report(failureMessage("fallback"));
-        }
+        triggerBrowserDownload(downloadUrl);
+        setFailureReason("fallback");
+        setShowManualFallback(true);
+        recordImportHistory({
+          gutenbergId: book.id,
+          title: book.title,
+          author: book.authors.map((a) => a.name).join(", "),
+          filename,
+          downloadedAt: new Date().toISOString(),
+        });
+        onHistoryUpdated?.();
+        reportLocal(failureMessage("fallback"));
       }
     }
 
     if (file) {
       try {
         setImportPhase("importing");
-        report(`Step 2 of 2 — Adding "${book.title}" to your library…`);
-        const result = await importEpubFile(file, report, {
+        reportProgress(`Step 2 of 2 — Adding "${book.title}" to your library…`);
+        const result = await importEpubFile(file, reportProgress, {
           gutenbergId: book.id,
           catalogTitle: book.title,
           catalogAuthor: book.authors.map((author) => author.name).join(", "),
@@ -323,7 +324,7 @@ export default function OpenShelfCatalog({
         });
         onHistoryUpdated?.();
         setImportPhase("done");
-        report(`Added "${result.book.title}" by ${result.book.author}. Choose a visual style next.`);
+        reportProgress(`Added "${result.book.title}" by ${result.book.author}. Choose a visual style next.`);
         onBookImported?.(result.structure);
         window.setTimeout(onClose, 1400);
       } catch (importErr) {
@@ -335,8 +336,8 @@ export default function OpenShelfCatalog({
         setShowManualFallback(false);
         setManualFallbackFilename("");
         setFallbackDownloadUrl("");
-        report(failureMessage("generic"));
-        onImportProgress?.("");
+        clearGlobalProgress();
+        reportLocal(failureMessage("generic"));
       }
     }
 
@@ -359,8 +360,8 @@ export default function OpenShelfCatalog({
     setManualFallbackFilename("");
     setShowManualFallback(false);
     setCopiedFilename(false);
-    report("");
-    onImportProgress?.("");
+    reportLocal("");
+    clearGlobalProgress();
   };
 
   const recordFallbackDownload = (book: GutendexBook, filename: string) => {
@@ -509,7 +510,7 @@ export default function OpenShelfCatalog({
                 Try again
               </button>
 
-              {failureReason === "popup-blocked" && fallbackDownloadUrl ? (
+              {fallbackDownloadUrl ? (
                 <a
                   href={fallbackDownloadUrl}
                   target="_blank"
@@ -710,10 +711,8 @@ function failureMessage(reason: DownloadFailureReason | null): string {
   switch (reason) {
     case "source-refused":
       return "The source refused this download. Try again.";
-    case "popup-blocked":
-      return "Download blocked by your popup blocker. Allow pop-ups, or tap Open download link below.";
     case "fallback":
-      return "Automatic download failed. If a file started downloading, use the steps below — otherwise try again.";
+      return "Automatic import failed. If a download started, use the steps below. If nothing appeared, allow pop-ups or tap Open download link.";
     default:
       return "Download unsuccessful. Try again.";
   }
@@ -791,17 +790,14 @@ async function fetchEpubBlob(
   return new Blob(chunks, { type: "application/epub+zip" });
 }
 
-type BrowserDownloadResult = "opened" | "popup-blocked";
-
-function startBrowserDownload(url: string): BrowserDownloadResult {
-  const popup = window.open(url, "_blank", "noopener,noreferrer");
-  if (popup === null) return "popup-blocked";
-  try {
-    popup.opener = null;
-  } catch {
-    /* ignore */
-  }
-  return "opened";
+function triggerBrowserDownload(url: string): void {
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function pickEpubUrls(book: GutendexBook): string[] {
