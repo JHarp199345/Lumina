@@ -1,32 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Clock, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, Copy, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import type { BookStructure } from "@/types";
-
-interface DownloadHistoryEntry {
-  title: string;
-  filename: string;
-  downloadedAt: string;
-  gutenbergId: number;
-}
-
-const DOWNLOAD_HISTORY_KEY = "lumina_download_history";
-const MAX_HISTORY = 8;
-
-function loadDownloadHistory(): DownloadHistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(DOWNLOAD_HISTORY_KEY);
-    return raw ? (JSON.parse(raw) as DownloadHistoryEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveDownloadHistory(entries: DownloadHistoryEntry[]): void {
-  try {
-    localStorage.setItem(DOWNLOAD_HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY)));
-  } catch { /* ignore */ }
-}
+import { recordImportHistory } from "@/utils/importHistory";
 
 interface GutendexBook {
   id: number;
@@ -114,7 +90,7 @@ export default function OpenShelfCatalog({
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
   const [manualFallbackTitle, setManualFallbackTitle] = useState("");
   const [manualFallbackFilename, setManualFallbackFilename] = useState("");
-  const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryEntry[]>(() => loadDownloadHistory());
+  const [copiedFilename, setCopiedFilename] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestKey = useMemo(() => `${query.trim().toLowerCase()}|${genre}|${sort}`, [query, genre, sort]);
@@ -277,6 +253,12 @@ export default function OpenShelfCatalog({
         catalogTitle: book.title,
         catalogAuthor: book.authors.map((author) => author.name).join(", "),
       });
+      recordImportHistory({
+        gutenbergId: book.id,
+        title: result.book.title,
+        author: result.book.author,
+        importedAt: new Date().toISOString(),
+      });
       setImportPhase("done");
       report(`Added "${result.book.title}" by ${result.book.author}. Choose a visual style next.`);
       onBookImported?.(result.structure);
@@ -285,20 +267,18 @@ export default function OpenShelfCatalog({
       const filename = `${safeFileName(book.title)}.epub`;
       startBrowserDownload(epubUrls[0], filename);
       console.warn("[OpenShelf] Automatic import failed; browser download fallback started.", err);
+      recordImportHistory({
+        gutenbergId: book.id,
+        title: book.title,
+        author: book.authors.map((a) => a.name).join(", "),
+        filename,
+        downloadedAt: new Date().toISOString(),
+      });
       needsManualImport = true;
       setImportPhase("manual");
       setManualFallbackTitle(book.title);
       setManualFallbackFilename(filename);
-      // Persist to download history so the filename is always recoverable.
-      const entry: DownloadHistoryEntry = {
-        title: book.title,
-        filename,
-        downloadedAt: new Date().toISOString(),
-        gutenbergId: book.id,
-      };
-      const updated = [entry, ...downloadHistory.filter((e) => e.gutenbergId !== book.id)];
-      setDownloadHistory(updated);
-      saveDownloadHistory(updated);
+      setCopiedFilename(false);
       report("");
       onImportProgress?.("");
     } finally {
@@ -444,18 +424,34 @@ export default function OpenShelfCatalog({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setImportPhase("idle");
-                  setManualFallbackTitle("");
-                  setManualFallbackFilename("");
-                  onImport();
-                }}
-                className="min-h-[44px] w-full rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
-              >
-                Choose Downloaded EPUB
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(manualFallbackFilename);
+                      setCopiedFilename(true);
+                      setTimeout(() => setCopiedFilename(false), 2000);
+                    } catch { /* clipboard denied */ }
+                  }}
+                  className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg border border-hair bg-ink/[0.06] px-3 text-sm font-medium text-ink-soft transition hover:bg-ink/[0.10]"
+                >
+                  {copiedFilename ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                  {copiedFilename ? "Copied!" : "Copy filename"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportPhase("idle");
+                    setManualFallbackTitle("");
+                    setManualFallbackFilename("");
+                    onImport();
+                  }}
+                  className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
+                >
+                  Choose File
+                </button>
+              </div>
             </div>
           )}
           {importPhase === "idle" && status && (
@@ -530,44 +526,6 @@ export default function OpenShelfCatalog({
               <p className="px-2 py-3 text-center text-[11px] text-ink-faint">
                 End of this shelf.
               </p>
-            )}
-
-            {downloadHistory.length > 0 && (
-              <div className="mt-4 rounded-lg border border-hair bg-ink/[0.03] p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-[11px] text-ink-faint">
-                    <Clock size={11} />
-                    <span>Downloaded files — find &amp; import these</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDownloadHistory([]);
-                      saveDownloadHistory([]);
-                    }}
-                    className="text-[10px] text-ink-faint/60 transition hover:text-ink-faint"
-                  >
-                    Clear
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {downloadHistory.map((entry) => (
-                    <div key={`${entry.gutenbergId}-${entry.downloadedAt}`} className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-[11px] text-ink-soft">{entry.title}</p>
-                        <p className="font-mono text-[10px] text-ink-faint">{entry.filename}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onImport()}
-                        className="flex-shrink-0 rounded-md border border-hair px-2 py-1 text-[11px] text-ink-faint transition hover:border-lumina-gold/30 hover:text-lumina-gold"
-                      >
-                        Import
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
             )}
           </div>
         )}
