@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, BookOpen, Check, Clock, Copy, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
-import { useEpubImport } from "@/hooks/useEpubImport";
 import type { BookStructure } from "@/types";
 import { recordImportHistory } from "@/utils/importHistory";
 import { resolveDownloadFilename } from "@/utils/downloadFilename";
-import ManualImportInstructions from "@/components/common/ManualImportInstructions";
 
 interface GutendexBook {
   id: number;
@@ -18,7 +16,7 @@ interface GutendexBook {
 
 type SortMode = "popular" | "title-asc" | "title-desc" | "year-asc" | "year-desc";
 
-type ImportPhase = "idle" | "downloading" | "importing" | "done" | "failed" | "awaiting-manual";
+type ImportPhase = "idle" | "downloading" | "failed" | "awaiting-manual";
 
 type DownloadFailureReason = "source-refused" | "generic";
 
@@ -86,7 +84,6 @@ export default function OpenShelfCatalog({
   onHistoryUpdated,
   onOpenHistory,
 }: OpenShelfCatalogProps) {
-  const { importEpubFile } = useEpubImport();
   const [query, setQuery] = useState("");
   const [genre, setGenre] = useState("");
   const [sort, setSort] = useState<SortMode>("popular");
@@ -99,7 +96,6 @@ export default function OpenShelfCatalog({
   const [importPhase, setImportPhase] = useState<ImportPhase>("idle");
   const [importingId, setImportingId] = useState<number | null>(null);
   const [activeTitle, setActiveTitle] = useState("");
-  const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
   const [failedBook, setFailedBook] = useState<GutendexBook | null>(null);
   const [failureReason, setFailureReason] = useState<DownloadFailureReason | null>(null);
   const [fallbackDownloadUrl, setFallbackDownloadUrl] = useState("");
@@ -235,7 +231,7 @@ export default function OpenShelfCatalog({
     setStatus(message);
   }, []);
 
-  const importBook = async (book: GutendexBook) => {
+  const downloadBook = async (book: GutendexBook) => {
     if (importingId !== null) return;
 
     const epubUrls = pickEpubUrls(book);
@@ -244,96 +240,41 @@ export default function OpenShelfCatalog({
       return;
     }
 
+    const downloadUrl = epubUrls[0];
+
     setImportingId(book.id);
     setActiveTitle(book.title);
     setImportPhase("downloading");
-    setDownloadPercent(null);
-    setFailedBook(null);
+    setFailedBook(book);
     setFailureReason(null);
-    setFallbackDownloadUrl("");
-    setManualFallbackFilename("");
-    setShowManualFallback(false);
-    reportLocal(`Step 1 of 2 — Downloading "${book.title}"…`);
-
-    let persistPanelState = false;
-    let file: File | undefined;
+    setCopiedFilename(false);
+    reportLocal(`Downloading "${book.title}"…`);
 
     try {
-      file = await downloadFirstWorkingEpub(book, epubUrls, (message, percent) => {
-        setDownloadPercent(percent);
-        reportLocal(message);
+      const filename = await resolveDownloadFilename(downloadUrl);
+      triggerBrowserDownload(downloadUrl);
+      setFallbackDownloadUrl(downloadUrl);
+      setManualFallbackFilename(filename);
+      setShowManualFallback(true);
+      recordImportHistory({
+        gutenbergId: book.id,
+        title: book.title,
+        author: book.authors.map((a) => a.name).join(", "),
+        filename,
+        downloadUrl,
+        downloadedAt: new Date().toISOString(),
       });
-    } catch (downloadErr) {
-      console.warn("[OpenShelf] In-app download failed; trying browser fallback.", downloadErr);
-      persistPanelState = true;
-      setFailedBook(book);
-      setCopiedFilename(false);
-
-      if (isRemoteDownloadBlocked(downloadErr)) {
-        setImportPhase("failed");
-        setFailureReason("source-refused");
-        reportLocal(failureMessage("source-refused"));
-      } else {
-        const downloadUrl = epubUrls[0];
-        const filename = await resolveDownloadFilename(downloadUrl);
-        setFallbackDownloadUrl(downloadUrl);
-        setManualFallbackFilename(filename);
-        triggerBrowserDownload(downloadUrl);
-        setImportPhase("awaiting-manual");
-        setFailureReason(null);
-        setShowManualFallback(true);
-        recordImportHistory({
-          gutenbergId: book.id,
-          title: book.title,
-          author: book.authors.map((a) => a.name).join(", "),
-          filename,
-          downloadedAt: new Date().toISOString(),
-        });
-        onHistoryUpdated?.();
-        reportLocal("Download started in your browser. Import it below when ready.");
-      }
-    }
-
-    if (file) {
-      try {
-        setImportPhase("importing");
-        reportLocal(`Step 2 of 2 — Adding "${book.title}" to your library…`);
-        const result = await importEpubFile(file, reportLocal, {
-          gutenbergId: book.id,
-          catalogTitle: book.title,
-          catalogAuthor: book.authors.map((author) => author.name).join(", "),
-        });
-        recordImportHistory({
-          gutenbergId: book.id,
-          title: result.book.title,
-          author: result.book.author,
-          importedAt: new Date().toISOString(),
-        });
-        onHistoryUpdated?.();
-        setImportPhase("done");
-        reportLocal(`Added "${result.book.title}" by ${result.book.author}. Choose a visual style next.`);
-        onBookImported?.(result.structure);
-        window.setTimeout(onClose, 1400);
-      } catch (importErr) {
-        console.warn("[OpenShelf] Import failed after download.", importErr);
-        persistPanelState = true;
-        setFailedBook(book);
-        setImportPhase("failed");
-        setFailureReason("generic");
-        setShowManualFallback(false);
-        setManualFallbackFilename("");
-        setFallbackDownloadUrl("");
-        reportLocal(failureMessage("generic"));
-      }
-    }
-
-    setImportingId(null);
-    setDownloadPercent(null);
-    if (!persistPanelState) {
-      window.setTimeout(() => {
-        setImportPhase("idle");
-        setActiveTitle("");
-      }, 1500);
+      onHistoryUpdated?.();
+      setImportPhase("awaiting-manual");
+      reportLocal("");
+    } catch (err) {
+      console.warn("[OpenShelf] Download failed.", err);
+      setImportPhase("failed");
+      setFailureReason("source-refused");
+      setShowManualFallback(false);
+      reportLocal(failureMessage("source-refused"));
+    } finally {
+      setImportingId(null);
     }
   };
 
@@ -349,16 +290,6 @@ export default function OpenShelfCatalog({
     reportLocal("");
   };
 
-  const recordFallbackDownload = (book: GutendexBook, filename: string) => {
-    recordImportHistory({
-      gutenbergId: book.id,
-      title: book.title,
-      author: book.authors.map((a) => a.name).join(", "),
-      filename,
-      downloadedAt: new Date().toISOString(),
-    });
-    onHistoryUpdated?.();
-  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -442,40 +373,15 @@ export default function OpenShelfCatalog({
       {(status || importPhase !== "idle") && (
         <div className="mx-4 mt-3 rounded-lg border border-lumina-gold/25 bg-lumina-gold/[0.06] px-3 py-3">
           {importPhase === "downloading" && (
-            <>
-              <p className="text-xs font-medium text-lumina-gold/90">
-                Downloading{activeTitle ? ` "${activeTitle}"` : ""}…
-              </p>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25">
-                <div
-                  className="h-full rounded-full bg-lumina-gold/80 transition-[width] duration-300"
-                  style={{ width: `${downloadPercent ?? 8}%` }}
-                />
-              </div>
-              <p className="mt-1.5 text-[11px] text-ink-faint">
-                {downloadPercent !== null
-                  ? `${downloadPercent}% — keep this screen open`
-                  : "Connecting…"}
-              </p>
-            </>
-          )}
-          {importPhase === "importing" && (
             <p className="flex items-center gap-2 text-xs text-lumina-gold/90">
               <Loader2 size={14} className="animate-spin" />
-              Adding to library — parsing chapters…
+              Downloading{activeTitle ? ` "${activeTitle}"` : ""}…
             </p>
           )}
-          {importPhase === "done" && (
-            <p className="text-xs font-medium text-lumina-gold">{status}</p>
-          )}
-          {(importPhase === "failed" || importPhase === "awaiting-manual") && (
-            <div className="space-y-2.5">
+          {importPhase === "failed" && (
+            <div className="space-y-2">
               <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-medium text-ink/85">
-                  {importPhase === "awaiting-manual"
-                    ? status || "Download started in your browser. Import it below when ready."
-                    : failureMessage(failureReason)}
-                </p>
+                <p className="text-xs text-ink/85">{failureMessage(failureReason)}</p>
                 <button
                   type="button"
                   onClick={dismissPanelMessage}
@@ -485,75 +391,83 @@ export default function OpenShelfCatalog({
                   <X size={13} />
                 </button>
               </div>
-
-              {importPhase === "failed" ? (
+              {failedBook ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (failedBook) void importBook(failedBook);
-                  }}
-                  disabled={!failedBook || importingId !== null}
-                  className="flex min-h-[44px] w-full items-center justify-center rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20 disabled:opacity-45"
+                  onClick={() => void downloadBook(failedBook)}
+                  disabled={importingId !== null}
+                  className="text-xs text-lumina-gold underline decoration-lumina-gold/40 underline-offset-2 hover:text-lumina-gold/90"
                 >
-                  Try again
+                  Try download again
                 </button>
-              ) : null}
-
-              {showManualFallback && manualFallbackFilename ? (
-                <>
-                  <div className="rounded-md border border-hair bg-black/20 px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-wide text-ink-faint">File name — search for this</p>
-                    <p className="mt-0.5 font-mono text-xs text-ink/90">{manualFallbackFilename}</p>
-                  </div>
-
-                  <ManualImportInstructions />
-
-                  {fallbackDownloadUrl ? (
-                    <a
-                      href={fallbackDownloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() => {
-                        if (failedBook && manualFallbackFilename) {
-                          recordFallbackDownload(failedBook, manualFallbackFilename);
-                        }
-                      }}
-                      className="flex min-h-[44px] w-full items-center justify-center rounded-lg border border-hair bg-ink/[0.06] px-3 text-sm font-medium text-ink-soft transition hover:bg-ink/[0.10]"
-                    >
-                      Open download link
-                    </a>
-                  ) : null}
-
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(manualFallbackFilename);
-                          setCopiedFilename(true);
-                          setTimeout(() => setCopiedFilename(false), 2000);
-                        } catch { /* clipboard denied */ }
-                      }}
-                      className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg border border-hair bg-ink/[0.06] px-3 text-sm font-medium text-ink-soft transition hover:bg-ink/[0.10]"
-                    >
-                      {copiedFilename ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-                      {copiedFilename ? "Copied!" : "Copy filename"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        dismissPanelMessage();
-                        onImport();
-                      }}
-                      className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
-                    >
-                      Choose File
-                    </button>
-                  </div>
-                </>
               ) : null}
             </div>
           )}
+          {importPhase === "awaiting-manual" && showManualFallback && manualFallbackFilename ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-ink-soft">Download started</p>
+                <button
+                  type="button"
+                  onClick={dismissPanelMessage}
+                  className="rounded p-0.5 text-ink-faint transition hover:text-ink-soft"
+                  title="Dismiss"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2 rounded-md border border-hair bg-black/20 px-2.5 py-2">
+                <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink/90" title={manualFallbackFilename}>
+                  {manualFallbackFilename}
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(manualFallbackFilename);
+                      setCopiedFilename(true);
+                      setTimeout(() => setCopiedFilename(false), 2000);
+                    } catch { /* clipboard denied */ }
+                  }}
+                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-hair text-ink-faint hover:text-ink-soft"
+                  title="Copy filename"
+                >
+                  {copiedFilename ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismissPanelMessage();
+                    onImport();
+                  }}
+                  className="rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 py-1.5 text-xs font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
+                >
+                  Choose File
+                </button>
+                {onOpenHistory ? (
+                  <button
+                    type="button"
+                    onClick={onOpenHistory}
+                    className="text-xs text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft"
+                  >
+                    Import steps in History
+                  </button>
+                ) : null}
+                {fallbackDownloadUrl ? (
+                  <a
+                    href={fallbackDownloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-[10px] text-ink-faint/70 underline decoration-ink-faint/30 underline-offset-2 hover:text-ink-faint"
+                  >
+                    Download again
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {importPhase === "idle" && status && (
             <p className="break-words text-xs text-ink-soft">{status}</p>
           )}
@@ -597,16 +511,16 @@ export default function OpenShelfCatalog({
                   <button
                     type="button"
                     disabled={blocked || isImporting}
-                    onClick={() => void importBook(book)}
+                    onClick={() => void downloadBook(book)}
                     className="mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-semibold text-lumina-gold transition hover:bg-lumina-gold/20 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isImporting ? (
                       <>
                         <Loader2 size={16} className="animate-spin" />
-                        Adding to library…
+                        Downloading…
                       </>
                     ) : (
-                      "Add to Library"
+                      "Download"
                     )}
                   </button>
                 </div>
@@ -705,78 +619,6 @@ function failureMessage(reason: DownloadFailureReason | null): string {
   }
 }
 
-function isRemoteDownloadBlocked(err: unknown): boolean {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  if (/download returned (403|429|503|502|404)/.test(msg)) return true;
-  if (/not an epub/.test(msg)) return true;
-  if (/no epub format could be imported/.test(msg)) {
-    return /403|429|503|502|404|not an epub/.test(msg);
-  }
-  return false;
-}
-
-async function downloadFirstWorkingEpub(
-  book: GutendexBook,
-  urls: string[],
-  onProgress: (message: string, percent: number | null) => void
-): Promise<File> {
-  const failures: string[] = [];
-  for (let index = 0; index < urls.length; index += 1) {
-    const url = urls[index];
-    try {
-      onProgress(
-        urls.length > 1
-          ? `Step 1 of 2 — Downloading "${book.title}" (format ${index + 1} of ${urls.length})…`
-          : `Step 1 of 2 — Downloading "${book.title}"…`,
-        null
-      );
-      const blob = await fetchEpubBlob(url, (percent) => {
-        onProgress(`Step 1 of 2 — Downloading "${book.title}"…`, percent);
-      });
-      await assertLooksLikeEpub(blob);
-      return new File([blob], `${safeFileName(book.title)}.epub`, {
-        type: "application/epub+zip",
-      });
-    } catch (err) {
-      failures.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  throw new Error(`No EPUB format could be imported. ${failures[0] ?? ""}`.trim());
-}
-
-async function fetchEpubBlob(
-  url: string,
-  onPercent: (percent: number | null) => void
-): Promise<Blob> {
-  const response = await fetch(url, {
-    credentials: "omit",
-    referrerPolicy: "no-referrer",
-  });
-  if (!response.ok) throw new Error(`Download returned ${response.status}`);
-
-  const total = Number(response.headers.get("Content-Length"));
-  const body = response.body;
-  if (!body || !Number.isFinite(total) || total <= 0) {
-    onPercent(null);
-    return response.blob();
-  }
-
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      received += value.length;
-      onPercent(Math.min(99, Math.round((received / total) * 100)));
-    }
-  }
-  onPercent(100);
-  return new Blob(chunks, { type: "application/epub+zip" });
-}
-
 function triggerBrowserDownload(url: string): void {
   const link = document.createElement("a");
   link.href = url;
@@ -822,15 +664,6 @@ function normalizeDownloadUrl(url: string): string {
   }
 }
 
-async function assertLooksLikeEpub(blob: Blob): Promise<void> {
-  const header = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
-  const looksLikeZip = header[0] === 0x50 && header[1] === 0x4b;
-  if (looksLikeZip) return;
-
-  const contentType = blob.type || "unknown content type";
-  throw new Error(`The download was not an EPUB file (${contentType}).`);
-}
-
 function authorLine(book: GutendexBook): string {
   return book.authors.map((author) => author.name).join(", ") || "Unknown author";
 }
@@ -840,8 +673,4 @@ function publicationYear(book: GutendexBook): number {
     .map((author) => author.birth_year)
     .filter((year): year is number => typeof year === "number");
   return years.length ? Math.min(...years) : 0;
-}
-
-function safeFileName(title: string): string {
-  return title.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "open_shelf_book";
 }

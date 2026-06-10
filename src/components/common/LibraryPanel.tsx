@@ -4,13 +4,15 @@ import {
   ArrowLeft,
   BookOpen,
   Check,
-  CheckCircle2,
   ChevronDown,
   Clock,
   Copy,
   FolderOpen,
   Plus,
   Sparkles,
+  Download,
+  ExternalLink,
+  FileText,
   Trash2,
   X,
 } from "lucide-react";
@@ -200,9 +202,9 @@ export default function LibraryPanel({
                 <Clock size={15} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-ink/75">Import History</p>
+                <p className="text-sm font-medium text-ink/75">Downloads</p>
                 <p className="mt-0.5 text-xs text-ink-faint">
-                  {importHistory.length} book{importHistory.length !== 1 ? "s" : ""} — tap to see filenames and status
+                  {importHistory.length} book{importHistory.length !== 1 ? "s" : ""} — filenames and import status
                 </p>
               </div>
             </button>
@@ -364,9 +366,9 @@ function ImportHistoryView({
 }: ImportHistoryViewProps) {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const importedIds = new Set(library.map((b) => b.gutenbergId).filter(Boolean));
-  const hasPendingDownloads = history.some(
+  const pendingCount = history.filter(
     (entry) => entry.filename && !importedIds.has(entry.gutenbergId)
-  );
+  ).length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -378,100 +380,125 @@ function ImportHistoryView({
           >
             <ArrowLeft size={15} />
           </button>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-hair bg-ink/[0.05] text-ink-soft">
+            <Download size={15} />
+          </div>
           <div>
-            <p className="text-sm font-medium text-ink/80">Import History</p>
-            <p className="text-xs text-ink-faint">Open Shelf downloads and imports</p>
+            <p className="text-sm font-medium text-ink/80">Downloads</p>
+            <p className="text-xs text-ink-faint">History of imported books</p>
           </div>
         </div>
         {history.length > 0 && (
           <button
             type="button"
             onClick={onClear}
-            className="text-xs text-ink-faint/60 transition hover:text-ink-faint"
+            className="flex items-center gap-1 text-xs text-ink-faint/60 transition hover:text-ink-faint"
           >
-            Clear all
+            <Trash2 size={12} />
+            Clear
           </button>
         )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {history.length === 0 ? (
-          <p className="py-8 text-center text-xs text-ink-faint">No import history yet.</p>
+          <p className="py-8 text-center text-xs text-ink-faint">No downloads yet.</p>
         ) : (
           <>
-            {hasPendingDownloads && (
-              <div className="mb-3 overflow-hidden rounded-lg border border-hair bg-ink/[0.03]">
-                <button
-                  type="button"
-                  onClick={() => setInstructionsOpen((open) => !open)}
-                  className="flex w-full items-center justify-between px-3 py-2.5 text-left transition hover:bg-ink/[0.05]"
-                >
-                  <span className="text-xs font-medium text-ink-soft">Instructions</span>
-                  <ChevronDown
-                    size={14}
-                    className={`text-ink-faint transition-transform ${instructionsOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-                {instructionsOpen && (
-                  <div className="border-t border-hair px-3 py-2.5">
-                    <ManualImportInstructions compact />
-                    <button
-                      type="button"
-                      onClick={onImport}
-                      className="mt-3 w-full rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-2 text-xs text-lumina-gold transition hover:bg-lumina-gold/15"
-                    >
-                      Choose downloaded file
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="mb-3">
+              <button
+                type="button"
+                onClick={() => setInstructionsOpen((open) => !open)}
+                className="flex w-full items-center justify-between rounded-lg border border-hair bg-ink/[0.03] px-3 py-2 text-left transition hover:bg-ink/[0.05]"
+              >
+                <span className="text-xs text-ink-soft underline decoration-ink-faint/50 underline-offset-2">
+                  How to import downloaded files
+                  {pendingCount > 0 ? ` (${pendingCount} waiting)` : ""}
+                </span>
+                <ChevronDown
+                  size={14}
+                  className={`flex-shrink-0 text-ink-faint transition-transform ${instructionsOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              {instructionsOpen && (
+                <div className="mt-1.5 rounded-lg border border-hair bg-ink/[0.03] px-3 py-2.5">
+                  <ManualImportInstructions compact />
+                  <button
+                    type="button"
+                    onClick={onImport}
+                    className="mt-2.5 w-full rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-2 text-xs text-lumina-gold transition hover:bg-lumina-gold/15"
+                  >
+                    Choose downloaded file
+                  </button>
+                </div>
+              )}
+            </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {history.map((entry) => {
                 const isInLibrary = importedIds.has(entry.gutenbergId);
                 const isCopied = copiedId === entry.gutenbergId;
+                const when = formatHistoryWhen(entry);
+                const downloadUrl = entryDownloadUrl(entry);
 
                 return (
                   <div
                     key={entry.gutenbergId}
-                    className="flex items-center gap-2 rounded-lg border border-hair bg-ink/[0.04] px-2.5 py-2"
+                    className="rounded-lg border border-hair bg-ink/[0.04] p-3"
                   >
-                    <div className="flex-shrink-0">
-                      {isInLibrary ? (
-                        <CheckCircle2 size={14} className="text-green-400/80" />
-                      ) : entry.filename ? (
-                        <Clock size={14} className="text-lumina-gold/70" />
-                      ) : (
-                        <div className="h-3.5 w-3.5 rounded-full border border-hair" />
-                      )}
+                    <div className="flex items-start gap-2">
+                      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-hair bg-black/15 text-ink-faint">
+                        <FileText size={14} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        {entry.filename ? (
+                          <div className="flex items-center gap-1.5">
+                            <p
+                              className="truncate font-mono text-sm font-medium text-ink/90"
+                              title={entry.filename}
+                            >
+                              {entry.filename}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => onCopy(entry)}
+                              className="flex-shrink-0 text-ink-faint transition hover:text-ink-soft"
+                              title="Copy filename"
+                            >
+                              {isCopied ? (
+                                <Check size={12} className="text-green-400" />
+                              ) : (
+                                <Copy size={12} />
+                              )}
+                            </button>
+                          </div>
+                        ) : null}
+                        <p className="mt-0.5 line-clamp-2 text-xs text-ink/75" title={entry.title}>
+                          {entry.title}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-ink-faint">
+                          {when ? <span>{when}</span> : null}
+                          {isInLibrary ? (
+                            <span className="text-green-400/90">Imported</span>
+                          ) : entry.filename ? (
+                            <span className="text-lumina-gold/80">Ready to import</span>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
 
-                    {entry.filename ? (
-                      <span
-                        className="max-w-[38%] flex-shrink-0 truncate font-mono text-[11px] text-ink/75"
-                        title={entry.filename}
-                      >
-                        {entry.filename}
-                      </span>
-                    ) : null}
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium text-ink/85" title={entry.title}>
-                        {entry.title}
-                      </p>
-                    </div>
-
-                    {entry.filename ? (
-                      <button
-                        type="button"
-                        onClick={() => onCopy(entry)}
-                        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-hair bg-ink/[0.06] text-ink-faint transition hover:bg-ink/[0.10] hover:text-ink-soft"
-                        title="Copy filename"
-                        aria-label={`Copy filename ${entry.filename}`}
-                      >
-                        {isCopied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-                      </button>
+                    {!isInLibrary && downloadUrl ? (
+                      <div className="mt-2 flex justify-end border-t border-hair/60 pt-2">
+                        <a
+                          href={downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[10px] text-ink-faint underline decoration-ink-faint/40 underline-offset-2 transition hover:text-ink-soft"
+                        >
+                          Open download link
+                          <ExternalLink size={10} />
+                        </a>
+                      </div>
                     ) : null}
                   </div>
                 );
@@ -482,4 +509,24 @@ function ImportHistoryView({
       </div>
     </div>
   );
+}
+
+function formatHistoryWhen(entry: ImportHistoryEntry): string {
+  const iso = entry.downloadedAt ?? entry.importedAt;
+  if (!iso) return "";
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function entryDownloadUrl(entry: ImportHistoryEntry): string | null {
+  if (entry.downloadUrl) return entry.downloadUrl;
+  if (entry.gutenbergId) {
+    return `https://www.gutenberg.org/ebooks/${entry.gutenbergId}.epub3.images`;
+  }
+  return null;
 }

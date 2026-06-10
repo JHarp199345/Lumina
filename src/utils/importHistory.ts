@@ -4,9 +4,11 @@ export interface ImportHistoryEntry {
   author: string;
   /** Set when the auto-import succeeded (never went to browser download). */
   importedAt?: string;
-  /** Set when the auto-import failed and a browser download was triggered. */
+  /** Set when a browser download was triggered. */
   filename?: string;
   downloadedAt?: string;
+  /** Original download URL for re-download from history. */
+  downloadUrl?: string;
 }
 
 const HISTORY_KEY = "lumina_import_history";
