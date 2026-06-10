@@ -531,7 +531,7 @@ export interface CachedImage {
   descriptionUsed: string;
   styleSeed: StyleSeedId;
   generatedAt: string;
-  generationApi: "imagen3" | "gemini-image" | "flux";
+  generationApi: "imagen3" | "gemini-image" | "flux" | "comfyui";
   emotionalThemes: string[];
 }
 

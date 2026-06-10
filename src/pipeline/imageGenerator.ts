@@ -12,6 +12,7 @@ import type { IdentifiedScene, StyleSeed, CachedImage } from "@/types";
 import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
 import { buildFinalImagePrompt } from "./visualDirector";
+import { getProvider, getOdysseusUrl, getOdysseusToken } from "@/api/llmClient";
 
 const IMAGEN_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const FAL_BASE = "https://queue.fal.run";
@@ -54,33 +55,39 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
     scene.directorBrief?.negativePrompt ??
     (isExpository ? EXPOSITORY_NEGATIVE_PROMPT : NEGATIVE_PROMPT);
 
-  // Try Imagen 3 first
   let imageData: Uint8Array | null = null;
   let apiUsed: CachedImage["generationApi"] = "imagen3";
 
-  try {
-    imageData = await generateWithImagen3(prompt, googleApiKey, negativePrompt);
-  } catch (err) {
-    console.warn("[ImageGen] Imagen failed, trying Gemini image fallback:", err);
-
+  if (getProvider() === "odysseus") {
+    // Local path: ComfyUI via Odysseus proxy
+    imageData = await generateWithComfyUI(prompt, negativePrompt);
+    apiUsed = "comfyui";
+  } else {
+    // Cloud path: Imagen 3 → Gemini image → fal.ai Flux
     try {
-      imageData = await generateWithGeminiImage(prompt, googleApiKey);
-      apiUsed = "gemini-image";
-    } catch (geminiErr) {
-      console.warn("[ImageGen] Gemini image fallback failed:", geminiErr);
+      imageData = await generateWithImagen3(prompt, googleApiKey, negativePrompt);
+    } catch (err) {
+      console.warn("[ImageGen] Imagen failed, trying Gemini image fallback:", err);
 
-      if (falApiKey) {
-        try {
-          imageData = await generateWithFlux(prompt, falApiKey);
-          apiUsed = "flux";
-        } catch (fluxErr) {
-          console.error("[ImageGen] Flux also failed:", fluxErr);
-          throw new Error("Image generation failed on all available APIs");
+      try {
+        imageData = await generateWithGeminiImage(prompt, googleApiKey);
+        apiUsed = "gemini-image";
+      } catch (geminiErr) {
+        console.warn("[ImageGen] Gemini image fallback failed:", geminiErr);
+
+        if (falApiKey) {
+          try {
+            imageData = await generateWithFlux(prompt, falApiKey);
+            apiUsed = "flux";
+          } catch (fluxErr) {
+            console.error("[ImageGen] Flux also failed:", fluxErr);
+            throw new Error("Image generation failed on all available APIs");
+          }
+        } else {
+          throw new Error(
+            `Image generation failed. Imagen: ${describeError(err)}. Gemini image: ${describeError(geminiErr)}.`
+          );
         }
-      } else {
-        throw new Error(
-          `Image generation failed. Imagen: ${describeError(err)}. Gemini image: ${describeError(geminiErr)}.`
-        );
       }
     }
   }
@@ -324,6 +331,32 @@ async function generateWithFlux(prompt: string, falApiKey: string): Promise<Uint
   }
 
   throw new Error("Flux generation timed out");
+}
+
+// ─── ComfyUI via Odysseus ─────────────────────────────────────────────────────
+
+async function generateWithComfyUI(prompt: string, negativePrompt: string): Promise<Uint8Array> {
+  const base = getOdysseusUrl();
+  const token = getOdysseusToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${base}/api/images/generate`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ prompt, negative_prompt: negativePrompt, width: 1024, height: 576 }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`ComfyUI generate error ${res.status}: ${msg}`);
+  }
+
+  const { image_url } = await res.json() as { image_url: string };
+  // image_url is a relative path like /api/images/cache/lumina_xxx.png — prepend base
+  const imgRes = await fetch(`${base}${image_url}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!imgRes.ok) throw new Error(`ComfyUI image fetch error ${imgRes.status}`);
+
+  return new Uint8Array(await imgRes.arrayBuffer());
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
