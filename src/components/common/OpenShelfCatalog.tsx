@@ -15,7 +15,7 @@ import {
 import ManualImportInstructions from "@/components/common/ManualImportInstructions";
 import type { BookStructure } from "@/types";
 import { recordImportHistory } from "@/utils/importHistory";
-import { resolveDownloadFilename } from "@/utils/downloadFilename";
+import { gutenbergFilenameFromUrl, filenameFromUrl, resolveDownloadFilename } from "@/utils/downloadFilename";
 
 interface GutendexBook {
   id: number;
@@ -262,13 +262,16 @@ export default function OpenShelfCatalog({
     setImportStepsOpen(false);
     reportLocal(`Downloading "${book.title}"…`);
 
+    const filename =
+      gutenbergFilenameFromUrl(downloadUrl) ?? filenameFromUrl(downloadUrl);
+
     try {
-      const filename = await resolveDownloadFilename(downloadUrl);
       triggerBrowserDownload(downloadUrl);
       setFallbackDownloadUrl(downloadUrl);
       setManualFallbackFilename(filename);
       setShowManualFallback(true);
-      recordImportHistory({
+
+      await recordImportHistory({
         gutenbergId: book.id,
         title: book.title,
         author: book.authors.map((a) => a.name).join(", "),
@@ -277,6 +280,21 @@ export default function OpenShelfCatalog({
         downloadedAt: new Date().toISOString(),
       });
       onHistoryUpdated?.();
+
+      void resolveDownloadFilename(downloadUrl)
+        .then((resolved) => {
+          if (resolved === filename) return;
+          return recordImportHistory({
+            gutenbergId: book.id,
+            title: book.title,
+            author: book.authors.map((a) => a.name).join(", "),
+            filename: resolved,
+            downloadUrl,
+            downloadedAt: new Date().toISOString(),
+          }).then(() => onHistoryUpdated?.());
+        })
+        .catch(() => { /* keep ledger row with URL-derived filename */ });
+
       setImportPhase("awaiting-manual");
       reportLocal("");
     } catch (err) {

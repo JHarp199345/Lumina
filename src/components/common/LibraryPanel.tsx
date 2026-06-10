@@ -42,10 +42,12 @@ export default function LibraryPanel({
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [openProgress, setOpenProgress] = useState("");
   const [view, setView] = useState<"library" | "open-shelf" | "import-history">("library");
-  const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(() => loadImportHistory());
+  const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
-  const refreshImportHistory = () => setImportHistory(loadImportHistory());
+  const refreshImportHistory = () => {
+    void loadImportHistory().then(setImportHistory);
+  };
 
   useEffect(() => {
     refreshImportHistory();
@@ -131,8 +133,7 @@ export default function LibraryPanel({
               } catch { /* denied */ }
             }}
             onClear={() => {
-              clearImportHistory();
-              setImportHistory([]);
+              void clearImportHistory().then(() => setImportHistory([]));
             }}
             onImport={onImport}
           />

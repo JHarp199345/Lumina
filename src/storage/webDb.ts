@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 
 export const STORES = {
   SOURCE_PROFILES: "source_profiles", // SourceIntelligenceProfile, keyed by bookId
@@ -30,6 +30,7 @@ export const STORES = {
   BOOK_SETTINGS: "book_settings",   // {seedId}, keyed by bookId
   ARCHIVE_BOOKS: "archive_books",   // ArchiveBook, keyed by bookId
   API_KEYS:      "api_keys",        // string values, keyed by key name
+  DOWNLOAD_LEDGER: "download_ledger", // Open Shelf download ledger, keyed by gutenbergId
 } as const;
 
 // ─── Store registry + lifecycle classes (PLANx) ────────────────────────────────
@@ -72,6 +73,7 @@ export const STORE_REGISTRY: StoreDef[] = [
   { name: STORES.STUDY_BADGES,    lifecycle: "userData",  keyPath: "id", indexes: BOOK_INDEX },
   { name: STORES.BOOK_SETTINGS,   lifecycle: "userData" },
   { name: STORES.API_KEYS,        lifecycle: "userData" },
+  { name: STORES.DOWNLOAD_LEDGER, lifecycle: "userData", keyPath: "gutenbergId" },
 
   { name: STORES.SEMANTIC_MAPS,   lifecycle: "generated" },
   { name: STORES.SOURCE_PROFILES, lifecycle: "generated" },

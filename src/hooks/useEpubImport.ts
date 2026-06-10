@@ -172,6 +172,12 @@ export function useEpubImport() {
     };
 
     await runStep("Saving book to library…", () => storage.saveBook(book));
+
+    if (book.gutenbergId) {
+      void import("@/utils/importHistory").then(({ markImportHistoryImported }) =>
+        markImportHistoryImported(book.gutenbergId!)
+      );
+    }
     await runStep("Saving book structure…", () => storage.saveBookStructure(structure));
     await runStep("Resetting reading position…", () =>
       storage.saveProgress({

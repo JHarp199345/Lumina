@@ -220,6 +220,18 @@ async function initSchema(db: Database): Promise<void> {
   `);
   await db.execute(`ALTER TABLE archive_books ADD COLUMN badge_count INTEGER NOT NULL DEFAULT 0`).catch(() => {});
   await db.execute(`ALTER TABLE notes ADD COLUMN source_excerpt TEXT`).catch(() => {});
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS download_ledger (
+      gutenberg_id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL,
+      filename TEXT,
+      download_url TEXT,
+      downloaded_at TEXT,
+      imported_at TEXT
+    );
+  `);
 }
 
 // ─── Books ────────────────────────────────────────────────────────────────────
@@ -996,4 +1008,59 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
   for (const [sql, params] of queries) {
     await db.execute(sql, params).catch(() => {});
   }
+}
+
+// ─── Open Shelf download ledger ───────────────────────────────────────────────
+
+export interface DbDownloadLedgerEntry {
+  gutenbergId: number;
+  title: string;
+  author: string;
+  filename?: string;
+  downloadUrl?: string;
+  downloadedAt?: string;
+  importedAt?: string;
+}
+
+export async function dbLoadDownloadLedger(): Promise<DbDownloadLedgerEntry[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM download_ledger ORDER BY COALESCE(downloaded_at, imported_at) DESC`
+  );
+
+  return rows.map((row) => ({
+    gutenbergId: Number(row.gutenberg_id),
+    title: String(row.title),
+    author: String(row.author),
+    filename: row.filename ? String(row.filename) : undefined,
+    downloadUrl: row.download_url ? String(row.download_url) : undefined,
+    downloadedAt: row.downloaded_at ? String(row.downloaded_at) : undefined,
+    importedAt: row.imported_at ? String(row.imported_at) : undefined,
+  }));
+}
+
+export async function dbSaveDownloadLedger(entries: DbDownloadLedgerEntry[]): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM download_ledger`);
+  for (const entry of entries) {
+    await db.execute(
+      `INSERT OR REPLACE INTO download_ledger
+       (gutenberg_id, title, author, filename, download_url, downloaded_at, imported_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        entry.gutenbergId,
+        entry.title,
+        entry.author,
+        entry.filename ?? null,
+        entry.downloadUrl ?? null,
+        entry.downloadedAt ?? null,
+        entry.importedAt ?? null,
+      ]
+    );
+  }
+}
+
+export async function dbClearDownloadLedger(): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM download_ledger`);
 }
