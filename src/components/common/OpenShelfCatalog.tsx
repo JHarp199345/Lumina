@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Check, Copy, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, Clock, Copy, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import type { BookStructure } from "@/types";
 import { recordImportHistory } from "@/utils/importHistory";
+import { resolveDownloadFilename } from "@/utils/downloadFilename";
+import ManualImportInstructions from "@/components/common/ManualImportInstructions";
 
 interface GutendexBook {
   id: number;
@@ -25,6 +27,12 @@ interface OpenShelfCatalogProps {
   onImport: () => void;
   onImportProgress?: (message: string) => void;
   onBookImported?: (structure: BookStructure) => void;
+  /** Number of import-history entries (drives header History button). */
+  historyCount?: number;
+  /** Called after history is written so the parent can refresh its list. */
+  onHistoryUpdated?: () => void;
+  /** Open the library Import History view. */
+  onOpenHistory?: () => void;
 }
 
 const GENRES = [
@@ -73,6 +81,9 @@ export default function OpenShelfCatalog({
   onImport,
   onImportProgress,
   onBookImported,
+  historyCount = 0,
+  onHistoryUpdated,
+  onOpenHistory,
 }: OpenShelfCatalogProps) {
   const { importEpubFile } = useEpubImport();
   const [query, setQuery] = useState("");
@@ -259,13 +270,15 @@ export default function OpenShelfCatalog({
         author: result.book.author,
         importedAt: new Date().toISOString(),
       });
+      onHistoryUpdated?.();
       setImportPhase("done");
       report(`Added "${result.book.title}" by ${result.book.author}. Choose a visual style next.`);
       onBookImported?.(result.structure);
       window.setTimeout(onClose, 1400);
     } catch (err) {
-      const filename = `${safeFileName(book.title)}.epub`;
-      startBrowserDownload(epubUrls[0], filename);
+      const downloadUrl = epubUrls[0];
+      const filename = await resolveDownloadFilename(downloadUrl);
+      startBrowserDownload(downloadUrl, filename);
       console.warn("[OpenShelf] Automatic import failed; browser download fallback started.", err);
       recordImportHistory({
         gutenbergId: book.id,
@@ -274,6 +287,7 @@ export default function OpenShelfCatalog({
         filename,
         downloadedAt: new Date().toISOString(),
       });
+      onHistoryUpdated?.();
       needsManualImport = true;
       setImportPhase("manual");
       setManualFallbackTitle(book.title);
@@ -304,7 +318,7 @@ export default function OpenShelfCatalog({
           >
             <ArrowLeft size={15} />
           </button>
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-ink/80">Open Shelf</p>
             <p className="text-xs text-ink-faint">
               {totalCount
@@ -312,6 +326,17 @@ export default function OpenShelfCatalog({
                 : "Public-domain books ready to download."}
             </p>
           </div>
+          {historyCount > 0 && onOpenHistory ? (
+            <button
+              type="button"
+              onClick={onOpenHistory}
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-hair bg-ink/[0.05] px-2.5 py-1.5 text-xs text-ink-soft transition hover:bg-ink/[0.08] hover:text-ink/80"
+              title="Import history"
+            >
+              <Clock size={13} />
+              History
+            </button>
+          ) : null}
         </div>
 
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-hair bg-black/20 px-3 py-2">
@@ -415,14 +440,7 @@ export default function OpenShelfCatalog({
                 <p className="mt-0.5 font-mono text-xs text-ink/90">{manualFallbackFilename}</p>
               </div>
 
-              <div className="space-y-1 text-[11px] leading-relaxed text-ink-faint">
-                <p><span className="text-ink-soft">Safari:</span> tap the ↓ icon in the address bar, then tap the file.</p>
-                <p><span className="text-ink-soft">Chrome:</span> tap ⋮ → Downloads, then tap the file.</p>
-                <p><span className="text-ink-soft">Files app:</span> Browse → iPhone → Downloads, or search the filename above.</p>
-                <p className="pt-0.5 text-[10px] text-ink-faint/70">
-                  Chrome on iOS sometimes opens the file in a tab instead of downloading — if that happened, use Safari to re-try.
-                </p>
-              </div>
+              <ManualImportInstructions />
 
               <div className="flex gap-2">
                 <button

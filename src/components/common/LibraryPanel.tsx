@@ -1,6 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, BookOpen, Check, CheckCircle2, Clock, Copy, FolderOpen, Plus, Sparkles, Trash2, X } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Copy,
+  FolderOpen,
+  Plus,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
+import ManualImportInstructions from "@/components/common/ManualImportInstructions";
 import { useBookStore } from "@/store/bookStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { storage } from "@/storage";
@@ -28,6 +42,12 @@ export default function LibraryPanel({
   const [view, setView] = useState<"library" | "open-shelf" | "import-history">("library");
   const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(() => loadImportHistory());
   const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  const refreshImportHistory = () => setImportHistory(loadImportHistory());
+
+  useEffect(() => {
+    refreshImportHistory();
+  }, []);
 
   const reportOpenProgress = (message: string) => {
     setOpenProgress(message);
@@ -77,13 +97,21 @@ export default function LibraryPanel({
       >
         {view === "open-shelf" ? (
           <OpenShelfCatalog
-            onBack={() => setView("library")}
+            onBack={() => {
+              refreshImportHistory();
+              setView("library");
+            }}
             onClose={onClose}
             onImport={onImport}
             onImportProgress={onImportProgress}
+            historyCount={importHistory.length}
+            onHistoryUpdated={refreshImportHistory}
+            onOpenHistory={() => {
+              refreshImportHistory();
+              setView("import-history");
+            }}
             onBookImported={(structure) => {
-              // Refresh history so the checkmark appears if they imported a previously-downloaded book
-              setImportHistory(loadImportHistory());
+              refreshImportHistory();
               onBookImported?.(structure);
             }}
           />
@@ -160,7 +188,7 @@ export default function LibraryPanel({
             <button
               type="button"
               onClick={() => {
-                setImportHistory(loadImportHistory());
+                refreshImportHistory();
                 setView("import-history");
               }}
               className="mb-3 flex w-full items-center gap-3 rounded-lg border border-hair bg-ink/[0.04] p-3 text-left transition-colors hover:bg-ink/[0.07]"
@@ -331,7 +359,11 @@ function ImportHistoryView({
   onClear,
   onImport,
 }: ImportHistoryViewProps) {
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
   const importedIds = new Set(library.map((b) => b.gutenbergId).filter(Boolean));
+  const hasPendingDownloads = history.some(
+    (entry) => entry.filename && !importedIds.has(entry.gutenbergId)
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -345,7 +377,7 @@ function ImportHistoryView({
           </button>
           <div>
             <p className="text-sm font-medium text-ink/80">Import History</p>
-            <p className="text-xs text-ink-faint">Books you&apos;ve added from Open Shelf</p>
+            <p className="text-xs text-ink-faint">Open Shelf downloads and imports</p>
           </div>
         </div>
         {history.length > 0 && (
@@ -363,67 +395,86 @@ function ImportHistoryView({
         {history.length === 0 ? (
           <p className="py-8 text-center text-xs text-ink-faint">No import history yet.</p>
         ) : (
-          <div className="space-y-2">
-            {history.map((entry) => {
-              const isInLibrary = importedIds.has(entry.gutenbergId);
-              const wasFallback = Boolean(entry.filename);
-              const isCopied = copiedId === entry.gutenbergId;
-
-              return (
-                <div
-                  key={entry.gutenbergId}
-                  className="rounded-lg border border-hair bg-ink/[0.04] p-3"
+          <>
+            {hasPendingDownloads && (
+              <div className="mb-3 overflow-hidden rounded-lg border border-hair bg-ink/[0.03]">
+                <button
+                  type="button"
+                  onClick={() => setInstructionsOpen((open) => !open)}
+                  className="flex w-full items-center justify-between px-3 py-2.5 text-left transition hover:bg-ink/[0.05]"
                 >
-                  <div className="flex items-start gap-2">
-                    <div className="mt-0.5 flex-shrink-0">
+                  <span className="text-xs font-medium text-ink-soft">Instructions</span>
+                  <ChevronDown
+                    size={14}
+                    className={`text-ink-faint transition-transform ${instructionsOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {instructionsOpen && (
+                  <div className="border-t border-hair px-3 py-2.5">
+                    <ManualImportInstructions compact />
+                    <button
+                      type="button"
+                      onClick={onImport}
+                      className="mt-3 w-full rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-2 text-xs text-lumina-gold transition hover:bg-lumina-gold/15"
+                    >
+                      Choose downloaded file
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              {history.map((entry) => {
+                const isInLibrary = importedIds.has(entry.gutenbergId);
+                const isCopied = copiedId === entry.gutenbergId;
+
+                return (
+                  <div
+                    key={entry.gutenbergId}
+                    className="flex items-center gap-2 rounded-lg border border-hair bg-ink/[0.04] px-2.5 py-2"
+                  >
+                    <div className="flex-shrink-0">
                       {isInLibrary ? (
-                        <CheckCircle2 size={15} className="text-green-400/80" />
+                        <CheckCircle2 size={14} className="text-green-400/80" />
+                      ) : entry.filename ? (
+                        <Clock size={14} className="text-lumina-gold/70" />
                       ) : (
-                        <div className="h-[15px] w-[15px] rounded-full border border-hair" />
+                        <div className="h-3.5 w-3.5 rounded-full border border-hair" />
                       )}
                     </div>
+
+                    {entry.filename ? (
+                      <span
+                        className="max-w-[38%] flex-shrink-0 truncate font-mono text-[11px] text-ink/75"
+                        title={entry.filename}
+                      >
+                        {entry.filename}
+                      </span>
+                    ) : null}
+
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-ink/80">{entry.title}</p>
-                      <p className="mt-0.5 truncate text-xs text-ink-faint">{entry.author}</p>
-                      <p className="mt-1 text-[11px] text-ink-faint">
-                        {isInLibrary
-                          ? "In your library"
-                          : wasFallback
-                            ? "Downloaded — not yet imported"
-                            : "Not in library"}
+                      <p className="truncate text-xs font-medium text-ink/85" title={entry.title}>
+                        {entry.title}
                       </p>
                     </div>
-                  </div>
 
-                  {wasFallback && !isInLibrary && (
-                    <div className="mt-2.5 space-y-2">
-                      <div className="rounded-md border border-hair bg-black/20 px-3 py-1.5">
-                        <p className="text-[10px] uppercase tracking-wide text-ink-faint">Search for this file</p>
-                        <p className="mt-0.5 font-mono text-xs text-ink/85">{entry.filename}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onCopy(entry)}
-                          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-hair bg-ink/[0.06] px-3 py-2 text-xs text-ink-soft transition hover:bg-ink/[0.10]"
-                        >
-                          {isCopied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-                          {isCopied ? "Copied!" : "Copy filename"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={onImport}
-                          className="flex flex-1 items-center justify-center rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-2 text-xs text-lumina-gold transition hover:bg-lumina-gold/15"
-                        >
-                          Choose file
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    {entry.filename ? (
+                      <button
+                        type="button"
+                        onClick={() => onCopy(entry)}
+                        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-hair bg-ink/[0.06] text-ink-faint transition hover:bg-ink/[0.10] hover:text-ink-soft"
+                        title="Copy filename"
+                        aria-label={`Copy filename ${entry.filename}`}
+                      >
+                        {isCopied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     </div>
