@@ -56,7 +56,11 @@ export default function AudioOverview() {
   const [scopeType, setScopeType] = useState<OverviewScope["type"]>("whole");
   const [chosenChapterIds, setChosenChapterIds] = useState<Set<string>>(new Set());
   const [minutes, setMinutes] = useState<number>(LUMINA_CONFIG.AUDIO_OVERVIEW_DEFAULT_MIN);
-  const [voiceId, setVoiceId] = useState<string>(LUMINA_CONFIG.AUDIO_OVERVIEW_DEFAULT_VOICE);
+  const [voiceId, setVoiceId] = useState<string>(
+    getProvider() === "odysseus"
+      ? (KOKORO_VOICES[0]?.id ?? LUMINA_CONFIG.AUDIO_OVERVIEW_DEFAULT_VOICE)
+      : LUMINA_CONFIG.AUDIO_OVERVIEW_DEFAULT_VOICE
+  );
   const [prompt, setPrompt] = useState("");           // the editable instruction text
   const [selectedAngleId, setSelectedAngleId] = useState<string | null>(null);
   const [profile, setProfile] = useState<SourceIntelligenceProfile | null>(null);
@@ -481,7 +485,10 @@ export default function AudioOverview() {
                         {artifact.segmentTitle}
                       </p>
                       <p className="text-[10px] text-ink-faint">
-                        ~{artifact.overviewMinutes ?? "?"} min · {artifact.voiceId}
+                        ~{artifact.overviewMinutes ?? "?"} min ·{" "}
+                        {(artifact.provider === "local" ? KOKORO_VOICES : GEMINI_VOICES).find(
+                          (v) => v.id === artifact.voiceId
+                        )?.label ?? artifact.voiceId}
                         {artifact.overviewPrompt ? " · custom" : " · default"}
                       </p>
                     </div>

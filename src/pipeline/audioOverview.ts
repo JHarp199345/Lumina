@@ -86,7 +86,10 @@ export function scopeLabel(scope: OverviewScope, structure: BookStructure): stri
   const chs = chaptersForScope(scope, structure);
   if (scope.type === "whole") return "Whole book overview";
   if (chs.length === 1) return `Overview · ${chs[0].title || "Chapter"}`;
-  return `Overview · ${chs.length} chapters`;
+  const shorten = (t: string) => (t.length > 28 ? t.slice(0, 27) + "…" : t);
+  const titles = chs.map((c) => shorten(c.title || `Ch ${c.index + 1}`));
+  if (chs.length === 2) return `Overview · ${titles[0]} & ${titles[1]}`;
+  return `Overview · ${titles[0]}, ${titles[1]} +${chs.length - 2}`;
 }
 
 // ─── Tier 1: instant outline from the ingestion map (no API call) ───────────────
@@ -267,14 +270,14 @@ export async function generateOverviewScript(args: ScriptArgs): Promise<string> 
 
   const prompt = `${instruction}
 
-You have approximately ${minutes} minutes — about ${targetWords} spoken words. Aim close to that length; do not pad with filler to fill time.
+Write EXACTLY ${targetWords} spoken words — this is ${minutes} minutes of narration at a calm explanatory pace. You must reach this word count. Develop each point fully with concrete examples, vivid details, and smooth transitions. Every key concept deserves thorough exploration. Do not end early or give a brief summary where depth is called for.
 
 Write CONTINUOUS SPOKEN NARRATION meant to be heard, not read. Do NOT include headings, bullet points, stage directions, speaker labels, or any markup — only the words to be spoken, in flowing paragraphs.
 
 MATERIAL TO EXPLAIN:
 ${truncateWords(context, 7000)}`;
 
-  const maxTokens = Math.min(8192, Math.round(targetWords * 2.2));
+  const maxTokens = Math.min(8192, Math.round(targetWords * 3.0));
   const script = await llmGenerate("audio_director", prompt, { temperature: 0.7, maxTokens, geminiKey: apiKey });
   return script.trim();
 }
