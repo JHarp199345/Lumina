@@ -115,7 +115,7 @@ async function _callOdysseus(
 
   const body: Record<string, unknown> = {
     messages: [{ role: "user", content: prompt }],
-    stream: false,
+    stream: true,  // streaming keeps the tunnel alive; each token resets Cloudflare's idle timer
   };
   if (options.temperature !== undefined) body.temperature = options.temperature;
   if (options.maxTokens !== undefined) body.max_tokens = options.maxTokens;
@@ -126,8 +126,36 @@ async function _callOdysseus(
     throw new Error(`Odysseus ${res.status}: ${text}`);
   }
 
-  const data = await res.json() as { content?: string };
-  return data.content ?? "";
+  // Read SSE stream: data: {"delta": "..."} … data: [DONE]
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("Odysseus: no response body");
+
+  const decoder = new TextDecoder();
+  let content = "";
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";   // keep incomplete last line for next chunk
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const payload = line.slice(6).trim();
+      if (payload === "[DONE]") return content;
+      try {
+        const parsed = JSON.parse(payload) as { delta?: string; content?: string };
+        content += parsed.delta ?? parsed.content ?? "";
+      } catch {
+        // malformed chunk — skip
+      }
+    }
+  }
+
+  return content;
 }
 
 // ── Gemini fallback ────────────────────────────────────────────────────────────
