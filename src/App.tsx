@@ -285,7 +285,7 @@ function App() {
     if (importFailed) return "The failed step is listed below.";
     const step = importProgress.toLowerCase();
     if (step.includes("downloading") || step.includes("step 1")) {
-      return "Downloading from Project Gutenberg — keep this screen open.";
+      return "Keep this screen open while the book downloads.";
     }
     if (step.includes("parsing") || step.includes("reading epub") || step.includes("step 2")) {
       return "Parsing chapters and preparing your library…";

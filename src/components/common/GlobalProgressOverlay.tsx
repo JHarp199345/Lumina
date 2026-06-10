@@ -30,7 +30,7 @@ const EXPOSITORY_PHASE_LABELS: Record<AnalysisProgressPhase, string> = {
 
 function estimateImportPercent(message: string): number {
   const step = message.toLowerCase();
-  if (step.includes("failed")) return 0;
+  if (step.includes("failed") || step.includes("unsuccessful")) return 0;
   if (step.includes("imported") || step.includes("added")) return 100;
   if (step.includes("mounting") || step.includes("done:")) return 92;
   if (step.includes("saving")) return 82;
