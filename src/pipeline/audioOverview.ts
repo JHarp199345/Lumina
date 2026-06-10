@@ -161,7 +161,7 @@ function buildSourceContext(
   const chapters = chaptersForScope(scope, structure);
 
   // Chapter scope — include real text, capped to a safe word budget.
-  const MAX_WORDS = 6000;
+  const MAX_WORDS = 10000;
   let budget = MAX_WORDS;
   const parts: string[] = [];
   for (const c of chapters) {
@@ -246,18 +246,35 @@ export async function generateOverviewScript(args: ScriptArgs): Promise<string> 
 
   const targetWords = Math.round(minutes * LUMINA_CONFIG.AUDIO_OVERVIEW_WPM);
 
-  // Grounding: prefer the SIP (discovered meaning); for chapter scope add real prose.
-  let context: string;
-  if (profile) {
-    context = profileGroundingText(profile);
-    if (scope.type !== "whole") {
-      const prose = buildSourceContext(scope, structure, semanticMap);
-      if (prose) context += `\n\nRelevant passages:\n${prose}`;
-    }
-  } else {
-    context = buildSourceContext(scope, structure, semanticMap);
-  }
+  // ── Layer 1: structural outline (chapter path, arc, themes — always free) ──
+  const outline = buildScopeOutline(scope, structure, semanticMap);
 
+  // ── Layer 2: source intelligence profile (deep meaning, relationships) ──────
+  const profileSection = profile ? profileGroundingText(profile) : "";
+
+  // ── Layer 3: raw prose passages ────────────────────────────────────────────
+  // Always include for chapter/choose scope; omit for whole-book (too large).
+  const prose = scope.type !== "whole" ? buildSourceContext(scope, structure, semanticMap) : "";
+
+  // ── Assemble combined context ──────────────────────────────────────────────
+  const contextParts: string[] = [];
+  if (profileSection) contextParts.push(profileSection);
+  if (outline) contextParts.push(`STRUCTURE:\n${outline}`);
+  if (prose) contextParts.push(`SOURCE PASSAGES:\n${prose}`);
+  const context = contextParts.join("\n\n") || outline;
+
+  // ── Coverage checklist: every key idea the narration must address ──────────
+  const coverageItems: string[] = [
+    ...(profile?.concepts.mainIdeas ?? []),
+    ...(profile?.progression ?? []),
+    ...(profile?.concepts.keyTerms?.slice(0, 10) ?? []),
+  ].filter(Boolean);
+
+  const coverageSection = coverageItems.length
+    ? `\nCOVERAGE CHECKLIST — your narration must address every item below. Do not skip any:\n${coverageItems.map((item) => `  - ${item}`).join("\n")}\n`
+    : "";
+
+  // ── Instruction ────────────────────────────────────────────────────────────
   const protocol = knowledgeProtocol(semanticMap, profile);
   const workType = knowledgeWorkType(semanticMap, profile);
   const defaultSpine = profile
@@ -269,15 +286,15 @@ export async function generateOverviewScript(args: ScriptArgs): Promise<string> 
     : defaultSpine;
 
   const prompt = `${instruction}
-
-Write EXACTLY ${targetWords} spoken words — this is ${minutes} minutes of narration at a calm explanatory pace. You must reach this word count. Develop each point fully with concrete examples, vivid details, and smooth transitions. Every key concept deserves thorough exploration. Do not end early or give a brief summary where depth is called for.
+${coverageSection}
+Your explanation must be thorough and complete. Do not abbreviate, rush past, or skip key ideas — cover each concept in enough depth that a listener builds real understanding. Aim for approximately ${minutes} minutes of narration (~${targetWords} words at a calm pace). Let the material determine the length; completeness matters more than hitting a target.
 
 Write CONTINUOUS SPOKEN NARRATION meant to be heard, not read. Do NOT include headings, bullet points, stage directions, speaker labels, or any markup — only the words to be spoken, in flowing paragraphs.
 
 MATERIAL TO EXPLAIN:
-${truncateWords(context, 7000)}`;
+${truncateWords(context, 12000)}`;
 
-  const maxTokens = Math.min(8192, Math.round(targetWords * 3.0));
+  const maxTokens = Math.min(8192, Math.round(targetWords * 2.5));
   const script = await llmGenerate("audio_director", prompt, { temperature: 0.7, maxTokens, geminiKey: apiKey });
   return script.trim();
 }
