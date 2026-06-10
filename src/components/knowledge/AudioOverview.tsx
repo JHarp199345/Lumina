@@ -15,8 +15,10 @@ import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
 import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
+import { getProvider } from "@/api/llmClient";
 import {
   GEMINI_VOICES,
+  KOKORO_VOICES,
   GOOGLE_KEY_NAME,
   suggestFullerPrompt,
   type OverviewScope,
@@ -109,8 +111,9 @@ export default function AudioOverview() {
     });
   }, [activeBook, jobStatus]);
 
-  // Key check.
+  // Key check — Odysseus provider needs no Google key.
   useEffect(() => {
+    if (getProvider() === "odysseus") { setHasKey(true); return; }
     let cancelled = false;
     storage
       .loadApiKey(GOOGLE_KEY_NAME)
@@ -159,10 +162,10 @@ export default function AudioOverview() {
         setProfile(existing);
         return;
       }
-      // No profile yet — build it if we have analysis + a key.
-      const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
+      // No profile yet — build it if we have analysis + a key (or Odysseus mode).
+      const apiKey = (await storage.loadApiKey(GOOGLE_KEY_NAME)) ?? "";
       if (cancelled) return;
-      if (!apiKey || !activeSemanticMap) return; // nothing to build from yet
+      if ((!apiKey && getProvider() === "gemini") || !activeSemanticMap) return;
       setProfileBuilding(true);
       try {
         const built = await buildSourceProfile(activeStructure, activeSemanticMap, apiKey);
@@ -200,8 +203,8 @@ export default function AudioOverview() {
   // Expand the current ghost angle (or a fresh one) into a fuller directive.
   const requestFullerSuggestion = async (ghostAngle?: SourceProfileSuggestion | null) => {
     if (!activeStructure) return;
-    const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
-    if (!apiKey) {
+    const apiKey = (await storage.loadApiKey(GOOGLE_KEY_NAME)) ?? "";
+    if (!apiKey && getProvider() === "gemini") {
       setHasKey(false);
       return;
     }
@@ -230,7 +233,7 @@ export default function AudioOverview() {
       return;
     }
     const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
-    if (!apiKey) {
+    if (!apiKey && getProvider() === "gemini") {
       setHasKey(false);
       setLocalError("Add your Google AI Studio key in Settings to generate an overview.");
       return;
@@ -420,7 +423,7 @@ export default function AudioOverview() {
             onChange={(e) => setVoiceId(e.target.value)}
             className="mt-2 w-full rounded-lg border border-hair bg-surface-dark px-2 py-2 text-xs text-ink-soft focus:outline-none"
           >
-            {GEMINI_VOICES.map((v) => (
+            {(getProvider() === "odysseus" ? KOKORO_VOICES : GEMINI_VOICES).map((v) => (
               <option key={v.id} value={v.id}>
                 {v.label} — {v.description}
               </option>
@@ -438,7 +441,9 @@ export default function AudioOverview() {
           {overviewGenerating ? jobProgress || "Generating…" : "Generate Overview"}
         </button>
         <p className="text-center text-[10px] text-ink-faint">
-          Larger generation — uses more of your Google quota than a single image.
+          {getProvider() === "odysseus"
+            ? "Runs locally via Odysseus — script and audio generation chained."
+            : "Larger generation — uses more of your Google quota than a single image."}
         </p>
 
         {error && <p className="text-[11px] leading-relaxed text-rose-400/80">{error}</p>}

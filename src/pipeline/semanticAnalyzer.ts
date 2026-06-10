@@ -27,11 +27,10 @@ import type {
   AnalysisProgressReporter,
 } from "@/types";
 import { LUMINA_CONFIG } from "@/config";
+import { llmGenerate, llmGenerateJSON } from "@/api/llmClient";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
 import { buildVisualSlotPlan } from "@/utils/sceneDedup";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 // ─── Main Entry Point ─────────────────────────────────────────────────────────
 
@@ -295,8 +294,11 @@ Identify concisely:
 Respond in JSON: { "dominantEmotions": ["...", "..."], "centralThemes": ["...", "..."] }`;
 
   try {
-    const raw = await callGemini(prompt, apiKey, 256);
-    const parsed = parseJsonResponse<{ dominantEmotions: string[]; centralThemes: string[] }>(raw);
+    const parsed = await llmGenerateJSON<{ dominantEmotions?: string[]; centralThemes?: string[] }>("reading", prompt, {
+      temperature: 0.7,
+      maxTokens: 256,
+      geminiKey: apiKey,
+    });
     return {
       dominantEmotions: parsed.dominantEmotions || [],
       centralThemes: parsed.centralThemes || [],
@@ -440,8 +442,11 @@ JSON response:
   "narrativeWeight": 0.7
 }`;
 
-  const raw = await callGemini(prompt, apiKey, 512);
-  const parsed = parseJsonResponse<Partial<IdentifiedScene>>(raw);
+  const parsed = await llmGenerateJSON<Partial<IdentifiedScene>>("reading", prompt, {
+    temperature: 0.7,
+    maxTokens: 512,
+    geminiKey: apiKey,
+  });
 
   const openingAnchor = pickSceneAnchor(chapter, structure.editionPipeline, {
     atOpening: true,
@@ -500,8 +505,11 @@ JSON response:
   "narrativeWeight": 0.8
 }`;
 
-  const raw = await callGemini(prompt, apiKey, 512);
-  const parsed = parseJsonResponse<Partial<IdentifiedScene>>(raw);
+  const parsed = await llmGenerateJSON<Partial<IdentifiedScene>>("reading", prompt, {
+    temperature: 0.7,
+    maxTokens: 512,
+    geminiKey: apiKey,
+  });
 
   const inflectionAnchor = pickSceneAnchor(chapter, structure.editionPipeline, {
     inflectionPoint,
@@ -587,24 +595,11 @@ Write a 2-4 sentence image generation prompt that:
 
 Respond with ONLY the prompt text, no JSON, no quotes, no explanation.`;
 
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.85,
-        topP: 0.95,
-        maxOutputTokens: 300,
-      },
-    }),
-  });
-
-  if (!response.ok) throw new Error(`Gemini error ${response.status}`);
-
-  const data = await response.json();
-  return (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
+  return (await llmGenerate("visual_analyst", prompt, {
+    temperature: 0.85,
+    maxTokens: 300,
+    geminiKey: apiKey,
+  })).trim();
 }
 
 function buildFallbackDescription(scene: IdentifiedScene, macroArc: MacroArc): string {
@@ -634,48 +629,9 @@ function calculateGoldenNumber(totalWords: number, candidateCount: number): numb
 // it scores by setup→payoff role and completes chains instead of taking the
 // top-sentiment N.
 
-// ─── Gemini Helpers ───────────────────────────────────────────────────────────
-
-async function callGemini(prompt: string, apiKey: string, maxTokens = 1024): Promise<string> {
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.7,
-        topP: 0.9,
-        maxOutputTokens: maxTokens,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${err}`);
-  }
-
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-}
-
 function truncateText(text: string, maxWords: number): string {
   const words = text.split(/\s+/);
   if (words.length <= maxWords) return text;
   return words.slice(0, maxWords).join(" ") + "…";
 }
 
-function parseJsonResponse<T>(raw: string): T {
-  const cleaned = raw
-    .replace(/```json\n?/gi, "")
-    .replace(/```\n?/gi, "")
-    .trim();
-  try {
-    return JSON.parse(cleaned) as T;
-  } catch {
-    console.error("[Semantic] Failed to parse JSON:", cleaned.slice(0, 200));
-    return {} as T;
-  }
-}

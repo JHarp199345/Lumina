@@ -759,7 +759,7 @@ export interface StudyFlashcard {
 // ─── Voice Studio (PLANVI) ────────────────────────────────────────────────────
 
 export type AudioArtifactStatus = "queued" | "generating" | "ready" | "failed";
-export type AudioProvider = "gemini" | "elevenlabs";
+export type AudioProvider = "gemini" | "elevenlabs" | "local";
 export type AudioGenerationMode = "saved" | "streamed";
 export type AudioArtifactScope = "segment" | "chapter" | "overview";
 

@@ -6,7 +6,7 @@
  * Powers Audio Overview and Presentation Studio prompts.
  */
 
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerate } from "@/api/llmClient";
 import { gatherExpositoryAnalysisGrounding, knowledgeProtocol } from "@/pipeline/knowledgeGrounding";
 import type {
   AnalysisProtocol,
@@ -17,8 +17,6 @@ import type {
   SourceProfileSuggestion,
   WorkType,
 } from "@/types";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 // ─── Public entry ────────────────────────────────────────────────────────────
 
@@ -403,23 +401,12 @@ export function defaultSpineForType(workType: WorkType, minutes: number, targetW
 // ─── Gemini JSON helper ─────────────────────────────────────────────────────────
 
 async function geminiJson(prompt: string, apiKey: string): Promise<RawProfile> {
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.6,
-        topP: 0.9,
-        maxOutputTokens: 4096,
-        responseMimeType: "application/json",
-      },
-    }),
+  const text = await llmGenerate("retrieval", prompt, {
+    temperature: 0.6,
+    maxTokens: 4096,
+    geminiKey: apiKey,
+    jsonMode: true,
   });
-  if (!res.ok) throw new Error(`Gemini error ${res.status}: ${await res.text().catch(() => "")}`);
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p?.text ?? "").join("") ?? "{}";
   return parseJson(text);
 }
 

@@ -1,4 +1,4 @@
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerateJSON } from "@/api/llmClient";
 import { findRelevantLoreEntities, formatLoreForPrompt } from "@/pipeline/visualLore";
 import type {
   AnalysisProgressReporter,
@@ -18,8 +18,6 @@ import type {
   VisualBeat,
   VisualLoreEntity,
 } from "@/types";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 const MOMENT_FUNCTIONS: MomentFunction[] = [
   "threshold",
@@ -249,8 +247,11 @@ export async function createVisualDirectorBrief(params: {
   const prompt = buildDirectorPrompt({ ...params, nearbyText, memory, beat, loreEntities });
 
   try {
-    const raw = await callGemini(prompt, params.apiKey, 1600);
-    const parsed = parseJsonResponse<Partial<VisualDirectorBrief>>(raw);
+    const parsed = await llmGenerateJSON<Partial<VisualDirectorBrief>>("visual_analyst", prompt, {
+      temperature: 0.65,
+      maxTokens: 1600,
+      geminiKey: params.apiKey,
+    });
     return normalizeBrief(parsed, params, nearbyText, memory);
   } catch (err) {
     console.warn("[VisualDirector] Brief generation failed, using fallback:", err);
@@ -833,32 +834,3 @@ function cleanArray(value: unknown, fallback: string[]): string[] {
   return cleaned.length ? cleaned.slice(0, 8) : fallback;
 }
 
-async function callGemini(prompt: string, apiKey: string, maxTokens: number): Promise<string> {
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.65,
-        topP: 0.9,
-        maxOutputTokens: maxTokens,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini visual director error ${response.status}: ${err}`);
-  }
-
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-}
-
-function parseJsonResponse<T>(raw: string): T {
-  const cleaned = raw.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
-  return JSON.parse(cleaned) as T;
-}

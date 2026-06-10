@@ -3,6 +3,7 @@
  */
 
 import { LUMINA_CONFIG } from "@/config";
+import { getProvider } from "@/api/llmClient";
 import {
   generateAudioOverview,
   GOOGLE_KEY_NAME,
@@ -41,8 +42,10 @@ async function ensureProfile(
 export async function runAudioOverviewJob(
   params: AudioOverviewJobParams
 ): Promise<AudioArtifact | null> {
-  const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
-  if (!apiKey) throw new Error("Add your Google AI Studio key in Settings to generate an overview.");
+  const apiKey = (await storage.loadApiKey(GOOGLE_KEY_NAME)) ?? "";
+  if (!apiKey && getProvider() === "gemini") {
+    throw new Error("Add your Google AI Studio key in Settings to generate an overview.");
+  }
 
   params.onProgress("Preparing source intelligence…");
   const enrichedProfile = await ensureProfile(params, apiKey);
@@ -73,10 +76,10 @@ export async function runAudioOverviewJob(
     chapterIndex: params.scope.type === "current" ? Math.max(0, params.scope.currentChapterIndex ?? 0) : 0,
     segmentTitle: scopeLabel(params.scope, params.structure),
     voiceId: params.voiceName,
-    provider: "gemini",
+    provider: getProvider() === "odysseus" ? "local" : "gemini",
     scope: "overview",
     voiceProviderId: params.voiceName,
-    modelId: LUMINA_CONFIG.GEMINI_TTS_MODEL,
+    modelId: getProvider() === "odysseus" ? "kokoro" : LUMINA_CONFIG.GEMINI_TTS_MODEL,
     mode: "saved",
     stylePresetId: "overview",
     textHash: "",
@@ -84,7 +87,7 @@ export async function runAudioOverviewJob(
     mimeType: audio.mimeType,
     durationSeconds: audio.durationSeconds,
     generatedAt: new Date().toISOString(),
-    generationApi: "gemini-tts",
+    generationApi: getProvider() === "odysseus" ? "kokoro" : "gemini-tts",
     status: "ready",
     overviewMinutes: params.minutes,
     overviewPrompt: effectivePrompt,

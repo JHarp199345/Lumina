@@ -13,9 +13,7 @@
  */
 
 import type { AnalysisProgressReporter, ArcShape, InflectionPoint } from "@/types";
-import { LUMINA_CONFIG } from "@/config";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+import { llmGenerateJSON } from "@/api/llmClient";
 
 // ─── Six Canonical Arc Shapes ─────────────────────────────────────────────────
 
@@ -130,26 +128,11 @@ Respond with ONLY a JSON array of numbers in order, one per chapter. Example: [-
 Numbers must be between -1.0 and 1.0.`;
 
   try {
-    const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 256,
-          responseMimeType: "application/json",
-        },
-      }),
+    const parsed = await llmGenerateJSON<unknown[]>("reading", prompt, {
+      temperature: 0.3,
+      maxTokens: 256,
+      geminiKey: apiKey,
     });
-
-    if (!response.ok) throw new Error(`Gemini error ${response.status}`);
-
-    const data = await response.json();
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-    const cleaned = raw.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
-    const parsed = JSON.parse(cleaned);
 
     if (Array.isArray(parsed)) {
       return chapters.map((_, i) =>

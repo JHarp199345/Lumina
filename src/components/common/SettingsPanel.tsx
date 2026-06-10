@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Key, Image, Type, Trash2, RefreshCw, Palette, FolderOpen } from "lucide-react";
+import { X, Key, Image, Type, Trash2, RefreshCw, Palette, FolderOpen, Server } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useBookStore } from "@/store/bookStore";
 import { useImageStore } from "@/store/imageStore";
@@ -11,6 +11,16 @@ import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { storage } from "@/storage";
 import ApiKeySetup from "./ApiKeySetup";
+import {
+  getProvider,
+  setProvider,
+  getOdysseusUrl,
+  setOdysseusUrl,
+  getOdysseusToken,
+  setOdysseusToken,
+  testOdysseus,
+  type LLMProvider,
+} from "@/api/llmClient";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -50,6 +60,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           <ReadingSection />
           <Divider />
           <VisualSection />
+          <Divider />
+          <AISection />
           <Divider />
           <ApiSection />
           <Divider />
@@ -328,6 +340,120 @@ function visualStyleDescription(level: number): string {
   if (level < 70) return "The scene is recognizable, with figures and action handled through gesture.";
   if (level < 90) return "Concrete scenes, action, setting, and important objects are clearly shown.";
   return "Closest scene depiction the selected art style allows, with cinematic restraint.";
+}
+
+// ─── AI Engine ────────────────────────────────────────────────────────────────
+
+function AISection() {
+  const [provider, setProviderState] = useState<LLMProvider>(() => getProvider());
+  const [url, setUrlState] = useState(() => getOdysseusUrl());
+  const [token, setTokenState] = useState(() => getOdysseusToken());
+  const [testState, setTestState] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [testMsg, setTestMsg] = useState("");
+
+  function applyProvider(p: LLMProvider) {
+    setProvider(p);
+    setProviderState(p);
+    setTestState("idle");
+  }
+
+  function handleUrlChange(val: string) {
+    setUrlState(val);
+    setOdysseusUrl(val);
+    setTestState("idle");
+  }
+
+  function handleTokenChange(val: string) {
+    setTokenState(val);
+    setOdysseusToken(val);
+  }
+
+  async function handleTest() {
+    setTestState("testing");
+    setTestMsg("");
+    try {
+      const { agents } = await testOdysseus(url);
+      setTestState("ok");
+      setTestMsg(`Connected · ${agents} agent${agents !== 1 ? "s" : ""}`);
+    } catch (err) {
+      setTestState("error");
+      setTestMsg(err instanceof Error ? err.message : "Connection failed");
+    }
+  }
+
+  return (
+    <div className="pb-4">
+      <SectionHeader icon={Server} label="AI Engine" />
+      <div className="px-5 space-y-4">
+        {/* Provider pills */}
+        <div className="flex gap-2">
+          {(["odysseus", "gemini"] as LLMProvider[]).map((p) => (
+            <button
+              key={p}
+              onClick={() => applyProvider(p)}
+              className={`flex-1 py-1.5 rounded text-xs transition-colors ${
+                provider === p
+                  ? "bg-lumina-gold/20 text-lumina-gold border border-lumina-gold/30"
+                  : "bg-ink/5 text-ink-faint border border-transparent hover:border-hair"
+              }`}
+            >
+              {p === "odysseus" ? "Local (Odysseus)" : "Cloud (Gemini)"}
+            </button>
+          ))}
+        </div>
+
+        {provider === "odysseus" && (
+          <>
+            <div className="space-y-1.5">
+              <label className="text-xs text-ink-faint">Server URL</label>
+              <input
+                type="text"
+                value={url}
+                onChange={(e) => handleUrlChange(e.target.value)}
+                placeholder="http://localhost:7860"
+                className="w-full bg-black/30 border border-hair rounded-lg px-3 py-2 text-xs text-ink-soft placeholder:text-ink-faint focus:outline-none focus:border-lumina-gold/50 font-mono transition-colors"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-ink-faint">
+                Auth Token <span className="text-ink-faint/60">optional</span>
+              </label>
+              <input
+                type="password"
+                value={token}
+                onChange={(e) => handleTokenChange(e.target.value)}
+                placeholder="••••••••••••••••"
+                className="w-full bg-black/20 border border-hair rounded-lg px-3 py-2 text-xs text-ink-faint placeholder:text-ink-faint focus:outline-none focus:border-hair font-mono transition-colors"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleTest}
+                disabled={testState === "testing"}
+                className="rounded-lg border border-hair bg-ink/[0.04] px-3 py-1.5 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-50"
+              >
+                {testState === "testing" ? "Testing…" : "Test Connection"}
+              </button>
+              {testState === "ok" && (
+                <span className="text-xs text-green-400">{testMsg}</span>
+              )}
+              {testState === "error" && (
+                <span className="text-xs text-red-400/80 truncate max-w-[160px]" title={testMsg}>
+                  {testMsg}
+                </span>
+              )}
+            </div>
+          </>
+        )}
+
+        {provider === "gemini" && (
+          <p className="text-xs text-ink-faint leading-relaxed">
+            Using Google AI Studio. Add your API key in the section below.
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────

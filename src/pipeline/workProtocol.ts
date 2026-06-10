@@ -5,7 +5,7 @@
  * Priority: Open Library catalog lookup → local heuristics → Gemini (TOC only).
  */
 
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerateJSON } from "@/api/llmClient";
 import { lookupExternalClassification } from "@/pipeline/bookClassificationLookup";
 import type {
   AnalysisProtocol,
@@ -15,8 +15,6 @@ import type {
   WorkType,
 } from "@/types";
 import { diagnosticInfo } from "@/utils/diagnostics";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 const EXPOSITORY_WORK_TYPES: WorkType[] = [
   "nonfiction",
@@ -225,12 +223,11 @@ Rules:
 - manuals and references → manual/reference, subjectHierarchy`;
 
   try {
-    const raw = await callGemini(prompt, apiKey, 400);
-    const parsed = parseJson(raw) as {
+    const parsed = await llmGenerateJSON<{
       workType?: WorkType;
       structureKind?: string;
       domain?: ExpositoryDomain;
-    };
+    }>("council", prompt, { temperature: 0.2, maxTokens: 400, geminiKey: apiKey });
 
     const workType = parsed.workType ?? "other";
     const isMemoirNarrative = workType === "memoir" && parsed.structureKind === "narrative";
@@ -311,26 +308,3 @@ Rules:
   }
 }
 
-async function callGemini(prompt: string, apiKey: string, maxTokens: number): Promise<string> {
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: maxTokens,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-  if (!response.ok) throw new Error(`Gemini ${response.status}`);
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-}
-
-function parseJson(raw: string): unknown {
-  const cleaned = raw.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
-  return JSON.parse(cleaned);
-}

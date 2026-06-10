@@ -5,10 +5,8 @@
  * generated segments, then Lumina creates cards from those exact passages.
  */
 
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerateJSON } from "@/api/llmClient";
 import type { BookStructure, StudyFlashcard, StudyFlashcardType, StudySegment } from "@/types";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 interface RawFlashcard {
   front?: string;
@@ -121,25 +119,11 @@ Selected material:
 ${material}
 """`;
 
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.35,
-        maxOutputTokens: 3072,
-        responseMimeType: "application/json",
-      },
-    }),
+  const parsed = await llmGenerateJSON<{ cards?: unknown[] }>("curriculum", prompt, {
+    temperature: 0.35,
+    maxTokens: 3072,
+    geminiKey: apiKey,
   });
-
-  if (!response.ok) throw new Error(`Gemini error ${response.status}`);
-
-  const data = await response.json();
-  const rawText: string = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  const parsed = JSON.parse(rawText.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim());
   const cards = normaliseCards(parsed.cards, structure.bookId, segments.map((segment) => segment.id)).slice(
     0,
     requestedCount

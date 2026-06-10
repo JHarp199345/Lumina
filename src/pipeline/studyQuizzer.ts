@@ -6,7 +6,7 @@
  * that build from recall toward synthesis.
  */
 
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerateJSON } from "@/api/llmClient";
 import type {
   BookStructure,
   StudyQuestionLevel,
@@ -15,8 +15,6 @@ import type {
   StudySegment,
 } from "@/types";
 import type { StudyChapterGroup } from "@/utils/studyProgress";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 interface RawQuestion {
   chainTitle?: string;
@@ -79,25 +77,11 @@ async function requestQuestions(
   minQuestions: number,
   maxQuestions: number
 ): Promise<StudyQuizQuestion[]> {
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.35,
-        maxOutputTokens: 3072,
-        responseMimeType: "application/json",
-      },
-    }),
+  const parsed = await llmGenerateJSON<{ questions?: unknown[] }>("quiz", prompt, {
+    temperature: 0.35,
+    maxTokens: 3072,
+    geminiKey: apiKey,
   });
-
-  if (!response.ok) throw new Error(`Gemini error ${response.status}`);
-
-  const data = await response.json();
-  const rawText: string = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-  const parsed = JSON.parse(rawText.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim());
   const questions = normaliseQuestions(parsed.questions).slice(0, maxQuestions);
   if (questions.length < minQuestions) throw new Error("AI returned too few usable quiz questions.");
   return questions.map((question, index) => ({ ...question, questionNumber: index + 1, id: `q-${index + 1}` }));

@@ -13,7 +13,7 @@
  * kept untouched and the error is surfaced; nothing is half-written.
  */
 
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerateJSON } from "@/api/llmClient";
 import type {
   BookStructure,
   Chapter,
@@ -21,8 +21,6 @@ import type {
   StudySegment,
   StudySpoilerLevel,
 } from "@/types";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 /** Segments per AI request — keeps each call small and lets us report progress. */
 const BATCH_SIZE = 6;
@@ -118,26 +116,11 @@ Respond with ONLY a JSON array of ${batch.length} objects, in the same order as 
 Segments:
 ${blocks}`;
 
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 2048,
-        responseMimeType: "application/json",
-      },
-    }),
+  const parsed = await llmGenerateJSON<unknown>("curriculum", prompt, {
+    temperature: 0.4,
+    maxTokens: 2048,
+    geminiKey: apiKey,
   });
-
-  if (!response.ok) throw new Error(`Gemini error ${response.status}`);
-
-  const data = await response.json();
-  const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-  const cleaned = raw.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
-  const parsed = JSON.parse(cleaned);
   if (!Array.isArray(parsed)) throw new Error("AI returned an unexpected shape");
   return parsed as RefinedFields[];
 }

@@ -3,7 +3,7 @@
  * Sections are heading-bounded; visuals are diagrams / infographics.
  */
 
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerate, llmGenerateJSON } from "@/api/llmClient";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { buildVisualStoryboard } from "@/pipeline/visualStoryboard";
 import {
@@ -26,8 +26,6 @@ import type {
   Section,
   SemanticMap,
 } from "@/types";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 const MIN_SECTION_WORDS = 180;
 const IMPORTANCE_THRESHOLD = 0.5;
@@ -228,8 +226,11 @@ async function extractIdeasFromSections(
     const prompt = buildExtractionPrompt(title, author, domain, batch);
 
     try {
-      const raw = await callGemini(prompt, apiKey, 4096);
-      const parsed = parseJson<{ sections?: ExtractedIdea[] }>(raw);
+      const parsed = await llmGenerateJSON<{ sections?: ExtractedIdea[] }>("reading", prompt, {
+        temperature: 0.35,
+        maxTokens: 4096,
+        geminiKey: apiKey,
+      });
       const items = parsed.sections ?? [];
 
       for (const candidate of batch) {
@@ -468,23 +469,11 @@ Write a 5-10 sentence image generation prompt that:
 
 Respond with ONLY the prompt text. No JSON, no quotes, no preamble.`;
 
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.55,
-        topP: 0.9,
-        maxOutputTokens: 800,
-      },
-    }),
-  });
-
-  if (!response.ok) throw new Error(`Gemini ${response.status}`);
-  const data = await response.json();
-  return (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
+  return (await llmGenerate("visual_analyst", prompt, {
+    temperature: 0.55,
+    maxTokens: 800,
+    geminiKey: apiKey,
+  })).trim();
 }
 
 function visualTypeInstructions(type: ExpositoryVisualType): string {
@@ -542,25 +531,6 @@ function truncateWords(text: string, maxWords: number): string {
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
-}
-
-async function callGemini(prompt: string, apiKey: string, maxTokens: number): Promise<string> {
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.35,
-        maxOutputTokens: maxTokens,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-  if (!response.ok) throw new Error(`Gemini ${response.status}`);
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 }
 
 function parseJson<T>(raw: string): T {

@@ -15,7 +15,7 @@
  * every later stage is aware of.
  */
 
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerateJSON } from "@/api/llmClient";
 import type {
   AnalysisProgressReporter,
   BookStructure,
@@ -28,8 +28,6 @@ import type {
   ThreadRole,
 } from "@/types";
 import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 const THREAD_KINDS: ThreadKind[] = [
   "promise",
@@ -79,8 +77,11 @@ export async function buildNarrativeBlueprint(params: {
 
   try {
     const prompt = buildBlueprintPrompt(structure, macroArc);
-    const raw = await callGemini(prompt, apiKey, 2400);
-    const parsed = parseJsonResponse<Partial<NarrativeBlueprint>>(raw);
+    const parsed = await llmGenerateJSON<Partial<NarrativeBlueprint>>("reading", prompt, {
+      temperature: 0.4,
+      maxTokens: 2400,
+      geminiKey: apiKey,
+    });
     const blueprint = normalizeBlueprint(structure.bookId, parsed, structure.chapters.length);
 
     diagnosticInfo("narrative_threads.complete", "Narrative blueprint created", {
@@ -355,35 +356,6 @@ function sortByReadingOrder(scenes: IdentifiedScene[]): IdentifiedScene[] {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function callGemini(prompt: string, apiKey: string, maxTokens: number): Promise<string> {
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.4,
-        topP: 0.9,
-        maxOutputTokens: maxTokens,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini narrative threading error ${response.status}: ${err}`);
-  }
-
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-}
-
-function parseJsonResponse<T>(raw: string): T {
-  const cleaned = raw.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
-  return JSON.parse(cleaned) as T;
-}
 
 function stringOr(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;

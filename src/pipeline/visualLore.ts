@@ -1,4 +1,5 @@
 import { LUMINA_CONFIG } from "@/config";
+import { llmGenerate, getProvider } from "@/api/llmClient";
 import type {
   AnalysisProgressReporter,
   BookStructure,
@@ -146,6 +147,15 @@ async function callGeminiWithSearch(
   prompt: string,
   apiKey: string
 ): Promise<{ text: string; metadata?: Record<string, unknown> }> {
+  if (getProvider() === "odysseus") {
+    const text = await llmGenerate("visual_analyst", prompt, {
+      temperature: 0.25,
+      maxTokens: 2400,
+      jsonMode: true,
+    });
+    return { text };
+  }
+
   const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
   const response = await fetch(url, {
     method: "POST",
@@ -167,7 +177,7 @@ async function callGeminiWithSearch(
     throw new Error(`Gemini visual lore error ${response.status}: ${err}`);
   }
 
-  const data = await response.json();
+  const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] }; groundingMetadata?: Record<string, unknown> }[] };
   return {
     text: data.candidates?.[0]?.content?.parts?.[0]?.text || "{}",
     metadata: data.candidates?.[0]?.groundingMetadata,

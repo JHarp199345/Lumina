@@ -15,6 +15,7 @@
  */
 
 import { LUMINA_CONFIG } from "@/config";
+import { llmGenerate, getProvider, getOdysseusUrl, getOdysseusToken } from "@/api/llmClient";
 import {
   buildExpositoryScopeOutline,
   buildExpositorySourceContext,
@@ -42,6 +43,20 @@ export const GEMINI_VOICES: GeminiVoice[] = [
   { id: "Fenrir", label: "Fenrir", description: "Warm and grounded" },
   { id: "Aoede", label: "Aoede", description: "Smooth and expressive" },
   { id: "Leda", label: "Leda", description: "Soft and reflective" },
+];
+
+// Local Kokoro voices (via Odysseus /api/tts/synthesize, style_preset field).
+export interface KokoroVoice {
+  id: string;         // style_preset sent to the TTS endpoint
+  label: string;
+  description: string;
+}
+export const KOKORO_VOICES: KokoroVoice[] = [
+  { id: "clear-narrator",   label: "Sky",    description: "Clear, neutral narrator" },
+  { id: "warm-storyteller", label: "Bella",  description: "Warm and expressive" },
+  { id: "dark-dramatic",    label: "George", description: "Deep and measured" },
+  { id: "quiet-intimate",   label: "Sarah",  description: "Soft and reflective" },
+  { id: "epic-chronicle",   label: "Lewis",  description: "Epic and resonant" },
 ];
 
 export interface OverviewScope {
@@ -192,7 +207,7 @@ No bullet points, no preamble, no headings — only the instruction text.
 MATERIAL:
 ${truncateWords(context, 5000)}`;
 
-  const text = await geminiText(prompt, apiKey, 1400);
+  const text = await llmGenerate("audio_director", prompt, { temperature: 0.7, maxTokens: 1400, geminiKey: apiKey });
   return text.trim();
 }
 
@@ -260,7 +275,7 @@ MATERIAL TO EXPLAIN:
 ${truncateWords(context, 7000)}`;
 
   const maxTokens = Math.min(8192, Math.round(targetWords * 2.2));
-  const script = await geminiText(prompt, apiKey, maxTokens);
+  const script = await llmGenerate("audio_director", prompt, { temperature: 0.7, maxTokens, geminiKey: apiKey });
   return script.trim();
 }
 
@@ -278,6 +293,10 @@ export async function synthesizeOverviewAudio(
   apiKey: string,
   onProgress?: (msg: string) => void
 ): Promise<SynthResult> {
+  if (getProvider() === "odysseus") {
+    return _synthesizeLocalTts(script, voiceName, onProgress);
+  }
+
   const chunks = chunkText(script, LUMINA_CONFIG.AUDIO_OVERVIEW_TTS_CHUNK_CHARS);
   const pcmParts: Uint8Array[] = [];
   let sampleRate = 24000;
@@ -292,6 +311,33 @@ export async function synthesizeOverviewAudio(
   const pcm = concatBytes(pcmParts);
   const wav = pcmToWav(pcm, sampleRate, 1);
   const durationSeconds = pcm.length / (sampleRate * 2 /* 16-bit */ * 1 /* mono */);
+  return { data: wav, mimeType: "audio/wav", durationSeconds };
+}
+
+async function _synthesizeLocalTts(
+  script: string,
+  stylePreset: string,
+  onProgress?: (msg: string) => void
+): Promise<SynthResult> {
+  onProgress?.("Voicing with local Kokoro…");
+  const base = getOdysseusUrl();
+  const token = getOdysseusToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${base}/api/tts/kokoro/synthesize`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ text: script, style_preset: stylePreset, speed: 1.0 }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Local TTS error ${res.status}: ${msg}`);
+  }
+  const wav = new Uint8Array(await res.arrayBuffer());
+  // WAV header: sample rate is at byte offset 24 (uint32 LE); PCM data starts at byte 44.
+  const view = new DataView(wav.buffer, wav.byteOffset);
+  const sampleRate = view.getUint32(24, true);
+  const durationSeconds = (wav.length - 44) / (sampleRate * 2);
   return { data: wav, mimeType: "audio/wav", durationSeconds };
 }
 

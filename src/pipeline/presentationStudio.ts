@@ -10,7 +10,7 @@
  * Runs on the Google AI Studio key — same pool as Audio Overview.
  */
 
-import { LUMINA_CONFIG } from "@/config";
+import { llmGenerate } from "@/api/llmClient";
 import {
   buildExpositoryScopeOutline,
   buildExpositorySourceContext,
@@ -39,8 +39,6 @@ import type {
   SourceProfileSuggestion,
   WorkType,
 } from "@/types";
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 export { scopeLabel };
 export type { OverviewScope };
@@ -462,29 +460,25 @@ export function deckToMarkdown(deck: PresentationDeck): string {
   return lines.join("\n").trim();
 }
 
-// ─── Gemini helpers ─────────────────────────────────────────────────────────────
+// ─── LLM helpers ────────────────────────────────────────────────────────────────
 
 async function geminiText(prompt: string, apiKey: string, maxOutputTokens: number): Promise<string> {
-  const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.65, topP: 0.9, maxOutputTokens },
-    }),
+  return llmGenerate("writer", prompt, {
+    temperature: 0.65,
+    maxTokens: maxOutputTokens,
+    geminiKey: apiKey,
   });
-  if (!res.ok) {
-    throw new Error(`Gemini error ${res.status}: ${await res.text().catch(() => "")}`);
-  }
-  const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p?.text ?? "").join("") ?? "";
 }
 
 async function geminiJson<T>(prompt: string, apiKey: string, maxOutputTokens: number): Promise<T> {
-  const text = await geminiText(prompt, apiKey, maxOutputTokens);
+  const text = await llmGenerate("writer", prompt, {
+    temperature: 0.65,
+    maxTokens: maxOutputTokens,
+    geminiKey: apiKey,
+    jsonMode: true,
+  });
   const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Gemini returned no JSON deck");
+  if (!jsonMatch) throw new Error("LLM returned no JSON deck");
   try {
     return JSON.parse(jsonMatch[0]) as T;
   } catch {
