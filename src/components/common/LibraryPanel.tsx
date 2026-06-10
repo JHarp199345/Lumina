@@ -169,7 +169,10 @@ export default function LibraryPanel({
 
           <button
             type="button"
-            onClick={() => setView("open-shelf")}
+            onClick={() => {
+              onImportProgress?.("");
+              setView("open-shelf");
+            }}
             className="mb-2 flex w-full items-center gap-3 rounded-lg border border-lumina-gold/25 bg-lumina-gold/8 p-3 text-left transition-colors hover:bg-lumina-gold/12"
           >
             <div className="flex h-12 w-10 flex-shrink-0 items-center justify-center rounded-md border border-lumina-gold/30 bg-black/15 text-lumina-gold">

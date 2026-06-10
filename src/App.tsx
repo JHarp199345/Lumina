@@ -261,11 +261,15 @@ function App() {
 
   const reportImportProgress = (message: string) => {
     setImportProgress(message);
+    if (!message) {
+      setImportDetails([]);
+      return;
+    }
     setImportDetails((items) => {
       const next = [...items, message].filter(Boolean);
       return next.slice(Math.max(0, next.length - 14));
     });
-    if (message) console.info("[Lumina Import]", message);
+    console.info("[Lumina Import]", message);
   };
 
   const analysisProgressHint = (() => {

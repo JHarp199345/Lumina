@@ -18,9 +18,9 @@ interface GutendexBook {
 
 type SortMode = "popular" | "title-asc" | "title-desc" | "year-asc" | "year-desc";
 
-type ImportPhase = "idle" | "downloading" | "importing" | "done" | "failed";
+type ImportPhase = "idle" | "downloading" | "importing" | "done" | "failed" | "awaiting-manual";
 
-type DownloadFailureReason = "source-refused" | "fallback" | "generic";
+type DownloadFailureReason = "source-refused" | "generic";
 
 interface OpenShelfCatalogProps {
   onBack: () => void;
@@ -81,7 +81,6 @@ export default function OpenShelfCatalog({
   onBack,
   onClose,
   onImport,
-  onImportProgress,
   onBookImported,
   historyCount = 0,
   onHistoryUpdated,
@@ -232,21 +231,9 @@ export default function OpenShelfCatalog({
     return copy;
   }, [books, sort]);
 
-  const reportProgress = useCallback(
-    (message: string) => {
-      setStatus(message);
-      onImportProgress?.(message);
-    },
-    [onImportProgress]
-  );
-
   const reportLocal = useCallback((message: string) => {
     setStatus(message);
   }, []);
-
-  const clearGlobalProgress = useCallback(() => {
-    onImportProgress?.("");
-  }, [onImportProgress]);
 
   const importBook = async (book: GutendexBook) => {
     if (importingId !== null) return;
@@ -266,25 +253,24 @@ export default function OpenShelfCatalog({
     setFallbackDownloadUrl("");
     setManualFallbackFilename("");
     setShowManualFallback(false);
-    reportProgress(`Step 1 of 2 — Downloading "${book.title}"…`);
+    reportLocal(`Step 1 of 2 — Downloading "${book.title}"…`);
 
-    let persistFailure = false;
+    let persistPanelState = false;
     let file: File | undefined;
 
     try {
       file = await downloadFirstWorkingEpub(book, epubUrls, (message, percent) => {
         setDownloadPercent(percent);
-        reportProgress(message);
+        reportLocal(message);
       });
     } catch (downloadErr) {
-      console.warn("[OpenShelf] Download failed.", downloadErr);
-      persistFailure = true;
+      console.warn("[OpenShelf] In-app download failed; trying browser fallback.", downloadErr);
+      persistPanelState = true;
       setFailedBook(book);
-      setImportPhase("failed");
       setCopiedFilename(false);
-      clearGlobalProgress();
 
       if (isRemoteDownloadBlocked(downloadErr)) {
+        setImportPhase("failed");
         setFailureReason("source-refused");
         reportLocal(failureMessage("source-refused"));
       } else {
@@ -293,7 +279,8 @@ export default function OpenShelfCatalog({
         setFallbackDownloadUrl(downloadUrl);
         setManualFallbackFilename(filename);
         triggerBrowserDownload(downloadUrl);
-        setFailureReason("fallback");
+        setImportPhase("awaiting-manual");
+        setFailureReason(null);
         setShowManualFallback(true);
         recordImportHistory({
           gutenbergId: book.id,
@@ -303,15 +290,15 @@ export default function OpenShelfCatalog({
           downloadedAt: new Date().toISOString(),
         });
         onHistoryUpdated?.();
-        reportLocal(failureMessage("fallback"));
+        reportLocal("Download started in your browser. Import it below when ready.");
       }
     }
 
     if (file) {
       try {
         setImportPhase("importing");
-        reportProgress(`Step 2 of 2 — Adding "${book.title}" to your library…`);
-        const result = await importEpubFile(file, reportProgress, {
+        reportLocal(`Step 2 of 2 — Adding "${book.title}" to your library…`);
+        const result = await importEpubFile(file, reportLocal, {
           gutenbergId: book.id,
           catalogTitle: book.title,
           catalogAuthor: book.authors.map((author) => author.name).join(", "),
@@ -324,26 +311,25 @@ export default function OpenShelfCatalog({
         });
         onHistoryUpdated?.();
         setImportPhase("done");
-        reportProgress(`Added "${result.book.title}" by ${result.book.author}. Choose a visual style next.`);
+        reportLocal(`Added "${result.book.title}" by ${result.book.author}. Choose a visual style next.`);
         onBookImported?.(result.structure);
         window.setTimeout(onClose, 1400);
       } catch (importErr) {
         console.warn("[OpenShelf] Import failed after download.", importErr);
-        persistFailure = true;
+        persistPanelState = true;
         setFailedBook(book);
         setImportPhase("failed");
         setFailureReason("generic");
         setShowManualFallback(false);
         setManualFallbackFilename("");
         setFallbackDownloadUrl("");
-        clearGlobalProgress();
         reportLocal(failureMessage("generic"));
       }
     }
 
     setImportingId(null);
     setDownloadPercent(null);
-    if (!persistFailure) {
+    if (!persistPanelState) {
       window.setTimeout(() => {
         setImportPhase("idle");
         setActiveTitle("");
@@ -351,7 +337,7 @@ export default function OpenShelfCatalog({
     }
   };
 
-  const dismissFailure = () => {
+  const dismissPanelMessage = () => {
     setImportPhase("idle");
     setActiveTitle("");
     setFailedBook(null);
@@ -361,7 +347,6 @@ export default function OpenShelfCatalog({
     setShowManualFallback(false);
     setCopiedFilename(false);
     reportLocal("");
-    clearGlobalProgress();
   };
 
   const recordFallbackDownload = (book: GutendexBook, filename: string) => {
@@ -483,15 +468,17 @@ export default function OpenShelfCatalog({
           {importPhase === "done" && (
             <p className="text-xs font-medium text-lumina-gold">{status}</p>
           )}
-          {importPhase === "failed" && (
+          {(importPhase === "failed" || importPhase === "awaiting-manual") && (
             <div className="space-y-2.5">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-xs font-medium text-ink/85">
-                  {failureMessage(failureReason)}
+                  {importPhase === "awaiting-manual"
+                    ? status || "Download started in your browser. Import it below when ready."
+                    : failureMessage(failureReason)}
                 </p>
                 <button
                   type="button"
-                  onClick={dismissFailure}
+                  onClick={dismissPanelMessage}
                   className="flex-shrink-0 rounded p-0.5 text-ink-faint transition hover:text-ink-soft"
                   title="Dismiss"
                 >
@@ -499,31 +486,17 @@ export default function OpenShelfCatalog({
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  if (failedBook) void importBook(failedBook);
-                }}
-                disabled={!failedBook || importingId !== null}
-                className="flex min-h-[44px] w-full items-center justify-center rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20 disabled:opacity-45"
-              >
-                Try again
-              </button>
-
-              {fallbackDownloadUrl ? (
-                <a
-                  href={fallbackDownloadUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+              {importPhase === "failed" ? (
+                <button
+                  type="button"
                   onClick={() => {
-                    if (failedBook && manualFallbackFilename) {
-                      recordFallbackDownload(failedBook, manualFallbackFilename);
-                    }
+                    if (failedBook) void importBook(failedBook);
                   }}
-                  className="flex min-h-[44px] w-full items-center justify-center rounded-lg border border-hair bg-ink/[0.06] px-3 text-sm font-medium text-ink-soft transition hover:bg-ink/[0.10]"
+                  disabled={!failedBook || importingId !== null}
+                  className="flex min-h-[44px] w-full items-center justify-center rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20 disabled:opacity-45"
                 >
-                  Open download link
-                </a>
+                  Try again
+                </button>
               ) : null}
 
               {showManualFallback && manualFallbackFilename ? (
@@ -534,6 +507,22 @@ export default function OpenShelfCatalog({
                   </div>
 
                   <ManualImportInstructions />
+
+                  {fallbackDownloadUrl ? (
+                    <a
+                      href={fallbackDownloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => {
+                        if (failedBook && manualFallbackFilename) {
+                          recordFallbackDownload(failedBook, manualFallbackFilename);
+                        }
+                      }}
+                      className="flex min-h-[44px] w-full items-center justify-center rounded-lg border border-hair bg-ink/[0.06] px-3 text-sm font-medium text-ink-soft transition hover:bg-ink/[0.10]"
+                    >
+                      Open download link
+                    </a>
+                  ) : null}
 
                   <div className="flex gap-2">
                     <button
@@ -553,10 +542,10 @@ export default function OpenShelfCatalog({
                     <button
                       type="button"
                       onClick={() => {
-                        dismissFailure();
+                        dismissPanelMessage();
                         onImport();
                       }}
-                      className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-hair bg-ink/[0.06] px-3 text-sm font-medium text-ink-soft transition hover:bg-ink/[0.10]"
+                      className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
                     >
                       Choose File
                     </button>
@@ -711,8 +700,6 @@ function failureMessage(reason: DownloadFailureReason | null): string {
   switch (reason) {
     case "source-refused":
       return "The source refused this download. Try again.";
-    case "fallback":
-      return "Automatic import failed. If a download started, use the steps below. If nothing appeared, allow pop-ups or tap Open download link.";
     default:
       return "Download unsuccessful. Try again.";
   }
