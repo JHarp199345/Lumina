@@ -422,7 +422,7 @@ function ImportHistoryView({
               </button>
               {instructionsOpen && (
                 <div className="mt-1.5 rounded-lg border border-hair bg-ink/[0.03] px-3 py-2.5">
-                  <ManualImportInstructions compact />
+                  <ManualImportInstructions iconsOnly compact />
                   <button
                     type="button"
                     onClick={onImport}
@@ -454,7 +454,7 @@ function ImportHistoryView({
                         {entry.filename ? (
                           <div className="flex items-center gap-1.5">
                             <p
-                              className="truncate font-mono text-sm font-medium text-ink/90"
+                              className="truncate font-serif text-sm font-semibold tracking-tight text-ink/92"
                               title={entry.filename}
                             >
                               {entry.filename}

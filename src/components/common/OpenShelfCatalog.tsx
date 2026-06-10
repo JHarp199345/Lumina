@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Check, Clock, Copy, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Check,
+  ChevronDown,
+  Clock,
+  Copy,
+  ExternalLink,
+  Loader2,
+  Search,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
+import ManualImportInstructions from "@/components/common/ManualImportInstructions";
 import type { BookStructure } from "@/types";
 import { recordImportHistory } from "@/utils/importHistory";
 import { resolveDownloadFilename } from "@/utils/downloadFilename";
@@ -102,6 +115,7 @@ export default function OpenShelfCatalog({
   const [manualFallbackFilename, setManualFallbackFilename] = useState("");
   const [showManualFallback, setShowManualFallback] = useState(false);
   const [copiedFilename, setCopiedFilename] = useState(false);
+  const [importStepsOpen, setImportStepsOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestKey = useMemo(() => `${query.trim().toLowerCase()}|${genre}|${sort}`, [query, genre, sort]);
@@ -248,6 +262,7 @@ export default function OpenShelfCatalog({
     setFailedBook(book);
     setFailureReason(null);
     setCopiedFilename(false);
+    setImportStepsOpen(false);
     reportLocal(`Downloading "${book.title}"…`);
 
     try {
@@ -287,6 +302,7 @@ export default function OpenShelfCatalog({
     setManualFallbackFilename("");
     setShowManualFallback(false);
     setCopiedFilename(false);
+    setImportStepsOpen(false);
     reportLocal("");
   };
 
@@ -404,7 +420,7 @@ export default function OpenShelfCatalog({
             </div>
           )}
           {importPhase === "awaiting-manual" && showManualFallback && manualFallbackFilename ? (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-ink-soft">Download started</p>
                 <button
@@ -416,10 +432,15 @@ export default function OpenShelfCatalog({
                   <X size={13} />
                 </button>
               </div>
-              <div className="flex items-center gap-2 rounded-md border border-hair bg-black/20 px-2.5 py-2">
-                <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink/90" title={manualFallbackFilename}>
-                  {manualFallbackFilename}
-                </p>
+
+              <p
+                className="truncate font-serif text-base font-semibold tracking-tight text-ink/92"
+                title={manualFallbackFilename}
+              >
+                {manualFallbackFilename}
+              </p>
+
+              <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={async () => {
@@ -429,43 +450,55 @@ export default function OpenShelfCatalog({
                       setTimeout(() => setCopiedFilename(false), 2000);
                     } catch { /* clipboard denied */ }
                   }}
-                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-hair text-ink-faint hover:text-ink-soft"
-                  title="Copy filename"
+                  className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg border border-hair bg-ink/[0.06] px-3 text-sm font-medium text-ink-soft transition hover:bg-ink/[0.10]"
                 >
-                  {copiedFilename ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+                  {copiedFilename ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                  {copiedFilename ? "Copied!" : "Copy filename"}
                 </button>
-              </div>
-              <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => {
                     dismissPanelMessage();
                     onImport();
                   }}
-                  className="rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 py-1.5 text-xs font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
+                  className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
                 >
                   Choose File
                 </button>
-                {onOpenHistory ? (
-                  <button
-                    type="button"
-                    onClick={onOpenHistory}
-                    className="text-xs text-ink-faint underline decoration-ink-faint/40 underline-offset-2 hover:text-ink-soft"
-                  >
-                    Import steps in History
-                  </button>
-                ) : null}
-                {fallbackDownloadUrl ? (
-                  <a
-                    href={fallbackDownloadUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-auto text-[10px] text-ink-faint/70 underline decoration-ink-faint/30 underline-offset-2 hover:text-ink-faint"
-                  >
-                    Download again
-                  </a>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-hair bg-ink/[0.03]">
+                <button
+                  type="button"
+                  onClick={() => setImportStepsOpen((open) => !open)}
+                  className="flex w-full items-center justify-between px-2.5 py-2 text-left transition hover:bg-ink/[0.05]"
+                >
+                  <span className="text-xs text-ink-soft underline decoration-ink-faint/50 underline-offset-2">
+                    How to find the file
+                  </span>
+                  <ChevronDown
+                    size={14}
+                    className={`text-ink-faint transition-transform ${importStepsOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {importStepsOpen ? (
+                  <div className="border-t border-hair px-2.5 py-2">
+                    <ManualImportInstructions iconsOnly compact />
+                  </div>
                 ) : null}
               </div>
+
+              {fallbackDownloadUrl ? (
+                <a
+                  href={fallbackDownloadUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1 py-1 text-[10px] text-ink-faint/75 underline decoration-ink-faint/35 underline-offset-2 transition hover:text-ink-faint"
+                >
+                  Open download link
+                  <ExternalLink size={10} />
+                </a>
+              ) : null}
             </div>
           ) : null}
           {importPhase === "idle" && status && (
