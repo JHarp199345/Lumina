@@ -338,25 +338,39 @@ async function generateWithFlux(prompt: string, falApiKey: string): Promise<Uint
 async function generateWithComfyUI(prompt: string, negativePrompt: string): Promise<Uint8Array> {
   const base = getOdysseusUrl();
   const token = getOdysseusToken();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const authHeaders: Record<string, string> = token ? { "Authorization": `Bearer ${token}` } : {};
 
-  const res = await fetch(`${base}/api/images/generate`, {
+  // POST returns immediately with a job_id — no long-lived connection through the tunnel.
+  const startRes = await fetch(`${base}/api/images/generate`, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ prompt, negative_prompt: negativePrompt, width: 1024, height: 576 }),
   });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(`ComfyUI generate error ${res.status}: ${msg}`);
+  if (!startRes.ok) {
+    const msg = await startRes.text().catch(() => "");
+    throw new Error(`ComfyUI queue error ${startRes.status}: ${msg}`);
   }
+  const { job_id } = await startRes.json() as { job_id: string };
 
-  const { image_url } = await res.json() as { image_url: string };
-  // image_url is a relative path like /api/images/cache/lumina_xxx.png — prepend base
-  const imgRes = await fetch(`${base}${image_url}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  if (!imgRes.ok) throw new Error(`ComfyUI image fetch error ${imgRes.status}`);
+  // Poll every 3s for up to 6 minutes. Each request is short — avoids the
+  // Cloudflare 100-second tunnel timeout that would kill a blocking generate call.
+  for (let attempt = 0; attempt < 120; attempt++) {
+    await new Promise<void>((r) => setTimeout(r, 3000));
 
-  return new Uint8Array(await imgRes.arrayBuffer());
+    const pollRes = await fetch(`${base}/api/images/jobs/${job_id}`, { headers: authHeaders });
+    if (!pollRes.ok) continue;
+    const job = await pollRes.json() as { status: string; image_url?: string; error?: string };
+
+    if (job.status === "done" && job.image_url) {
+      const imgRes = await fetch(`${base}${job.image_url}`, { headers: authHeaders });
+      if (!imgRes.ok) throw new Error(`ComfyUI image fetch error ${imgRes.status}`);
+      return new Uint8Array(await imgRes.arrayBuffer());
+    }
+    if (job.status === "error") {
+      throw new Error(`ComfyUI generation failed: ${job.error ?? "unknown error"}`);
+    }
+  }
+  throw new Error("ComfyUI generation timed out (6 min)");
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
