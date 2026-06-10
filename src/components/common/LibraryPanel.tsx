@@ -106,7 +106,6 @@ export default function LibraryPanel({
             onClose={onClose}
             onImport={onImport}
             onImportProgress={onImportProgress}
-            historyCount={importHistory.length}
             onHistoryUpdated={refreshImportHistory}
             onOpenHistory={() => {
               refreshImportHistory();
@@ -189,26 +188,26 @@ export default function LibraryPanel({
             <FolderOpen size={15} className="text-lumina-gold/75" />
           </button>
 
-          {importHistory.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                refreshImportHistory();
-                setView("import-history");
-              }}
-              className="mb-3 flex w-full items-center gap-3 rounded-lg border border-hair bg-ink/[0.04] p-3 text-left transition-colors hover:bg-ink/[0.07]"
-            >
-              <div className="flex h-12 w-10 flex-shrink-0 items-center justify-center rounded-md border border-hair bg-black/10 text-ink-faint">
-                <Clock size={15} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-ink/75">Downloads</p>
-                <p className="mt-0.5 text-xs text-ink-faint">
-                  {importHistory.length} book{importHistory.length !== 1 ? "s" : ""} — filenames and import status
-                </p>
-              </div>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              refreshImportHistory();
+              setView("import-history");
+            }}
+            className="mb-3 flex w-full items-center gap-3 rounded-lg border border-hair bg-ink/[0.04] p-3 text-left transition-colors hover:bg-ink/[0.07]"
+          >
+            <div className="flex h-12 w-10 flex-shrink-0 items-center justify-center rounded-md border border-hair bg-black/10 text-ink-faint">
+              <Clock size={15} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-ink/75">Downloads</p>
+              <p className="mt-0.5 text-xs text-ink-faint">
+                {importHistory.length > 0
+                  ? `${importHistory.length} book${importHistory.length !== 1 ? "s" : ""} — filenames and import status`
+                  : "Filenames, import steps, and download links"}
+              </p>
+            </div>
+          </button>
 
           {library.length === 0 ? (
             <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-hair bg-black/10 px-6 text-center">

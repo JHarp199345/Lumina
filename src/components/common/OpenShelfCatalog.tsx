@@ -40,8 +40,6 @@ interface OpenShelfCatalogProps {
   onImport: () => void;
   onImportProgress?: (message: string) => void;
   onBookImported?: (structure: BookStructure) => void;
-  /** Number of import-history entries (drives header History button). */
-  historyCount?: number;
   /** Called after history is written so the parent can refresh its list. */
   onHistoryUpdated?: () => void;
   /** Open the library Import History view. */
@@ -93,7 +91,6 @@ export default function OpenShelfCatalog({
   onClose,
   onImport,
   onBookImported,
-  historyCount = 0,
   onHistoryUpdated,
   onOpenHistory,
 }: OpenShelfCatalogProps) {
@@ -326,15 +323,15 @@ export default function OpenShelfCatalog({
                 : "Public-domain books ready to download."}
             </p>
           </div>
-          {historyCount > 0 && onOpenHistory ? (
+          {onOpenHistory ? (
             <button
               type="button"
               onClick={onOpenHistory}
               className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-hair bg-ink/[0.05] px-2.5 py-1.5 text-xs text-ink-soft transition hover:bg-ink/[0.08] hover:text-ink/80"
-              title="Import history"
+              title="Downloads history"
             >
               <Clock size={13} />
-              History
+              Downloads
             </button>
           ) : null}
         </div>
