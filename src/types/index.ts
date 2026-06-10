@@ -68,6 +68,9 @@ export interface BookStructure {
   author: string;
   totalWords: number;
   parserConfidence: "high" | "medium" | "low";
+  /** Bumped when the parser produces structurally incompatible output. Stored
+   *  structures below the current version are re-parsed on next open. */
+  parserVersion?: number;
   chapters: Chapter[];
   collectionGroups?: CollectionGroup[];
   editionPipeline?: EditionPipeline;

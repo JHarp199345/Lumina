@@ -192,6 +192,7 @@ export async function parseEpub(
       author,
       totalWords,
       parserConfidence: confidence,
+      parserVersion: 2,
       chapters,
       collectionGroups: collectionGroups.length > 1 ? collectionGroups : undefined,
     },

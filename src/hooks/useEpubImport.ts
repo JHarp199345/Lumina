@@ -252,7 +252,8 @@ export function useEpubImport() {
           !structure ||
           structureLacksParagraphs(structure) ||
           structureHasDuplicateParagraphs(structure) ||
-          needsEditionReparse(structure);
+          needsEditionReparse(structure) ||
+          !structure.parserVersion || structure.parserVersion < 2;
 
         if (shouldReparse) {
           const reason = !structure
