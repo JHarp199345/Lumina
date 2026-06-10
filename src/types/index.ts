@@ -617,6 +617,9 @@ export interface UserSettings {
   hasCompletedOnboarding: boolean;
   apiKeyConfigured: boolean;
   visualInterpretationLevel: number;
+  // AI Engine
+  llmProvider: "odysseus" | "gemini";
+  odysseusUrl: string;
 }
 
 // ─── Image Generation Queue ───────────────────────────────────────────────────

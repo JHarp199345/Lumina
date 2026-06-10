@@ -1,28 +1,28 @@
 import { LUMINA_CONFIG } from "@/config";
+import { useSettingsStore } from "@/store/settingsStore";
 
-// ── Provider settings (localStorage) ──────────────────────────────────────────
+// ── Provider settings — backed by Zustand persist store ───────────────────────
+// Token is still kept in localStorage with the lk_ prefix (same as Gemini key),
+// since it's a credential rather than a setting.
 
 export type LLMProvider = "odysseus" | "gemini";
 
-const PROVIDER_KEY = "lumina_llm_provider";
-const URL_KEY = "lumina_odysseus_url";
 const TOKEN_KEY = "lk_lumina_odysseus_token";
-const DEFAULT_URL = "http://localhost:7860";
 
 export function getProvider(): LLMProvider {
-  return (localStorage.getItem(PROVIDER_KEY) as LLMProvider) || "odysseus";
+  return useSettingsStore.getState().llmProvider ?? "odysseus";
 }
 
 export function setProvider(p: LLMProvider): void {
-  localStorage.setItem(PROVIDER_KEY, p);
+  useSettingsStore.getState().setLlmProvider(p);
 }
 
 export function getOdysseusUrl(): string {
-  return localStorage.getItem(URL_KEY) || DEFAULT_URL;
+  return useSettingsStore.getState().odysseusUrl || "http://localhost:7860";
 }
 
 export function setOdysseusUrl(url: string): void {
-  localStorage.setItem(URL_KEY, url.replace(/\/$/, ""));
+  useSettingsStore.getState().setOdysseusUrl(url);
 }
 
 export function getOdysseusToken(): string {

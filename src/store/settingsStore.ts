@@ -15,6 +15,8 @@ interface SettingsStore extends UserSettings {
   setHasCompletedOnboarding: (completed: boolean) => void;
   setApiKeyConfigured: (configured: boolean) => void;
   setVisualInterpretationLevel: (level: number) => void;
+  setLlmProvider: (provider: "odysseus" | "gemini") => void;
+  setOdysseusUrl: (url: string) => void;
   resolvedTheme: () => "dark" | "light";
 }
 
@@ -48,6 +50,8 @@ export const useSettingsStore = create<SettingsStore>()(
       hasCompletedOnboarding: false,
       apiKeyConfigured: false,
       visualInterpretationLevel: 80,
+      llmProvider: "odysseus",
+      odysseusUrl: "http://localhost:7860",
 
       // Actions
       setTheme: (theme) => set({ theme }),
@@ -61,6 +65,8 @@ export const useSettingsStore = create<SettingsStore>()(
       setApiKeyConfigured: (apiKeyConfigured) => set({ apiKeyConfigured }),
       setVisualInterpretationLevel: (visualInterpretationLevel) =>
         set({ visualInterpretationLevel: Math.max(0, Math.min(100, visualInterpretationLevel)) }),
+      setLlmProvider: (llmProvider) => set({ llmProvider }),
+      setOdysseusUrl: (url) => set({ odysseusUrl: url.replace(/\/$/, "") || "http://localhost:7860" }),
 
       setLayoutPreset: (preset) => {
         const { layout, order } = LAYOUT_PRESETS[preset];

@@ -345,20 +345,20 @@ function visualStyleDescription(level: number): string {
 // ─── AI Engine ────────────────────────────────────────────────────────────────
 
 function AISection() {
-  const [provider, setProviderState] = useState<LLMProvider>(() => getProvider());
-  const [url, setUrlState] = useState(() => getOdysseusUrl());
+  // Provider and URL come directly from the Zustand persist store — same
+  // mechanism as theme/font/layout, so they survive panel close/reopen.
+  const provider = useSettingsStore((s) => s.llmProvider);
+  const url = useSettingsStore((s) => s.odysseusUrl);
   const [token, setTokenState] = useState(() => getOdysseusToken());
   const [testState, setTestState] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [testMsg, setTestMsg] = useState("");
 
   function applyProvider(p: LLMProvider) {
     setProvider(p);
-    setProviderState(p);
     setTestState("idle");
   }
 
   function handleUrlChange(val: string) {
-    setUrlState(val);
     setOdysseusUrl(val);
     setTestState("idle");
   }
