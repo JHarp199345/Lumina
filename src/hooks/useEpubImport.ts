@@ -16,7 +16,6 @@ import { ensureReadingParagraphs } from "@/utils/readingText";
 import { getDisplayImage, hydrateImageWordPositions } from "@/utils/imagePosition";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { diagnosticInfo } from "@/utils/diagnostics";
-import { gutenbergIdFromFilename } from "@/utils/downloadFilename";
 import { markLedgerImportedFromImport } from "@/utils/importHistory";
 
 function describeError(err: unknown): string {
@@ -158,10 +157,7 @@ export function useEpubImport() {
 
     const coverImage = await optionalStep("Extracting cover image…", () => extractCoverImage(zip), onProgress);
 
-    const resolvedGutenbergId =
-      structure.gutenbergId ??
-      importContext?.gutenbergId ??
-      gutenbergIdFromFilename(fileName);
+    const resolvedGutenbergId = structure.gutenbergId ?? importContext?.gutenbergId;
 
     const book: Book = {
       id: structure.bookId,
@@ -180,10 +176,9 @@ export function useEpubImport() {
 
     await runStep("Saving book to library…", () => storage.saveBook(book));
 
-    await markLedgerImportedFromImport({
-      gutenbergId: resolvedGutenbergId,
-      importedFileName: fileName,
-    });
+    if (resolvedGutenbergId != null) {
+      await markLedgerImportedFromImport({ gutenbergId: resolvedGutenbergId });
+    }
     await runStep("Saving book structure…", () => storage.saveBookStructure(structure));
     await runStep("Resetting reading position…", () =>
       storage.saveProgress({
@@ -265,7 +260,10 @@ export function useEpubImport() {
           structureLacksParagraphs(structure) ||
           structureHasDuplicateParagraphs(structure) ||
           needsEditionReparse(structure) ||
-          !structure.parserVersion || structure.parserVersion < 2;
+          !structure.parserVersion || structure.parserVersion < 2 ||
+          ((book.editionPipeline === "gutenberg" || book.importSource === "gutenberg") &&
+            book.gutenbergId == null &&
+            structure.gutenbergId == null);
 
         if (shouldReparse) {
           const reason = !structure
@@ -283,10 +281,14 @@ export function useEpubImport() {
           });
           structure = parsed.structure;
           await storage.saveBookStructure(structure);
-          if (structure.editionPipeline !== book.editionPipeline) {
+          const gutenbergId = structure.gutenbergId ?? book.gutenbergId;
+          if (
+            structure.editionPipeline !== book.editionPipeline ||
+            (gutenbergId != null && gutenbergId !== book.gutenbergId)
+          ) {
             const updates: Partial<Book> = {
               editionPipeline: structure.editionPipeline,
-              gutenbergId: structure.gutenbergId ?? book.gutenbergId,
+              gutenbergId,
               importSource: structure.editionPipeline === "gutenberg" ? "gutenberg" : "file",
             };
             updateBook(book.id, updates);

@@ -16,6 +16,10 @@ import {
   resolveEditionPipeline,
   type ParseEpubOptions,
 } from "@/pipeline/epubEdition";
+import {
+  detectGutenbergIdFromTexts,
+  parseGutenbergCatalogId,
+} from "@/pipeline/gutenbergEpub";
 import { subdivideOversizedChapters } from "@/utils/chapterSubdivision";
 
 export type { EpubImportContext, ParseEpubOptions } from "@/pipeline/epubEdition";
@@ -172,6 +176,13 @@ export async function parseEpub(
   }
 
   const editionPipeline = resolveEditionPipeline(options?.importContext, rawTexts);
+  const contentGutenbergId =
+    editionPipeline === "gutenberg"
+      ? elementsByTagName(opfDoc, "dc:identifier")
+          .map((element) => parseGutenbergCatalogId(element.textContent ?? ""))
+          .find((id): id is number => typeof id === "number") ??
+        detectGutenbergIdFromTexts(rawTexts)
+      : undefined;
   chapters = applyEditionPipeline(editionPipeline, chapters, options?.importContext, onProgress);
 
   const beforeSplit = chapters.length;
@@ -198,7 +209,8 @@ export async function parseEpub(
     },
     editionPipeline,
     options?.importContext,
-    options?.sourceFileName
+    options?.sourceFileName,
+    contentGutenbergId
   );
 
   return { structure, rawTexts, zip };

@@ -1,6 +1,5 @@
 import type { Book } from "@/types";
 import { STORES, dbDelete, dbGetAll, dbPut } from "@/storage/webDb";
-import { gutenbergIdFromFilename } from "@/utils/downloadFilename";
 import { isTauri } from "@/utils/runtime";
 
 async function tauriLedger() {
@@ -40,19 +39,6 @@ export function buildLedgerAnchor(gutenbergId: number, filename: string): string
 export function normalizeFilenameForMatch(name: string): string {
   const base = name.trim().toLowerCase().split("/").pop() ?? name;
   return base.replace(/\.epub$/i, "");
-}
-
-function filenamesLooselyMatch(
-  ledgerFilename: string,
-  importedName: string,
-  gutenbergId: number
-): boolean {
-  const canonical = normalizeFilenameForMatch(ledgerFilename);
-  const picked = normalizeFilenameForMatch(importedName);
-  if (canonical === picked) return true;
-  if (picked.includes(`pg${gutenbergId}`)) return true;
-  if (picked.includes(String(gutenbergId)) && canonical.includes(String(gutenbergId))) return true;
-  return false;
 }
 
 function entryTimestamp(entry: ImportHistoryEntry): number {
@@ -95,20 +81,15 @@ function pickStatus(
   return next ?? prior ?? "requested";
 }
 
-function normalizeTitle(title: string): string {
-  return title.trim().toLowerCase().replace(/\s+/g, " ");
-}
+export type LedgerLibraryBook = Pick<Book, "gutenbergId">;
 
-function libraryBookMatchesLedger(book: Pick<Book, "gutenbergId" | "title" | "editionPipeline" | "importSource">, entry: ImportHistoryEntry): boolean {
-  if (book.gutenbergId === entry.gutenbergId) return true;
-  const isGutenbergBook =
-    book.editionPipeline === "gutenberg" || book.importSource === "gutenberg";
-  return isGutenbergBook && normalizeTitle(book.title) === normalizeTitle(entry.title);
+function libraryBookMatchesLedger(book: LedgerLibraryBook, entry: ImportHistoryEntry): boolean {
+  return typeof book.gutenbergId === "number" && book.gutenbergId === entry.gutenbergId;
 }
 
 export function isLedgerEntryImported(
   entry: ImportHistoryEntry,
-  library: Pick<Book, "gutenbergId" | "title" | "editionPipeline" | "importSource">[]
+  library: LedgerLibraryBook[]
 ): boolean {
   if (entry.downloadStatus === "imported" || Boolean(entry.importedAt)) return true;
   return library.some((book) => libraryBookMatchesLedger(book, entry));
@@ -231,43 +212,16 @@ export async function confirmDownloadHandoff(gutenbergId: number): Promise<void>
   }
 }
 
-function resolveGutenbergIdForImport(params: {
-  gutenbergId?: number;
-  importedFileName?: string;
-}): number | undefined {
-  return params.gutenbergId ?? (params.importedFileName ? gutenbergIdFromFilename(params.importedFileName) : undefined);
-}
-
 export async function matchLedgerForImport(params: {
   gutenbergId?: number;
-  importedFileName?: string;
 }): Promise<ImportHistoryEntry | undefined> {
+  if (params.gutenbergId == null) return undefined;
   const ledger = await readLedger();
-  const gutenbergId = resolveGutenbergIdForImport(params);
-
-  if (gutenbergId) {
-    const byId = ledger.find((e) => e.gutenbergId === gutenbergId);
-    if (byId) return byId;
-  }
-
-  if (!params.importedFileName) return undefined;
-
-  for (const row of ledger) {
-    if (row.filename && filenamesLooselyMatch(row.filename, params.importedFileName, row.gutenbergId)) {
-      return row;
-    }
-    if (row.anchor && gutenbergId && row.anchor === buildLedgerAnchor(gutenbergId, params.importedFileName)) {
-      return row;
-    }
-  }
-
-  return undefined;
+  return ledger.find((e) => e.gutenbergId === params.gutenbergId);
 }
 
 /** Backfill ledger rows that already exist in the library (e.g. pre-tracking imports). */
-export async function reconcileLedgerWithLibrary(
-  library: Pick<Book, "gutenbergId" | "title" | "editionPipeline" | "importSource">[]
-): Promise<void> {
+export async function reconcileLedgerWithLibrary(library: LedgerLibraryBook[]): Promise<void> {
   try {
     const ledger = await readLedger();
     for (const entry of ledger) {
@@ -286,7 +240,6 @@ export async function reconcileLedgerWithLibrary(
 
 export async function markLedgerImportedFromImport(params: {
   gutenbergId?: number;
-  importedFileName?: string;
 }): Promise<void> {
   try {
     const row = await matchLedgerForImport(params);

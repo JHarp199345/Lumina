@@ -3,7 +3,10 @@
  */
 
 import type { BookStructure, Chapter, EditionPipeline } from "@/types";
-import { normalizeGutenbergChapters, detectGutenbergHtml } from "@/pipeline/gutenbergEpub";
+import {
+  detectGutenbergHtml,
+  normalizeGutenbergChapters,
+} from "@/pipeline/gutenbergEpub";
 import { gutenbergIdFromFilename } from "@/utils/downloadFilename";
 
 export type { EditionPipeline };
@@ -51,7 +54,8 @@ export function mergeEditionMetadata(
   structure: BookStructure,
   pipeline: EditionPipeline,
   importContext: EpubImportContext | undefined,
-  sourceFileName?: string
+  sourceFileName?: string,
+  contentGutenbergId?: number
 ): BookStructure {
   const title =
     importContext?.catalogTitle?.trim() ||
@@ -61,6 +65,7 @@ export function mergeEditionMetadata(
     structure.author;
   const gutenbergId =
     importContext?.gutenbergId ??
+    contentGutenbergId ??
     (pipeline === "gutenberg" && sourceFileName
       ? gutenbergIdFromFilename(sourceFileName)
       : undefined);

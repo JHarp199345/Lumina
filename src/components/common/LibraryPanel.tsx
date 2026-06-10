@@ -22,7 +22,8 @@ import { useBookStore } from "@/store/bookStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { storage } from "@/storage";
 import OpenShelfCatalog from "@/components/common/OpenShelfCatalog";
-import type { BookImportSource, BookStructure, EditionPipeline } from "@/types";
+import type { BookStructure } from "@/types";
+import type { LedgerLibraryBook } from "@/utils/importHistory";
 import {
   clearImportHistory,
   isLedgerEntryImported,
@@ -51,12 +52,21 @@ export default function LibraryPanel({
   const [openProgress, setOpenProgress] = useState("");
   const [view, setView] = useState<"library" | "open-shelf" | "import-history">("library");
   const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>([]);
+  const [ledgerLibrary, setLedgerLibrary] = useState<LedgerLibraryBook[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
   const refreshImportHistory = () => {
-    void reconcileLedgerWithLibrary(library)
-      .then(() => loadImportHistory())
-      .then(setImportHistory);
+    void (async () => {
+      const enriched = await Promise.all(
+        library.map(async (book) => ({
+          gutenbergId:
+            book.gutenbergId ?? (await storage.loadBookStructure(book.id))?.gutenbergId,
+        }))
+      );
+      setLedgerLibrary(enriched);
+      await reconcileLedgerWithLibrary(enriched);
+      setImportHistory(await loadImportHistory());
+    })();
   };
 
   useEffect(() => {
@@ -135,7 +145,7 @@ export default function LibraryPanel({
         ) : view === "import-history" ? (
           <ImportHistoryView
             history={importHistory}
-            library={library}
+            library={ledgerLibrary}
             copiedId={copiedId}
             onBack={() => setView("library")}
             onCopy={async (entry) => {
@@ -361,13 +371,7 @@ export default function LibraryPanel({
 
 interface ImportHistoryViewProps {
   history: ImportHistoryEntry[];
-  library: {
-    id: string;
-    gutenbergId?: number;
-    title: string;
-    editionPipeline?: EditionPipeline;
-    importSource?: BookImportSource;
-  }[];
+  library: LedgerLibraryBook[];
   copiedId: number | null;
   onBack: () => void;
   onCopy: (entry: ImportHistoryEntry) => void;

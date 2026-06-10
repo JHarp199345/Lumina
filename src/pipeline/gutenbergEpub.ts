@@ -42,6 +42,46 @@ export function detectGutenbergHtml(html: string): boolean {
   return GUTENBERG_HTML_MARKERS.some((pattern) => pattern.test(sample));
 }
 
+const GUTENBERG_ID_PATTERNS = [
+  /gutenberg\.org\/ebooks\/(\d{1,7})/i,
+  /gutenberg\.org\/files\/(\d{1,7})/i,
+  /cache\/epub\/(\d{1,7})\//i,
+  /ebook\s*#\s*(\d{1,7})/i,
+];
+
+/** Parse a Project Gutenberg ebook id from a URL, OPF identifier, or boilerplate line. */
+export function parseGutenbergCatalogId(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  for (const pattern of GUTENBERG_ID_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (!match?.[1]) continue;
+    const id = Number(match[1]);
+    if (Number.isFinite(id) && id > 0) return id;
+  }
+  return undefined;
+}
+
+/** Read the ebook id baked into Gutenberg HTML — survives user renames on disk. */
+export function detectGutenbergIdFromHtml(html: string): number | undefined {
+  const sample = html.slice(0, 20000);
+  for (const pattern of GUTENBERG_ID_PATTERNS) {
+    const match = sample.match(pattern);
+    if (!match?.[1]) continue;
+    const id = Number(match[1]);
+    if (Number.isFinite(id) && id > 0) return id;
+  }
+  return undefined;
+}
+
+export function detectGutenbergIdFromTexts(rawTexts: Map<string, string>): number | undefined {
+  for (const html of rawTexts.values()) {
+    const id = detectGutenbergIdFromHtml(html);
+    if (id) return id;
+  }
+  return undefined;
+}
+
 export function stripGutenbergBoilerplate(text: string): string {
   const paragraphs = text
     .split(/\n{2,}/)
