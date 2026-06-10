@@ -449,10 +449,177 @@ export interface OverviewResult {
 }
 
 export async function generateAudioOverview(args: ScriptArgs & { voiceName: string }): Promise<OverviewResult> {
+  // Local LLM path: deep understanding-first chunked pipeline.
+  // Gemini/paid API path is completely separate — do not touch it.
+  if (getProvider() === "odysseus") {
+    return _generateAudioOverviewLocal(args);
+  }
   const script = await generateOverviewScript(args);
   if (!script) throw new Error("The summary came back empty — try again.");
   const audio = await synthesizeOverviewAudio(script, args.voiceName, args.apiKey, args.onProgress);
   return { script, audio };
+}
+
+// ─── Local LLM: understanding-first chunked pipeline ───────────────────────────
+// Splits raw book text into 10k-word segments. Each segment goes through:
+//   1. Comprehension pass  — LLM reads raw text and produces a dense understanding doc
+//   2. Script pass         — LLM writes narration FROM the understanding doc
+//   3. TTS                 — Kokoro voices the script chunk
+// All PCM is concatenated into one WAV. Only runs on Odysseus (local LLM).
+
+const LOCAL_CHUNK_WORDS = 10_000;
+
+async function _buildChunkUnderstanding(
+  text: string,
+  bookTitle: string,
+  priorUnderstanding: string,
+  apiKey: string
+): Promise<string> {
+  const priorSection = priorUnderstanding
+    ? `Context established from earlier in the work:\n${priorUnderstanding}\n\n`
+    : "";
+
+  const prompt = `You are building a thorough understanding of a section of "${bookTitle}" before explaining it to a listener.
+
+${priorSection}Read the following material carefully and produce a comprehensive comprehension document that captures:
+- The central thesis, argument, or narrative thread of this section
+- Every key concept, theory, model, or idea — with its precise meaning in this context
+- The logical or narrative progression: how ideas develop, build on each other, or conflict
+- Specific evidence, examples, case studies, experiments, or illustrations used
+- Any frameworks, systems, or methodologies introduced
+- Relationships between entities (people, concepts, institutions, events) and how they evolve
+- How this section connects to or extends what came before
+- What a listener must carry forward to understand the rest of the work
+
+Be exhaustive and specific — name the actual concepts, terms, arguments, and examples from the text. Do not condense prematurely. This document is the foundation for a spoken explanation.
+
+MATERIAL:
+${text}`;
+
+  return llmGenerate("audio_director", prompt, { temperature: 0.3, maxTokens: 4096, geminiKey: apiKey });
+}
+
+async function _buildChunkScript(
+  understanding: string,
+  bookTitle: string,
+  segIndex: number,
+  totalSegs: number,
+  segTargetWords: number,
+  userPrompt: string,
+  priorScriptTail: string,
+  apiKey: string
+): Promise<string> {
+  const sectionNote = totalSegs > 1 ? ` (section ${segIndex + 1} of ${totalSegs})` : "";
+  const positionGuide =
+    totalSegs <= 1
+      ? ""
+      : segIndex === 0
+        ? "Open by introducing the work and framing what the listener is about to learn."
+        : segIndex === totalSegs - 1
+          ? "This is the final section. Conclude by synthesizing the contribution of the whole work."
+          : "Continue the explanation naturally from where it left off.";
+
+  const continuationLine = priorScriptTail
+    ? `Continue naturally from this point — do not repeat it:\n"…${priorScriptTail.trim()}"\n\n`
+    : "";
+
+  const instructionLine = userPrompt.trim()
+    ? `Follow this reader instruction as your primary guide:\n"${userPrompt.trim()}"\n\n`
+    : "";
+
+  const prompt = `You are narrating a spoken audio overview of "${bookTitle}"${sectionNote}.
+${positionGuide}
+
+${instructionLine}${continuationLine}Using the comprehension notes below, write a thorough spoken explanation (~${segTargetWords} words). Cover every concept, argument, example, and relationship in the notes — do not abbreviate, skip, or gloss over any idea. Develop each point fully so the listener builds genuine understanding.
+
+Write CONTINUOUS SPOKEN NARRATION in flowing paragraphs. No headings, bullet points, or markup — only words to be spoken.
+
+COMPREHENSION NOTES:
+${understanding}`;
+
+  return llmGenerate("audio_director", prompt, {
+    temperature: 0.7,
+    maxTokens: Math.min(8192, Math.round(segTargetWords * 3)),
+    geminiKey: apiKey,
+  });
+}
+
+async function _generateAudioOverviewLocal(
+  args: ScriptArgs & { voiceName: string }
+): Promise<OverviewResult> {
+  const { scope, structure, semanticMap, userPrompt, minutes, apiKey, voiceName, profile, onProgress } = args;
+
+  const targetWords = Math.round(minutes * LUMINA_CONFIG.AUDIO_OVERVIEW_WPM);
+  const chapters = chaptersForScope(scope, structure);
+  const bookTitle = structure.title || "this work";
+
+  // Collect raw text for the scope
+  const allWords: string[] = [];
+  for (const ch of chapters) {
+    if (ch.rawText) allWords.push(...ch.rawText.split(/\s+/).filter(Boolean));
+  }
+
+  // Build segments. Fall back to the assembled outline/profile context if no raw text.
+  const segments: string[] = [];
+  if (allWords.length > 0) {
+    for (let i = 0; i < allWords.length; i += LOCAL_CHUNK_WORDS) {
+      segments.push(allWords.slice(i, i + LOCAL_CHUNK_WORDS).join(" "));
+    }
+  } else {
+    const outline = buildScopeOutline(scope, structure, semanticMap);
+    const profileSection = profile ? profileGroundingText(profile) : "";
+    segments.push([profileSection, outline].filter(Boolean).join("\n\n") || "No source text available.");
+  }
+
+  // Words per segment — honour the user's target time but ensure depth floor of ~2.5 min each
+  const segTargetWords = Math.max(Math.round(targetWords / segments.length), 350);
+  const total = segments.length;
+
+  onProgress?.(`Preparing deep analysis — ${total} section${total > 1 ? "s" : ""} to process…`);
+
+  const allScripts: string[] = [];
+  const pcmParts: Uint8Array[] = [];
+  let sampleRate = 24000;
+  let priorUnderstanding = "";
+  let priorScriptTail = "";
+
+  for (let i = 0; i < total; i++) {
+    const n = i + 1;
+
+    // Pass 1 — comprehension
+    onProgress?.(`Analyzing section ${n} of ${total}…`);
+    const understanding = await _buildChunkUnderstanding(segments[i], bookTitle, priorUnderstanding, apiKey);
+
+    // Pass 2 — narration script
+    onProgress?.(`Writing section ${n} of ${total}…`);
+    const segScript = await _buildChunkScript(
+      understanding, bookTitle, i, total, segTargetWords, userPrompt, priorScriptTail, apiKey
+    );
+    allScripts.push(segScript.trim());
+
+    // Carry forward context for next segment
+    priorUnderstanding = understanding.slice(-1000);
+    priorScriptTail = segScript.slice(-400);
+
+    // Pass 3 — TTS (already job-based + chunked internally)
+    onProgress?.(`Voicing section ${n} of ${total}…`);
+    const segAudio = await synthesizeOverviewAudio(segScript, voiceName, apiKey, onProgress);
+
+    // Extract raw PCM (skip 44-byte WAV header) for stitching
+    const view = new DataView(segAudio.data.buffer, segAudio.data.byteOffset);
+    sampleRate = view.getUint32(24, true);
+    pcmParts.push(segAudio.data.slice(44));
+  }
+
+  onProgress?.("Assembling final audio…");
+  const combinedPcm = concatBytes(pcmParts);
+  const finalWav = pcmToWav(combinedPcm, sampleRate, 1);
+  const durationSeconds = combinedPcm.length / (sampleRate * 2);
+
+  return {
+    script: allScripts.join("\n\n"),
+    audio: { data: finalWav, mimeType: "audio/wav", durationSeconds },
+  };
 }
 
 // ─── Gemini text helper ─────────────────────────────────────────────────────────

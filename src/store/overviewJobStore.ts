@@ -73,10 +73,21 @@ export const useOverviewJobStore = create<OverviewJobStore>()((set, get) => ({
     void (async () => {
       const isStale = () => get().requestId !== requestId;
 
+      // Heartbeat: if no progress update arrives for 45 s, reassure the user
+      // that the job is still running (local LLM / TTS can be slow).
+      let lastProgressMs = Date.now();
+      const heartbeatId = setInterval(() => {
+        if (isStale() || get().status !== "running") { clearInterval(heartbeatId); return; }
+        if (Date.now() - lastProgressMs > 45_000) {
+          set({ progress: "Still working… local processing can take several minutes per section" });
+        }
+      }, 15_000);
+
       try {
         const artifact = await runAudioOverviewJob({
           ...params,
           onProgress: (message) => {
+            lastProgressMs = Date.now();
             if (!isStale()) set({ progress: message });
           },
           isStale,
@@ -110,6 +121,7 @@ export const useOverviewJobStore = create<OverviewJobStore>()((set, get) => ({
           progress: "",
         });
       } finally {
+        clearInterval(heartbeatId);
         if (get().requestId === requestId && get().status === "running") {
           set({ status: "idle", progress: "", bookId: null });
         }
