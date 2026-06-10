@@ -16,6 +16,8 @@ import { ensureReadingParagraphs } from "@/utils/readingText";
 import { getDisplayImage, hydrateImageWordPositions } from "@/utils/imagePosition";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { diagnosticInfo } from "@/utils/diagnostics";
+import { gutenbergIdFromFilename } from "@/utils/downloadFilename";
+import { markLedgerImportedFromImport } from "@/utils/importHistory";
 
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -136,17 +138,17 @@ export function useEpubImport() {
       bytes = await runStep("Reading EPUB file…", () => readFileBytes(picked as string));
     }
 
-    // Give React a breath to render the import status before parsing a large EPUB.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const { structure, zip } = await runStep("Parsing EPUB structure…", () =>
-      parseEpub(bytes, onProgress, { importContext })
-    );
-
     const fileName =
       picked instanceof File
         ? picked.name
         : (picked as string).split("/").pop() || "book.epub";
+
+    // Give React a breath to render the import status before parsing a large EPUB.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const { structure, zip } = await runStep("Parsing EPUB structure…", () =>
+      parseEpub(bytes, onProgress, { importContext, sourceFileName: fileName })
+    );
 
     const storedPath = await runStep("Copying book into Lumina…", () =>
       picked instanceof File && storage.storeEpubBytes
@@ -155,6 +157,11 @@ export function useEpubImport() {
     );
 
     const coverImage = await optionalStep("Extracting cover image…", () => extractCoverImage(zip), onProgress);
+
+    const resolvedGutenbergId =
+      structure.gutenbergId ??
+      importContext?.gutenbergId ??
+      gutenbergIdFromFilename(fileName);
 
     const book: Book = {
       id: structure.bookId,
@@ -167,18 +174,16 @@ export function useEpubImport() {
       importedAt: new Date().toISOString(),
       lastOpened: new Date().toISOString(),
       importSource: structure.editionPipeline === "gutenberg" ? "gutenberg" : "file",
-      gutenbergId: structure.gutenbergId ?? importContext?.gutenbergId,
+      gutenbergId: resolvedGutenbergId,
       editionPipeline: structure.editionPipeline,
     };
 
     await runStep("Saving book to library…", () => storage.saveBook(book));
 
-    void import("@/utils/importHistory").then(({ markLedgerImportedFromImport }) =>
-      markLedgerImportedFromImport({
-        gutenbergId: book.gutenbergId ?? structure.gutenbergId ?? importContext?.gutenbergId,
-        importedFileName: fileName,
-      })
-    );
+    await markLedgerImportedFromImport({
+      gutenbergId: resolvedGutenbergId,
+      importedFileName: fileName,
+    });
     await runStep("Saving book structure…", () => storage.saveBookStructure(structure));
     await runStep("Resetting reading position…", () =>
       storage.saveProgress({

@@ -1,4 +1,6 @@
+import type { Book } from "@/types";
 import { STORES, dbDelete, dbGetAll, dbPut } from "@/storage/webDb";
+import { gutenbergIdFromFilename } from "@/utils/downloadFilename";
 import { isTauri } from "@/utils/runtime";
 
 async function tauriLedger() {
@@ -93,15 +95,23 @@ function pickStatus(
   return next ?? prior ?? "requested";
 }
 
+function normalizeTitle(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function libraryBookMatchesLedger(book: Pick<Book, "gutenbergId" | "title" | "editionPipeline" | "importSource">, entry: ImportHistoryEntry): boolean {
+  if (book.gutenbergId === entry.gutenbergId) return true;
+  const isGutenbergBook =
+    book.editionPipeline === "gutenberg" || book.importSource === "gutenberg";
+  return isGutenbergBook && normalizeTitle(book.title) === normalizeTitle(entry.title);
+}
+
 export function isLedgerEntryImported(
   entry: ImportHistoryEntry,
-  libraryGutenbergIds: Set<number>
+  library: Pick<Book, "gutenbergId" | "title" | "editionPipeline" | "importSource">[]
 ): boolean {
-  return (
-    entry.downloadStatus === "imported" ||
-    Boolean(entry.importedAt) ||
-    libraryGutenbergIds.has(entry.gutenbergId)
-  );
+  if (entry.downloadStatus === "imported" || Boolean(entry.importedAt)) return true;
+  return library.some((book) => libraryBookMatchesLedger(book, entry));
 }
 
 export function ledgerStatusLabel(entry: ImportHistoryEntry, imported: boolean): string {
@@ -221,14 +231,22 @@ export async function confirmDownloadHandoff(gutenbergId: number): Promise<void>
   }
 }
 
+function resolveGutenbergIdForImport(params: {
+  gutenbergId?: number;
+  importedFileName?: string;
+}): number | undefined {
+  return params.gutenbergId ?? (params.importedFileName ? gutenbergIdFromFilename(params.importedFileName) : undefined);
+}
+
 export async function matchLedgerForImport(params: {
   gutenbergId?: number;
   importedFileName?: string;
 }): Promise<ImportHistoryEntry | undefined> {
   const ledger = await readLedger();
+  const gutenbergId = resolveGutenbergIdForImport(params);
 
-  if (params.gutenbergId) {
-    const byId = ledger.find((e) => e.gutenbergId === params.gutenbergId);
+  if (gutenbergId) {
+    const byId = ledger.find((e) => e.gutenbergId === gutenbergId);
     if (byId) return byId;
   }
 
@@ -238,9 +256,32 @@ export async function matchLedgerForImport(params: {
     if (row.filename && filenamesLooselyMatch(row.filename, params.importedFileName, row.gutenbergId)) {
       return row;
     }
+    if (row.anchor && gutenbergId && row.anchor === buildLedgerAnchor(gutenbergId, params.importedFileName)) {
+      return row;
+    }
   }
 
   return undefined;
+}
+
+/** Backfill ledger rows that already exist in the library (e.g. pre-tracking imports). */
+export async function reconcileLedgerWithLibrary(
+  library: Pick<Book, "gutenbergId" | "title" | "editionPipeline" | "importSource">[]
+): Promise<void> {
+  try {
+    const ledger = await readLedger();
+    for (const entry of ledger) {
+      if (entry.downloadStatus === "imported" || entry.importedAt) continue;
+      if (!library.some((book) => libraryBookMatchesLedger(book, entry))) continue;
+      await recordImportHistory({
+        ...entry,
+        downloadStatus: "imported",
+        importedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    console.warn("[DownloadLedger] Library reconcile failed:", err);
+  }
 }
 
 export async function markLedgerImportedFromImport(params: {

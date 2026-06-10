@@ -197,7 +197,8 @@ export async function parseEpub(
       collectionGroups: collectionGroups.length > 1 ? collectionGroups : undefined,
     },
     editionPipeline,
-    options?.importContext
+    options?.importContext,
+    options?.sourceFileName
   );
 
   return { structure, rawTexts, zip };

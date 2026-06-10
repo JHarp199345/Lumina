@@ -1,3 +1,12 @@
+/** Project Gutenberg cache filenames: pg43-images-3.epub → 43 */
+export function gutenbergIdFromFilename(name: string): number | undefined {
+  const base = name.trim().split("/").pop() ?? name;
+  const match = base.match(/^pg(\d+)/i);
+  if (!match?.[1]) return undefined;
+  const id = Number(match[1]);
+  return Number.isFinite(id) && id > 0 ? id : undefined;
+}
+
 /** Basename from a download URL path (e.g. cache/epub/1661/pg1661-images-3.epub). */
 export function filenameFromUrl(url: string): string {
   try {

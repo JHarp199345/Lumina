@@ -22,12 +22,13 @@ import { useBookStore } from "@/store/bookStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { storage } from "@/storage";
 import OpenShelfCatalog from "@/components/common/OpenShelfCatalog";
-import type { BookStructure } from "@/types";
+import type { BookImportSource, BookStructure, EditionPipeline } from "@/types";
 import {
   clearImportHistory,
   isLedgerEntryImported,
   ledgerStatusLabel,
   loadImportHistory,
+  reconcileLedgerWithLibrary,
   type ImportHistoryEntry,
 } from "@/utils/importHistory";
 
@@ -53,7 +54,9 @@ export default function LibraryPanel({
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
   const refreshImportHistory = () => {
-    void loadImportHistory().then(setImportHistory);
+    void reconcileLedgerWithLibrary(library)
+      .then(() => loadImportHistory())
+      .then(setImportHistory);
   };
 
   useEffect(() => {
@@ -62,7 +65,7 @@ export default function LibraryPanel({
 
   useEffect(() => {
     refreshImportHistory();
-  }, [library.length]);
+  }, [library.length, library.map((b) => `${b.id}:${b.gutenbergId ?? ""}`).join("|")]);
 
   const reportOpenProgress = (message: string) => {
     setOpenProgress(message);
@@ -358,7 +361,13 @@ export default function LibraryPanel({
 
 interface ImportHistoryViewProps {
   history: ImportHistoryEntry[];
-  library: { id: string; gutenbergId?: number }[];
+  library: {
+    id: string;
+    gutenbergId?: number;
+    title: string;
+    editionPipeline?: EditionPipeline;
+    importSource?: BookImportSource;
+  }[];
   copiedId: number | null;
   onBack: () => void;
   onCopy: (entry: ImportHistoryEntry) => void;
@@ -376,11 +385,8 @@ function ImportHistoryView({
   onImport,
 }: ImportHistoryViewProps) {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
-  const importedIds = new Set(
-    library.map((b) => b.gutenbergId).filter((id): id is number => typeof id === "number")
-  );
   const pendingCount = history.filter(
-    (entry) => entry.filename && !isLedgerEntryImported(entry, importedIds)
+    (entry) => entry.filename && !isLedgerEntryImported(entry, library)
   ).length;
 
   return (
@@ -449,7 +455,7 @@ function ImportHistoryView({
 
             <div className="space-y-2">
               {history.map((entry) => {
-                const isImported = isLedgerEntryImported(entry, importedIds);
+                const isImported = isLedgerEntryImported(entry, library);
                 const isCopied = copiedId === entry.gutenbergId;
                 const when = formatHistoryWhen(entry);
                 const downloadUrl = entryDownloadUrl(entry);

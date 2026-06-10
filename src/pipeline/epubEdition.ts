@@ -4,6 +4,7 @@
 
 import type { BookStructure, Chapter, EditionPipeline } from "@/types";
 import { normalizeGutenbergChapters, detectGutenbergHtml } from "@/pipeline/gutenbergEpub";
+import { gutenbergIdFromFilename } from "@/utils/downloadFilename";
 
 export type { EditionPipeline };
 
@@ -18,6 +19,8 @@ export interface EpubImportContext {
 
 export interface ParseEpubOptions {
   importContext?: EpubImportContext;
+  /** Original picked filename — used to recover Gutenberg id when importContext is absent. */
+  sourceFileName?: string;
 }
 
 /** Pick normalization pipeline from EPUB content — same path for file picker and Open Shelf. */
@@ -47,7 +50,8 @@ export function applyEditionPipeline(
 export function mergeEditionMetadata(
   structure: BookStructure,
   pipeline: EditionPipeline,
-  importContext: EpubImportContext | undefined
+  importContext: EpubImportContext | undefined,
+  sourceFileName?: string
 ): BookStructure {
   const title =
     importContext?.catalogTitle?.trim() ||
@@ -55,12 +59,17 @@ export function mergeEditionMetadata(
   const author =
     importContext?.catalogAuthor?.trim() ||
     structure.author;
+  const gutenbergId =
+    importContext?.gutenbergId ??
+    (pipeline === "gutenberg" && sourceFileName
+      ? gutenbergIdFromFilename(sourceFileName)
+      : undefined);
 
   return {
     ...structure,
     title,
     author,
     editionPipeline: pipeline,
-    gutenbergId: importContext?.gutenbergId,
+    gutenbergId,
   };
 }
