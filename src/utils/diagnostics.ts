@@ -10,7 +10,7 @@ export interface DiagnosticEntry {
 }
 
 const STORAGE_KEY = "lumina.diagnostics.v1";
-const MAX_ENTRIES = 1000;
+const MAX_ENTRIES = 200;
 
 function safeStringify(value: unknown): string {
   try {
@@ -47,10 +47,17 @@ export function getDiagnosticEntries(): DiagnosticEntry[] {
 }
 
 function writeEntries(entries: DiagnosticEntry[]): void {
+  const trimmed = entries.slice(-MAX_ENTRIES);
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(-MAX_ENTRIES)));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
   } catch {
-    // Logging must never break the reader.
+    // Quota exceeded — clear everything and keep only the most recent 50 entries.
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed.slice(-50)));
+    } catch {
+      // Logging must never break the reader.
+    }
   }
 }
 

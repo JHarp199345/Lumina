@@ -79,10 +79,14 @@ export default function FloatingAudioPlayer() {
 
   useEffect(() => {
     if (!bookId || !activeAudioId) return;
-    localStorage.setItem(
-      AUDIO_SESSION_KEY,
-      JSON.stringify({ bookId, audioId: activeAudioId, currentTime })
-    );
+    try {
+      localStorage.setItem(
+        AUDIO_SESSION_KEY,
+        JSON.stringify({ bookId, audioId: activeAudioId, currentTime })
+      );
+    } catch {
+      // localStorage full — session restore won't work but playback continues.
+    }
   }, [activeAudioId, bookId, currentTime]);
 
   useEffect(() => {
