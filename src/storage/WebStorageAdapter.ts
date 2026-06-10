@@ -339,6 +339,11 @@ export class WebStorageAdapter implements StorageAdapter {
     return resolved.sort((a, b) => new Date(a.generatedAt).getTime() - new Date(b.generatedAt).getTime());
   }
 
+  async deleteAudioArtifact(id: string): Promise<void> {
+    await dbDelete(STORES.AUDIO_META, id);
+    await dbDelete(STORES.AUDIO_BLOBS, id).catch(() => {});
+  }
+
   async deleteAudioArtifacts(bookId: string): Promise<void> {
     const metas = await dbGetByIndex<AudioArtifact>(STORES.AUDIO_META, "bookId", bookId);
     await Promise.all(

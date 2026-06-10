@@ -116,6 +116,7 @@ export interface StorageAdapter {
 
   saveAudioArtifact(meta: Omit<AudioArtifact, "filePath">, data: Uint8Array): Promise<string>;
   loadAudioArtifacts(bookId: string): Promise<AudioArtifact[]>;
+  deleteAudioArtifact(id: string): Promise<void>;
   deleteAudioArtifacts(bookId: string): Promise<void>;
 
   // ── Presentation Studio ───────────────────────────────────────────────────

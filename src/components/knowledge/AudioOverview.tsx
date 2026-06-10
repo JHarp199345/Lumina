@@ -7,6 +7,7 @@ import {
   Pause,
   Play,
   Sparkles,
+  Trash2,
   Wand2,
 } from "lucide-react";
 import { useAudioStore } from "@/store/audioStore";
@@ -39,6 +40,7 @@ export default function AudioOverview() {
     mount,
     setActiveAudio,
     setIsPlaying,
+    removeArtifact,
   } = useAudioStore();
   const {
     status: jobStatus,
@@ -462,7 +464,7 @@ export default function AudioOverview() {
               {overviewArtifacts.map((artifact) => (
                 <div
                   key={artifact.id}
-                  className={`rounded-lg border px-2.5 py-2 transition-colors ${
+                  className={`group/artifact rounded-lg border px-2.5 py-2 transition-colors ${
                     activeAudioId === artifact.id
                       ? "border-lumina-gold/40 bg-lumina-gold/[0.07]"
                       : "border-hair bg-ink/[0.02]"
@@ -492,9 +494,22 @@ export default function AudioOverview() {
                         {artifact.overviewPrompt ? " · custom" : " · default"}
                       </p>
                     </div>
-                    {activeAudioId === artifact.id && (
-                      <CheckCircle2 size={14} className="shrink-0 text-lumina-gold/75" />
-                    )}
+                    <div className="flex shrink-0 items-center gap-1">
+                      {activeAudioId === artifact.id && (
+                        <CheckCircle2 size={14} className="text-lumina-gold/75" />
+                      )}
+                      <button
+                        onClick={async () => {
+                          removeArtifact(artifact.id);
+                          await storage.deleteAudioArtifact(artifact.id).catch(() => {});
+                        }}
+                        className="rounded p-1 text-ink-faint opacity-0 transition-opacity hover:text-rose-400 group-hover/artifact:opacity-100"
+                        aria-label="Delete overview"
+                        title="Delete"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

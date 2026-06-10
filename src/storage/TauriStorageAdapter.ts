@@ -290,6 +290,10 @@ export class TauriStorageAdapter implements StorageAdapter {
     return dbLoadAudioArtifacts(bookId);
   }
 
+  async deleteAudioArtifact(id: string): Promise<void> {
+    await dbDeleteAudioArtifact(id);
+  }
+
   async deleteAudioArtifacts(bookId: string): Promise<void> {
     await dbDeleteAudioArtifacts(bookId);
     const appDataDir = await getAppDataDir().catch(() => "");

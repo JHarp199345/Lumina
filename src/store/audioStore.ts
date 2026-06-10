@@ -35,6 +35,7 @@ interface AudioStore {
   clear: () => void;
   setArtifacts: (artifacts: AudioArtifact[]) => void;
   addArtifact: (artifact: AudioArtifact) => void;
+  removeArtifact: (id: string) => void;
   setActiveSegment: (segmentId: string | null) => void;
   setActiveAudio: (audioId: string | null) => void;
   setVoice: (voiceId: string) => void;
@@ -111,6 +112,12 @@ export const useAudioStore = create<AudioStore>()((set, get) => ({
     set((state) => ({
       artifacts: [...state.artifacts.filter((item) => item.id !== artifact.id), artifact],
       activeAudioId: artifact.id,
+    })),
+  removeArtifact: (id) =>
+    set((state) => ({
+      artifacts: state.artifacts.filter((item) => item.id !== id),
+      activeAudioId: state.activeAudioId === id ? null : state.activeAudioId,
+      isPlaying: state.activeAudioId === id ? false : state.isPlaying,
     })),
   setActiveSegment: (activeSegmentId) => set({ activeSegmentId }),
   setActiveAudio: (activeAudioId) => set({ activeAudioId }),
