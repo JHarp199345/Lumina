@@ -1,7 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Loader2, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, BookOpen, Clock, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import type { BookStructure } from "@/types";
+
+interface DownloadHistoryEntry {
+  title: string;
+  filename: string;
+  downloadedAt: string;
+  gutenbergId: number;
+}
+
+const DOWNLOAD_HISTORY_KEY = "lumina_download_history";
+const MAX_HISTORY = 8;
+
+function loadDownloadHistory(): DownloadHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(DOWNLOAD_HISTORY_KEY);
+    return raw ? (JSON.parse(raw) as DownloadHistoryEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDownloadHistory(entries: DownloadHistoryEntry[]): void {
+  try {
+    localStorage.setItem(DOWNLOAD_HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY)));
+  } catch { /* ignore */ }
+}
 
 interface GutendexBook {
   id: number;
@@ -88,6 +113,8 @@ export default function OpenShelfCatalog({
   const [activeTitle, setActiveTitle] = useState("");
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
   const [manualFallbackTitle, setManualFallbackTitle] = useState("");
+  const [manualFallbackFilename, setManualFallbackFilename] = useState("");
+  const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryEntry[]>(() => loadDownloadHistory());
   const [showFilters, setShowFilters] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestKey = useMemo(() => `${query.trim().toLowerCase()}|${genre}|${sort}`, [query, genre, sort]);
@@ -235,7 +262,7 @@ export default function OpenShelfCatalog({
     setImportPhase("downloading");
     setDownloadPercent(null);
     setManualFallbackTitle("");
-    report(`Step 1 of 2 — Downloading “${book.title}”…`);
+    report(`Step 1 of 2 — Downloading "${book.title}"…`);
 
     let needsManualImport = false;
     try {
@@ -244,22 +271,34 @@ export default function OpenShelfCatalog({
         report(message);
       });
       setImportPhase("importing");
-      report(`Step 2 of 2 — Adding “${book.title}” to your library…`);
+      report(`Step 2 of 2 — Adding "${book.title}" to your library…`);
       const result = await importEpubFile(file, report, {
         gutenbergId: book.id,
         catalogTitle: book.title,
         catalogAuthor: book.authors.map((author) => author.name).join(", "),
       });
       setImportPhase("done");
-      report(`Added “${result.book.title}” by ${result.book.author}. Choose a visual style next.`);
+      report(`Added "${result.book.title}" by ${result.book.author}. Choose a visual style next.`);
       onBookImported?.(result.structure);
       window.setTimeout(onClose, 1400);
     } catch (err) {
-      startBrowserDownload(epubUrls[0], book.title);
+      const filename = `${safeFileName(book.title)}.epub`;
+      startBrowserDownload(epubUrls[0], filename);
       console.warn("[OpenShelf] Automatic import failed; browser download fallback started.", err);
       needsManualImport = true;
       setImportPhase("manual");
       setManualFallbackTitle(book.title);
+      setManualFallbackFilename(filename);
+      // Persist to download history so the filename is always recoverable.
+      const entry: DownloadHistoryEntry = {
+        title: book.title,
+        filename,
+        downloadedAt: new Date().toISOString(),
+        gutenbergId: book.id,
+      };
+      const updated = [entry, ...downloadHistory.filter((e) => e.gutenbergId !== book.id)];
+      setDownloadHistory(updated);
+      saveDownloadHistory(updated);
       report("");
       onImportProgress?.("");
     } finally {
@@ -347,7 +386,7 @@ export default function OpenShelfCatalog({
           {importPhase === "downloading" && (
             <>
               <p className="text-xs font-medium text-lumina-gold/90">
-                Downloading{activeTitle ? ` “${activeTitle}”` : ""}…
+                Downloading{activeTitle ? ` "${activeTitle}"` : ""}…
               </p>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25">
                 <div
@@ -372,19 +411,45 @@ export default function OpenShelfCatalog({
             <p className="text-xs font-medium text-lumina-gold">{status}</p>
           )}
           {importPhase === "manual" && (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-ink/85">
-                iPhone/iPad couldn&apos;t auto-import “{manualFallbackTitle}”.
-              </p>
-              <p className="text-[11px] leading-relaxed text-ink-faint">
-                Safari started a download — usually named like <span className="font-mono text-ink-soft">pg12345.epub</span> in
-                Files → Downloads. Then tap the button below and pick that file. Chrome on iOS works the same way.
-              </p>
+            <div className="space-y-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-ink/85">
+                  Couldn&apos;t auto-import — a download was started instead.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportPhase("idle");
+                    setManualFallbackTitle("");
+                    setManualFallbackFilename("");
+                  }}
+                  className="flex-shrink-0 rounded p-0.5 text-ink-faint transition hover:text-ink-soft"
+                  title="Dismiss"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+
+              <div className="rounded-md border border-hair bg-black/20 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-ink-faint">File name — search for this</p>
+                <p className="mt-0.5 font-mono text-xs text-ink/90">{manualFallbackFilename}</p>
+              </div>
+
+              <div className="space-y-1 text-[11px] leading-relaxed text-ink-faint">
+                <p><span className="text-ink-soft">Safari:</span> tap the ↓ icon in the address bar, then tap the file.</p>
+                <p><span className="text-ink-soft">Chrome:</span> tap ⋮ → Downloads, then tap the file.</p>
+                <p><span className="text-ink-soft">Files app:</span> Browse → iPhone → Downloads, or search the filename above.</p>
+                <p className="pt-0.5 text-[10px] text-ink-faint/70">
+                  Chrome on iOS sometimes opens the file in a tab instead of downloading — if that happened, use Safari to re-try.
+                </p>
+              </div>
+
               <button
                 type="button"
                 onClick={() => {
                   setImportPhase("idle");
                   setManualFallbackTitle("");
+                  setManualFallbackFilename("");
                   onImport();
                 }}
                 className="min-h-[44px] w-full rounded-lg border border-lumina-gold/35 bg-lumina-gold/14 px-3 text-sm font-medium text-lumina-gold transition hover:bg-lumina-gold/20"
@@ -463,8 +528,46 @@ export default function OpenShelfCatalog({
             )}
             {!nextUrl && visibleBooks.length > 0 && (
               <p className="px-2 py-3 text-center text-[11px] text-ink-faint">
-                End of this shelf. Some Gutenberg downloads may need to be imported from the browser's Downloads folder.
+                End of this shelf.
               </p>
+            )}
+
+            {downloadHistory.length > 0 && (
+              <div className="mt-4 rounded-lg border border-hair bg-ink/[0.03] p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[11px] text-ink-faint">
+                    <Clock size={11} />
+                    <span>Downloaded files — find &amp; import these</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDownloadHistory([]);
+                      saveDownloadHistory([]);
+                    }}
+                    className="text-[10px] text-ink-faint/60 transition hover:text-ink-faint"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {downloadHistory.map((entry) => (
+                    <div key={`${entry.gutenbergId}-${entry.downloadedAt}`} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-[11px] text-ink-soft">{entry.title}</p>
+                        <p className="font-mono text-[10px] text-ink-faint">{entry.filename}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onImport()}
+                        className="flex-shrink-0 rounded-md border border-hair px-2 py-1 text-[11px] text-ink-faint transition hover:border-lumina-gold/30 hover:text-lumina-gold"
+                      >
+                        Import
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -546,12 +649,12 @@ async function downloadFirstWorkingEpub(
     try {
       onProgress(
         urls.length > 1
-          ? `Step 1 of 2 — Downloading “${book.title}” (format ${index + 1} of ${urls.length})…`
-          : `Step 1 of 2 — Downloading “${book.title}”…`,
+          ? `Step 1 of 2 — Downloading "${book.title}" (format ${index + 1} of ${urls.length})…`
+          : `Step 1 of 2 — Downloading "${book.title}"…`,
         null
       );
       const blob = await fetchEpubBlob(url, (percent) => {
-        onProgress(`Step 1 of 2 — Downloading “${book.title}”…`, percent);
+        onProgress(`Step 1 of 2 — Downloading "${book.title}"…`, percent);
       });
       await assertLooksLikeEpub(blob);
       return new File([blob], `${safeFileName(book.title)}.epub`, {
@@ -597,11 +700,11 @@ async function fetchEpubBlob(
   return new Blob(chunks, { type: "application/epub+zip" });
 }
 
-function startBrowserDownload(url: string | undefined, title: string): void {
+function startBrowserDownload(url: string | undefined, filename: string): void {
   if (!url) return;
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${safeFileName(title)}.epub`;
+  link.download = filename;
   link.rel = "noopener";
   link.target = "_blank";
   document.body.appendChild(link);
