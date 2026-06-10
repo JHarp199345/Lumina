@@ -31,6 +31,7 @@ import {
 } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
+import { getProvider } from "@/api/llmClient";
 import type { IdentifiedScene, CachedImage } from "@/types";
 
 function scenePositions(
@@ -342,7 +343,7 @@ export function useImageTrigger() {
       const googleKey = await storage.loadApiKey("lumina_google_ai_key");
       const falKey = await storage.loadApiKey("lumina_fal_key");
 
-      if (!googleKey) {
+      if (!googleKey && getProvider() === "gemini") {
         store.updateQueueItemStatus(next.sceneId, "failed");
         return;
       }
@@ -355,7 +356,7 @@ export function useImageTrigger() {
         bookId: next.bookId,
         wordPosition: scenePosition,
         visualSlotKey: slotKey,
-        googleApiKey: googleKey,
+        googleApiKey: googleKey ?? "",
         falApiKey: falKey || undefined,
         priorPaletteContext: priorContext,
         onComplete: async (img) => {

@@ -18,6 +18,7 @@ import { generateImage } from "@/pipeline/imageGenerator";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { getStyleSeedById } from "@/data/styleSeeds";
 import { storage } from "@/storage";
+import { getProvider } from "@/api/llmClient";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import {
@@ -302,7 +303,7 @@ export function useBookOrchestration() {
 
       try {
         const googleKey = await storage.loadApiKey("lumina_google_ai_key");
-        if (!googleKey) {
+        if (!googleKey && getProvider() === "gemini") {
           console.warn("[Orchestration] No API key — skipping analysis");
           diagnosticWarn("analysis.no_google_key", "No Google AI key found");
           setIsAnalyzing(false);
@@ -314,14 +315,14 @@ export function useBookOrchestration() {
           return;
         }
 
-        const baseSemanticMap = await analyzeBook(structure, googleKey, reportProgress);
+        const baseSemanticMap = await analyzeBook(structure, googleKey ?? "", reportProgress);
         const isExpository = baseSemanticMap.analysisProtocol === "expository";
 
         const visualLore = isExpository
           ? null
           : await buildVisualLoreDossier({
               structure,
-              apiKey: googleKey,
+              apiKey: googleKey ?? "",
               onProgress: reportProgress,
             });
         const loreSemanticMap = visualLore
@@ -335,7 +336,7 @@ export function useBookOrchestration() {
                 structure,
                 styleSeed,
                 interpretationLevel: visualInterpretationLevel,
-                apiKey: googleKey,
+                apiKey: googleKey ?? "",
                 onProgress: reportProgress,
               })
             : loreSemanticMap.scenes;
@@ -354,11 +355,11 @@ export function useBookOrchestration() {
         void (async () => {
           try {
             const apiKey = await storage.loadApiKey("lumina_google_ai_key");
-            if (!apiKey) return;
+            if (!apiKey && getProvider() === "gemini") return;
             const existing = await storage.loadSourceProfile(semanticMap.bookId).catch(() => null);
             if (existing) return;
             const { buildSourceProfile } = await import("@/pipeline/sourceProfile");
-            const profile = await buildSourceProfile(structure, semanticMap, apiKey);
+            const profile = await buildSourceProfile(structure, semanticMap, apiKey ?? "");
             await storage.saveSourceProfile(profile).catch(() => {});
           } catch (err) {
             diagnosticWarn("source_profile.prewarm_failed", "SIP pre-warm failed", {
@@ -500,7 +501,7 @@ export function useBookOrchestration() {
       const styleSeed = getStyleSeedById(styleSeedId);
       const googleKey = await storage.loadApiKey("lumina_google_ai_key");
       const falKey = await storage.loadApiKey("lumina_fal_key");
-      if (!styleSeed || !googleKey) return;
+      if (!styleSeed || (!googleKey && getProvider() === "gemini")) return;
 
       if (slotKey && !store.claimGenerationSlot(slotKey)) return;
 
@@ -512,7 +513,7 @@ export function useBookOrchestration() {
           bookId: semanticBookId,
           wordPosition: scenePosition,
           visualSlotKey: slotKey ?? undefined,
-          googleApiKey: googleKey,
+          googleApiKey: googleKey ?? "",
           falApiKey: falKey ?? undefined,
           onComplete: async (img) => {
             addToCache(img);

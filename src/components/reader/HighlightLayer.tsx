@@ -11,6 +11,7 @@ import { createVisualDirectorBrief } from "@/pipeline/visualDirector";
 import { buildVisualStoryboard } from "@/pipeline/visualStoryboard";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { storage } from "@/storage";
+import { getProvider } from "@/api/llmClient";
 import { lensClassName, lensSwatchStyle, useLensStore } from "@/store/lensStore";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import type { HighlightColor, IdentifiedScene } from "@/types";
@@ -121,7 +122,7 @@ export default function HighlightLayer() {
     const styleSeed = getStyleSeedById(activeStyleSeed);
     const googleKey = await storage.loadApiKey("lumina_google_ai_key");
     const falKey = await storage.loadApiKey("lumina_fal_key");
-    if (!styleSeed || !googleKey) return;
+    if (!styleSeed || (!googleKey && getProvider() === "gemini")) return;
 
     const wordsBeforeChapter = activeStructure.chapters
       .slice(0, chapter.index)
@@ -163,7 +164,7 @@ export default function HighlightLayer() {
         recentBriefs: activeSemanticMap.scenes
           .map((scene) => scene.directorBrief)
           .filter((brief): brief is NonNullable<typeof brief> => Boolean(brief)),
-        apiKey: googleKey,
+        apiKey: googleKey ?? "",
       });
       const directedScene = { ...customScene, directorBrief: brief, imageDescription: brief.finalPrompt };
       const mergedScenes = [...activeSemanticMap.scenes.filter((scene) => scene.id !== directedScene.id), directedScene]
@@ -190,7 +191,7 @@ export default function HighlightLayer() {
         styleSeed,
         bookId: activeSemanticMap.bookId,
         wordPosition: computeSceneWordPosition(directedScene, activeStructure.chapters),
-        googleApiKey: googleKey,
+        googleApiKey: googleKey ?? "",
         falApiKey: falKey ?? undefined,
       });
       addToCache(image);

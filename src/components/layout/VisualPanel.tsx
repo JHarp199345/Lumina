@@ -8,6 +8,7 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { generateImage } from "@/pipeline/imageGenerator";
 import { getStyleSeedById } from "@/data/styleSeeds";
 import { storage } from "@/storage";
+import { getProvider } from "@/api/llmClient";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
 import { LUMINA_CONFIG } from "@/config";
@@ -81,6 +82,7 @@ export default function VisualPanel() {
     setAnalysisRequested,
   } = useBookStore();
   const { imageGenerationEnabled, apiKeyConfigured } = useSettingsStore();
+  const effectiveApiKeyConfigured = apiKeyConfigured || getProvider() === "odysseus";
   const currentCfi = useReaderStore((s) => s.currentCfi);
   const { isTablet } = useDeviceLayout();
   const [showRegenerate, setShowRegenerate] = useState(false);
@@ -163,7 +165,7 @@ export default function VisualPanel() {
       const googleKey = await storage.loadApiKey("lumina_google_ai_key");
       const falKey = await storage.loadApiKey("lumina_fal_key");
       const styleSeed = getStyleSeedById(activeStyleSeed);
-      if (!googleKey || !styleSeed) return;
+      if ((!googleKey && getProvider() === "gemini") || !styleSeed) return;
 
       const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
       const scene =
@@ -189,7 +191,7 @@ export default function VisualPanel() {
           bookId: activeBook.id,
           wordPosition,
           visualSlotKey: slotKey ?? undefined,
-          googleApiKey: googleKey,
+          googleApiKey: googleKey ?? "",
           falApiKey: falKey ?? undefined,
           onComplete: async (img) => {
             addToCache(img);
@@ -301,7 +303,7 @@ export default function VisualPanel() {
           <AmbientFailureState gradient={ambientGradient} onRetry={handleRegenerate} />
         ) : (() => {
           const waitingPhase = resolveWaitingPhase({
-            apiKeyConfigured,
+            apiKeyConfigured: effectiveApiKeyConfigured,
             activeSemanticMap: activeSemanticMap ?? null,
             isGenerating,
             hasPendingInQueue: queue.some((q) => q.status === "pending"),

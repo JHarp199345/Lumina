@@ -13,6 +13,7 @@ import {
   visualSlotKeyForScene,
 } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
+import { getProvider } from "@/api/llmClient";
 
 export function useGalleryActions() {
   const visitPassage = useCallback((sceneId: string) => {
@@ -67,7 +68,7 @@ export function useGalleryActions() {
     const googleKey = await storage.loadApiKey("lumina_google_ai_key");
     const falKey = await storage.loadApiKey("lumina_fal_key");
     const styleSeed = getStyleSeedById(activeStyleSeed);
-    if (!googleKey || !styleSeed) {
+    if ((!googleKey && getProvider() === "gemini") || !styleSeed) {
       store.releaseGenerationSlot();
       return;
     }
@@ -79,7 +80,7 @@ export function useGalleryActions() {
         bookId: activeBook.id,
         wordPosition: computeSceneWordPosition(scene, chapters),
         visualSlotKey: slotKey,
-        googleApiKey: googleKey,
+        googleApiKey: googleKey ?? "",
         falApiKey: falKey ?? undefined,
         onComplete: async (img) => {
           store.addToCache(img);
