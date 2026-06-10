@@ -53,6 +53,23 @@ function structureLacksParagraphs(structure: Pick<BookStructure, "chapters" | "t
   return !hasAnyParagraphBreak;
 }
 
+// A structure parsed before the leaf-block fix double-counted nested blocks
+// (e.g. a <blockquote> wrapping a <p>), emitting the same paragraph twice in a
+// row. If any chapter has a substantial paragraph identical to the one right
+// before it, the stored text is from the buggy parser → re-parse to clean it.
+function structureHasDuplicateParagraphs(structure: Pick<BookStructure, "chapters">): boolean {
+  for (const ch of structure.chapters) {
+    const paras = (ch.rawText ?? "").split(/\n{2,}/);
+    for (let i = 1; i < paras.length; i++) {
+      const prev = paras[i - 1].trim();
+      // 40-char floor avoids false positives on legitimately repeated short
+      // lines (scene breaks, refrains); a long verbatim repeat is the bug.
+      if (prev.length >= 40 && prev === paras[i].trim()) return true;
+    }
+  }
+  return false;
+}
+
 function epubImportContextFromBook(book: Book): EpubImportContext | undefined {
   if (!book.gutenbergId && book.editionPipeline !== "gutenberg") return undefined;
   return {
@@ -234,6 +251,7 @@ export function useEpubImport() {
         const shouldReparse =
           !structure ||
           structureLacksParagraphs(structure) ||
+          structureHasDuplicateParagraphs(structure) ||
           needsEditionReparse(structure);
 
         if (shouldReparse) {
@@ -241,7 +259,9 @@ export function useEpubImport() {
             ? "Reading saved EPUB file…"
             : needsEditionReparse(structure)
               ? "Detecting edition and re-reading EPUB…"
-              : "Re-reading EPUB for paragraph structure…";
+              : structureHasDuplicateParagraphs(structure)
+                ? "Cleaning duplicated text and re-reading EPUB…"
+                : "Re-reading EPUB for paragraph structure…";
           onProgress?.(reason);
           const bytes = await storage.getEpubBytes(book);
           onProgress?.("Parsing saved EPUB structure…");

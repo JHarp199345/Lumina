@@ -930,9 +930,14 @@ function extractText(html: string): string {
   doc.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
 
   // Extract text per block-level element so paragraph boundaries survive.
-  // These elements rarely nest one another, so textContent won't double-count.
-  const blocks = Array.from(
-    doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, blockquote, li, pre")
+  // Block elements DO nest — a <blockquote> (or <li>) commonly wraps <p>s — so
+  // selecting both the wrapper and its children double-counts the text (the
+  // wrapper's textContent already contains the children's). Keep only LEAF
+  // blocks (no nested block descendant) so each paragraph is emitted exactly
+  // once. A blockquote with inline-only content is itself a leaf and survives.
+  const BLOCK_SELECTOR = "p, h1, h2, h3, h4, h5, h6, blockquote, li, pre";
+  const blocks = Array.from(doc.querySelectorAll(BLOCK_SELECTOR)).filter(
+    (el) => !el.querySelector(BLOCK_SELECTOR)
   );
 
   let paragraphs: string[] = blocks
