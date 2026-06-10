@@ -91,7 +91,7 @@ export default function VoiceStudio() {
     selectedVoiceId,
     selectedStylePresetId,
     isPlaying,
-    isGenerating,
+    voiceIsGenerating,
     currentTime,
     duration,
     volume,
@@ -105,8 +105,8 @@ export default function VoiceStudio() {
     setVoice,
     setStylePreset,
     setIsPlaying,
-    setIsGenerating,
-    setProgress,
+    setVoiceIsGenerating,
+    setVoiceProgress,
     setPlaybackPosition,
     setActiveReadAlong,
     setVolume,
@@ -290,9 +290,8 @@ export default function VoiceStudio() {
       return;
     }
     setError(null);
-    useAudioStore.setState({ generationSource: "voice" });
-    setIsGenerating(true);
-    setProgress(mode === "streamed" ? "Streaming narration" : "Generating narration");
+    setVoiceIsGenerating(true);
+    setVoiceProgress(mode === "streamed" ? "Streaming narration" : "Generating narration");
     try {
       const generated = await generateChapterGroupAudio({
         unit: selectedUnit,
@@ -301,11 +300,11 @@ export default function VoiceStudio() {
         voice: selectedVoice,
         style: selectedStyle,
         mode,
-        onProgress: setProgress,
+        onProgress: setVoiceProgress,
         onChunk:
           mode === "streamed"
             ? async ({ artifact: partialArtifact, data, chunkIndex, totalChunks }) => {
-                setProgress(`Saving streamed audio chunk ${chunkIndex + 1} of ${totalChunks}`);
+                setVoiceProgress(`Saving streamed audio chunk ${chunkIndex + 1} of ${totalChunks}`);
                 const filePath = await storage.saveAudioArtifact(partialArtifact, data);
                 const playableArtifact: AudioArtifact = { ...partialArtifact, filePath };
                 addArtifact(playableArtifact);
@@ -314,7 +313,7 @@ export default function VoiceStudio() {
               }
             : undefined,
       });
-      setProgress("Saving audio");
+      setVoiceProgress("Saving audio");
       const filePath = await storage.saveAudioArtifact(generated.artifact, generated.data);
       const artifact: AudioArtifact = { ...generated.artifact, filePath };
       addArtifact(artifact);
@@ -326,9 +325,8 @@ export default function VoiceStudio() {
       console.error("[VoiceStudio] Audio generation failed:", err);
       setError(err instanceof Error ? err.message : "Narration generation failed.");
     } finally {
-      setIsGenerating(false);
-      useAudioStore.setState({ generationSource: null });
-      setProgress("");
+      setVoiceIsGenerating(false);
+      setVoiceProgress("");
     }
   };
 
@@ -618,11 +616,11 @@ export default function VoiceStudio() {
             </button>
             <button
               onClick={() => runGenerate("saved")}
-              disabled={isGenerating || !selectedUnit}
+              disabled={voiceIsGenerating || !selectedUnit}
               className="flex items-center justify-center gap-2 rounded-lg border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-2.5 text-xs font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
             >
-              {isGenerating ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-              {matchingArtifact ? "Use Cache" : isGenerating ? "Generating" : "Generate"}
+              {voiceIsGenerating ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              {matchingArtifact ? "Use Cache" : voiceIsGenerating ? "Generating" : "Generate"}
             </button>
           </div>
 
@@ -636,14 +634,14 @@ export default function VoiceStudio() {
             </button>
             <button
               onClick={() => runGenerate("streamed", true)}
-              disabled={isGenerating || !selectedUnit}
+              disabled={voiceIsGenerating || !selectedUnit}
               className="rounded-lg border border-hair bg-ink/[0.03] px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-40"
             >
               Stream Now
             </button>
             <button
               onClick={() => runGenerate("saved", true)}
-              disabled={isGenerating || !selectedUnit}
+              disabled={voiceIsGenerating || !selectedUnit}
               className="rounded-lg border border-hair bg-ink/[0.03] px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft disabled:opacity-40"
             >
               Regenerate Explicitly

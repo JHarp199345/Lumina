@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { AudioLines, Gauge, Loader2, Pause, Play, Square, Volume2, X } from "lucide-react";
+import { Gauge, Pause, Play, Square, Volume2, X } from "lucide-react";
 import { useAudioStore } from "@/store/audioStore";
 import { useDrawerStore } from "@/store/drawerStore";
 import type { AudioArtifact } from "@/types";
@@ -31,9 +31,7 @@ export default function FloatingAudioPlayer() {
     artifacts,
     activeAudioId,
     isPlaying,
-    isGenerating,
-    generationSource,
-    generationProgress,
+    voiceIsGenerating,
     currentTime,
     duration,
     volume,
@@ -56,10 +54,6 @@ export default function FloatingAudioPlayer() {
     [activeAudioId, artifacts]
   );
   const showControls = Boolean(activeArtifact) && !(isOpen && view === "voice-studio");
-  const showOverviewGeneration =
-    isGenerating &&
-    generationSource === "overview" &&
-    !(isOpen && view === "audio-overview");
 
   useEffect(() => {
     if (!bookId || activeAudioId || artifacts.length === 0) return;
@@ -159,7 +153,7 @@ export default function FloatingAudioPlayer() {
   };
 
   const handleEnded = () => {
-    if (activeArtifact?.mode === "streamed" && isGenerating) {
+    if (activeArtifact?.mode === "streamed" && voiceIsGenerating) {
       setIsPlaying(true);
       return;
     }
@@ -201,30 +195,11 @@ export default function FloatingAudioPlayer() {
         onLoadedMetadata={(event) => setPlaybackPosition(event.currentTarget.currentTime, event.currentTarget.duration)}
         onEnded={handleEnded}
         onPause={() => {
-          if (activeArtifact?.mode === "streamed" && isGenerating) return;
+          if (activeArtifact?.mode === "streamed" && voiceIsGenerating) return;
           if (audioRef.current?.ended) return;
           setIsPlaying(false);
         }}
       />
-
-      {showOverviewGeneration && (
-        <button
-          type="button"
-          onClick={() => open("audio-overview")}
-          className="fixed bottom-6 right-6 z-[70] flex max-w-[min(320px,calc(100vw-2rem))] items-center gap-2 rounded-xl border border-lumina-gold/30 bg-[linear-gradient(145deg,rgba(48,38,18,0.92),rgba(18,14,8,0.94))] px-3 py-2.5 text-left text-lumina-gold/90 shadow-[0_18px_45px_rgba(0,0,0,0.45)] backdrop-blur-xl"
-        >
-          <Loader2 size={15} className="shrink-0 animate-spin text-lumina-gold/80" />
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-lumina-gold/75">
-              Audio Overview
-            </p>
-            <p className="truncate text-xs text-lumina-gold/90">
-              {generationProgress || "Generating in background…"}
-            </p>
-          </div>
-          <AudioLines size={14} className="shrink-0 text-lumina-gold/70" />
-        </button>
-      )}
 
       {showControls && collapsed && (
         <button

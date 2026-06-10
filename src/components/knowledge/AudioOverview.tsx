@@ -10,6 +10,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { useAudioStore } from "@/store/audioStore";
+import { useOverviewJobStore } from "@/store/overviewJobStore";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
 import { storage } from "@/storage";
@@ -33,19 +34,22 @@ export default function AudioOverview() {
     artifacts,
     activeAudioId,
     isPlaying,
-    isGenerating,
-    generationSource,
-    generationProgress,
-    error,
     mount,
     setActiveAudio,
     setIsPlaying,
-    setProgress,
-    setError,
-    startOverviewGeneration,
   } = useAudioStore();
+  const {
+    status: jobStatus,
+    progress: jobProgress,
+    error: jobError,
+    start: startOverviewJob,
+    isRunningForBook,
+    dismissError,
+  } = useOverviewJobStore();
 
-  const overviewGenerating = isGenerating && generationSource === "overview";
+  const overviewGenerating = activeBook ? isRunningForBook(activeBook.id) : false;
+  const [localError, setLocalError] = useState<string | null>(null);
+  const error = jobError ?? localError;
 
   const [scopeType, setScopeType] = useState<OverviewScope["type"]>("whole");
   const [chosenChapterIds, setChosenChapterIds] = useState<Set<string>>(new Set());
@@ -95,6 +99,16 @@ export default function AudioOverview() {
     };
   }, [activeBook, bookId, mount]);
 
+  // Pick up artifacts saved while this panel was closed or the gallery was open.
+  useEffect(() => {
+    if (!activeBook || jobStatus !== "completed") return;
+    void storage.loadAudioArtifacts(activeBook.id).then((loaded) => {
+      if (useAudioStore.getState().bookId === activeBook.id) {
+        useAudioStore.getState().setArtifacts(loaded);
+      }
+    });
+  }, [activeBook, jobStatus]);
+
   // Key check.
   useEffect(() => {
     let cancelled = false;
@@ -119,7 +133,6 @@ export default function AudioOverview() {
     if (isUsableSourceProfile(profile, activeSemanticMap)) return profile;
     if (!activeSemanticMap) return profile;
     setProfileBuilding(true);
-    setProgress("Building source intelligence…");
     try {
       return await buildAndStoreProfile(apiKey);
     } catch (err) {
@@ -205,7 +218,7 @@ export default function AudioOverview() {
         setPrompt(fuller);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not generate a suggestion.");
+      setLocalError(err instanceof Error ? err.message : "Could not generate a suggestion.");
     } finally {
       setIsSuggesting(false);
     }
@@ -213,17 +226,18 @@ export default function AudioOverview() {
 
   const generate = async () => {
     if (!activeBook || !activeStructure) {
-      setError("Open a book first.");
+      setLocalError("Open a book first.");
       return;
     }
     const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
     if (!apiKey) {
       setHasKey(false);
-      setError("Add your Google AI Studio key in Settings to generate an overview.");
+      setLocalError("Add your Google AI Studio key in Settings to generate an overview.");
       return;
     }
-    setError(null);
-    startOverviewGeneration({
+    setLocalError(null);
+    dismissError();
+    startOverviewJob({
       bookId: activeBook.id,
       scope,
       structure: activeStructure,
@@ -267,7 +281,7 @@ export default function AudioOverview() {
         <div className="space-y-1.5">
           <p className="text-sm font-medium text-ink/85">Generating audio overview</p>
           <p className="text-xs text-ink-faint">
-            {generationProgress || "Working…"} You can close this panel — generation continues in
+            {jobProgress || "Working…"} You can close this panel — generation continues in
             the background.
           </p>
         </div>
@@ -421,7 +435,7 @@ export default function AudioOverview() {
           className="flex items-center justify-center gap-2 rounded-xl border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-3 text-sm font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
         >
           <Sparkles size={15} className={overviewGenerating ? "animate-pulse" : ""} />
-          {overviewGenerating ? generationProgress || "Generating…" : "Generate Overview"}
+          {overviewGenerating ? jobProgress || "Generating…" : "Generate Overview"}
         </button>
         <p className="text-center text-[10px] text-ink-faint">
           Larger generation — uses more of your Google quota than a single image.

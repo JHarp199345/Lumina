@@ -8,6 +8,7 @@ import { useImageStore } from "@/store/imageStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useStudyStore } from "@/store/studyStore";
 import { useAudioStore } from "@/store/audioStore";
+import { useOverviewJobStore } from "@/store/overviewJobStore";
 import { storage } from "@/storage";
 import type { Book, BookStructure, CachedImage } from "@/types";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
@@ -100,6 +101,8 @@ export function useEpubImport() {
   const { loadProgress, resetReader } = useReaderStore();
 
   const unmountActiveBook = useCallback(() => {
+    const bookId = useBookStore.getState().activeBook?.id;
+    if (bookId) useOverviewJobStore.getState().cancelForBook(bookId);
     clearActiveBookState();
     clearAnnotations();
     clearImagesForUnmount();
