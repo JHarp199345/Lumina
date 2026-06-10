@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import ManualImportInstructions from "@/components/common/ManualImportInstructions";
 import type { BookStructure } from "@/types";
-import { recordImportHistory } from "@/utils/importHistory";
+import { DOWNLOAD_HANDOFF_WINDOW_MS, watchAppHandoff } from "@/utils/downloadHandoff";
+import { buildLedgerAnchor, confirmDownloadHandoff, recordImportHistory } from "@/utils/importHistory";
 import { gutenbergFilenameFromUrl, filenameFromUrl, resolveDownloadFilename } from "@/utils/downloadFilename";
 
 interface GutendexBook {
@@ -114,6 +115,14 @@ export default function OpenShelfCatalog({
   const [copiedFilename, setCopiedFilename] = useState(false);
   const [importStepsOpen, setImportStepsOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const handoffCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      handoffCleanupRef.current?.();
+      handoffCleanupRef.current = null;
+    };
+  }, []);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestKey = useMemo(() => `${query.trim().toLowerCase()}|${genre}|${sort}`, [query, genre, sort]);
 
@@ -260,6 +269,8 @@ export default function OpenShelfCatalog({
     setFailureReason(null);
     setCopiedFilename(false);
     setImportStepsOpen(false);
+    handoffCleanupRef.current?.();
+    handoffCleanupRef.current = null;
     reportLocal(`Downloading "${book.title}"…`);
 
     const filename =
@@ -271,15 +282,25 @@ export default function OpenShelfCatalog({
       setManualFallbackFilename(filename);
       setShowManualFallback(true);
 
+      const downloadedAt = new Date().toISOString();
       await recordImportHistory({
         gutenbergId: book.id,
         title: book.title,
         author: book.authors.map((a) => a.name).join(", "),
+        anchor: buildLedgerAnchor(book.id, filename),
         filename,
         downloadUrl,
-        downloadedAt: new Date().toISOString(),
+        downloadedAt,
+        downloadStatus: "requested",
       });
       onHistoryUpdated?.();
+
+      handoffCleanupRef.current = watchAppHandoff(
+        () => {
+          void confirmDownloadHandoff(book.id).then(() => onHistoryUpdated?.());
+        },
+        DOWNLOAD_HANDOFF_WINDOW_MS
+      );
 
       void resolveDownloadFilename(downloadUrl)
         .then((resolved) => {
@@ -288,9 +309,11 @@ export default function OpenShelfCatalog({
             gutenbergId: book.id,
             title: book.title,
             author: book.authors.map((a) => a.name).join(", "),
+            anchor: buildLedgerAnchor(book.id, resolved),
             filename: resolved,
             downloadUrl,
-            downloadedAt: new Date().toISOString(),
+            downloadedAt,
+            downloadStatus: "requested",
           }).then(() => onHistoryUpdated?.());
         })
         .catch(() => { /* keep ledger row with URL-derived filename */ });
@@ -318,6 +341,8 @@ export default function OpenShelfCatalog({
     setShowManualFallback(false);
     setCopiedFilename(false);
     setImportStepsOpen(false);
+    handoffCleanupRef.current?.();
+    handoffCleanupRef.current = null;
     reportLocal("");
   };
 

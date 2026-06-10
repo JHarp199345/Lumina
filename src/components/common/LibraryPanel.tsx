@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   BookOpen,
   Check,
+  CheckCircle2,
   ChevronDown,
   Clock,
   Copy,
@@ -22,7 +23,13 @@ import { useEpubImport } from "@/hooks/useEpubImport";
 import { storage } from "@/storage";
 import OpenShelfCatalog from "@/components/common/OpenShelfCatalog";
 import type { BookStructure } from "@/types";
-import { loadImportHistory, clearImportHistory, type ImportHistoryEntry } from "@/utils/importHistory";
+import {
+  clearImportHistory,
+  isLedgerEntryImported,
+  ledgerStatusLabel,
+  loadImportHistory,
+  type ImportHistoryEntry,
+} from "@/utils/importHistory";
 
 interface LibraryPanelProps {
   onClose: () => void;
@@ -52,6 +59,10 @@ export default function LibraryPanel({
   useEffect(() => {
     refreshImportHistory();
   }, []);
+
+  useEffect(() => {
+    refreshImportHistory();
+  }, [library.length]);
 
   const reportOpenProgress = (message: string) => {
     setOpenProgress(message);
@@ -365,9 +376,11 @@ function ImportHistoryView({
   onImport,
 }: ImportHistoryViewProps) {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
-  const importedIds = new Set(library.map((b) => b.gutenbergId).filter(Boolean));
+  const importedIds = new Set(
+    library.map((b) => b.gutenbergId).filter((id): id is number => typeof id === "number")
+  );
   const pendingCount = history.filter(
-    (entry) => entry.filename && !importedIds.has(entry.gutenbergId)
+    (entry) => entry.filename && !isLedgerEntryImported(entry, importedIds)
   ).length;
 
   return (
@@ -436,10 +449,11 @@ function ImportHistoryView({
 
             <div className="space-y-2">
               {history.map((entry) => {
-                const isInLibrary = importedIds.has(entry.gutenbergId);
+                const isImported = isLedgerEntryImported(entry, importedIds);
                 const isCopied = copiedId === entry.gutenbergId;
                 const when = formatHistoryWhen(entry);
                 const downloadUrl = entryDownloadUrl(entry);
+                const statusLabel = ledgerStatusLabel(entry, isImported);
 
                 return (
                   <div
@@ -447,8 +461,12 @@ function ImportHistoryView({
                     className="rounded-lg border border-hair bg-ink/[0.04] p-3"
                   >
                     <div className="flex items-start gap-2">
-                      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-hair bg-black/15 text-ink-faint">
-                        <FileText size={14} />
+                      <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-hair bg-black/15">
+                        {isImported ? (
+                          <CheckCircle2 size={15} className="text-green-400/90" />
+                        ) : (
+                          <FileText size={14} className="text-ink-faint" />
+                        )}
                       </div>
                       <div className="min-w-0 flex-1">
                         {entry.filename ? (
@@ -478,16 +496,22 @@ function ImportHistoryView({
                         </p>
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-ink-faint">
                           {when ? <span>{when}</span> : null}
-                          {isInLibrary ? (
-                            <span className="text-green-400/90">Imported</span>
-                          ) : entry.filename ? (
-                            <span className="text-lumina-gold/80">Ready to import</span>
-                          ) : null}
+                          <span
+                            className={
+                              isImported
+                                ? "text-green-400/90"
+                                : entry.downloadStatus === "confirmed" || entry.downloadConfirmedAt
+                                  ? "text-ink-soft"
+                                  : "text-lumina-gold/80"
+                            }
+                          >
+                            {statusLabel}
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    {!isInLibrary && downloadUrl ? (
+                    {!isImported && downloadUrl ? (
                       <div className="mt-2 flex justify-end border-t border-hair/60 pt-2">
                         <a
                           href={downloadUrl}

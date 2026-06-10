@@ -226,12 +226,18 @@ async function initSchema(db: Database): Promise<void> {
       gutenberg_id INTEGER PRIMARY KEY,
       title TEXT NOT NULL,
       author TEXT NOT NULL,
+      anchor TEXT,
       filename TEXT,
       download_url TEXT,
       downloaded_at TEXT,
+      download_confirmed_at TEXT,
+      download_status TEXT,
       imported_at TEXT
     );
   `);
+  await db.execute(`ALTER TABLE download_ledger ADD COLUMN anchor TEXT`).catch(() => {});
+  await db.execute(`ALTER TABLE download_ledger ADD COLUMN download_confirmed_at TEXT`).catch(() => {});
+  await db.execute(`ALTER TABLE download_ledger ADD COLUMN download_status TEXT`).catch(() => {});
 }
 
 // ─── Books ────────────────────────────────────────────────────────────────────
@@ -1016,9 +1022,12 @@ export interface DbDownloadLedgerEntry {
   gutenbergId: number;
   title: string;
   author: string;
+  anchor?: string;
   filename?: string;
   downloadUrl?: string;
   downloadedAt?: string;
+  downloadConfirmedAt?: string;
+  downloadStatus?: string;
   importedAt?: string;
 }
 
@@ -1032,9 +1041,12 @@ export async function dbLoadDownloadLedger(): Promise<DbDownloadLedgerEntry[]> {
     gutenbergId: Number(row.gutenberg_id),
     title: String(row.title),
     author: String(row.author),
+    anchor: row.anchor ? String(row.anchor) : undefined,
     filename: row.filename ? String(row.filename) : undefined,
     downloadUrl: row.download_url ? String(row.download_url) : undefined,
     downloadedAt: row.downloaded_at ? String(row.downloaded_at) : undefined,
+    downloadConfirmedAt: row.download_confirmed_at ? String(row.download_confirmed_at) : undefined,
+    downloadStatus: row.download_status ? String(row.download_status) : undefined,
     importedAt: row.imported_at ? String(row.imported_at) : undefined,
   }));
 }
@@ -1045,15 +1057,18 @@ export async function dbSaveDownloadLedger(entries: DbDownloadLedgerEntry[]): Pr
   for (const entry of entries) {
     await db.execute(
       `INSERT OR REPLACE INTO download_ledger
-       (gutenberg_id, title, author, filename, download_url, downloaded_at, imported_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       (gutenberg_id, title, author, anchor, filename, download_url, downloaded_at, download_confirmed_at, download_status, imported_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         entry.gutenbergId,
         entry.title,
         entry.author,
+        entry.anchor ?? null,
         entry.filename ?? null,
         entry.downloadUrl ?? null,
         entry.downloadedAt ?? null,
+        entry.downloadConfirmedAt ?? null,
+        entry.downloadStatus ?? null,
         entry.importedAt ?? null,
       ]
     );
