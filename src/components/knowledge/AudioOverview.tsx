@@ -17,8 +17,6 @@ import { LUMINA_CONFIG } from "@/config";
 import {
   GEMINI_VOICES,
   GOOGLE_KEY_NAME,
-  generateAudioOverview,
-  scopeLabel,
   suggestFullerPrompt,
   type OverviewScope,
 } from "@/pipeline/audioOverview";
@@ -36,16 +34,18 @@ export default function AudioOverview() {
     activeAudioId,
     isPlaying,
     isGenerating,
+    generationSource,
     generationProgress,
     error,
     mount,
-    addArtifact,
     setActiveAudio,
     setIsPlaying,
-    setIsGenerating,
     setProgress,
     setError,
+    startOverviewGeneration,
   } = useAudioStore();
+
+  const overviewGenerating = isGenerating && generationSource === "overview";
 
   const [scopeType, setScopeType] = useState<OverviewScope["type"]>("whole");
   const [chosenChapterIds, setChosenChapterIds] = useState<Set<string>>(new Set());
@@ -223,63 +223,16 @@ export default function AudioOverview() {
       return;
     }
     setError(null);
-    setIsGenerating(true);
-    setProgress("Preparing source intelligence…");
-    try {
-      const enrichedProfile = await ensureProfile(apiKey);
-      // The reader's text is the instruction; a truly empty field falls back to
-      // the hidden, type-aware default (which is grounded on the SIP anyway).
-      const effectivePrompt = prompt.trim();
-      const { script, audio } = await generateAudioOverview({
-        scope,
-        structure: activeStructure,
-        semanticMap: activeSemanticMap,
-        profile: enrichedProfile,
-        userPrompt: effectivePrompt,
-        minutes,
-        apiKey,
-        voiceName: voiceId,
-        onProgress: setProgress,
-      });
-
-      setProgress("Saving overview…");
-      const id = `audio-overview-${Date.now()}`;
-      const meta: Omit<AudioArtifact, "filePath"> = {
-        id,
-        bookId: activeBook.id,
-        segmentId: id,
-        chapterIndex: scopeType === "current" ? Math.max(0, currentChapterIndex) : 0,
-        segmentTitle: scopeLabel(scope, activeStructure),
-        voiceId,
-        provider: "gemini",
-        scope: "overview",
-        voiceProviderId: voiceId,
-        modelId: LUMINA_CONFIG.GEMINI_TTS_MODEL,
-        mode: "saved",
-        stylePresetId: "overview",
-        textHash: "",
-        promptHash: "",
-        mimeType: audio.mimeType,
-        durationSeconds: audio.durationSeconds,
-        generatedAt: new Date().toISOString(),
-        generationApi: "gemini-tts",
-        status: "ready",
-        overviewMinutes: minutes,
-        overviewPrompt: effectivePrompt,
-        overviewScript: script,
-      };
-      const filePath = await storage.saveAudioArtifact(meta, audio.data);
-      const artifact: AudioArtifact = { ...meta, filePath };
-      addArtifact(artifact);
-      setActiveAudio(artifact.id);
-      setIsPlaying(true);
-    } catch (err) {
-      console.error("[AudioOverview] generation failed:", err);
-      setError(err instanceof Error ? err.message : "Overview generation failed.");
-    } finally {
-      setIsGenerating(false);
-      setProgress("");
-    }
+    startOverviewGeneration({
+      bookId: activeBook.id,
+      scope,
+      structure: activeStructure,
+      semanticMap: activeSemanticMap,
+      profile,
+      userPrompt: prompt,
+      minutes,
+      voiceName: voiceId,
+    });
   };
 
   const playArtifact = (artifact: AudioArtifact) => {
@@ -302,6 +255,23 @@ export default function AudioOverview() {
         icon={<AudioLines size={20} />}
         text="This book is still being prepared. Once chapters are detected, overviews can be generated."
       />
+    );
+  }
+
+  if (overviewGenerating) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
+        <span className="flex h-12 w-12 animate-pulse items-center justify-center rounded-xl border border-lumina-gold/20 bg-lumina-gold/[0.06] text-lumina-gold/80">
+          <AudioLines size={22} />
+        </span>
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium text-ink/85">Generating audio overview</p>
+          <p className="text-xs text-ink-faint">
+            {generationProgress || "Working…"} You can close this panel — generation continues in
+            the background.
+          </p>
+        </div>
+      </div>
     );
   }
 
@@ -447,11 +417,11 @@ export default function AudioOverview() {
         {/* Generate */}
         <button
           onClick={generate}
-          disabled={isGenerating}
+          disabled={overviewGenerating}
           className="flex items-center justify-center gap-2 rounded-xl border border-lumina-gold/30 bg-lumina-gold/10 px-3 py-3 text-sm font-medium text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:border-hair disabled:bg-ink/[0.03] disabled:text-ink-faint"
         >
-          <Sparkles size={15} className={isGenerating ? "animate-pulse" : ""} />
-          {isGenerating ? generationProgress || "Generating…" : "Generate Overview"}
+          <Sparkles size={15} className={overviewGenerating ? "animate-pulse" : ""} />
+          {overviewGenerating ? generationProgress || "Generating…" : "Generate Overview"}
         </button>
         <p className="text-center text-[10px] text-ink-faint">
           Larger generation — uses more of your Google quota than a single image.

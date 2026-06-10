@@ -295,38 +295,53 @@ export async function synthesizeOverviewAudio(
   return { data: wav, mimeType: "audio/wav", durationSeconds };
 }
 
+const TTS_RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const TTS_MAX_ATTEMPTS = 3;
+
 async function geminiTts(
   text: string,
   voiceName: string,
   apiKey: string
 ): Promise<{ pcm: Uint8Array; rate: number }> {
   const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_TTS_MODEL}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-        },
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: { prebuiltVoiceConfig: { voiceName } },
       },
-    }),
+    },
   });
-  if (!res.ok) {
-    throw new Error(`Gemini TTS error ${res.status}: ${await res.text().catch(() => "")}`);
+
+  let lastError = "Gemini TTS request failed.";
+  for (let attempt = 1; attempt <= TTS_MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const part = data?.candidates?.[0]?.content?.parts?.find(
+        (p: { inlineData?: { data?: string } }) => p?.inlineData?.data
+      );
+      const base64 = part?.inlineData?.data as string | undefined;
+      const mime = (part?.inlineData?.mimeType as string | undefined) ?? "audio/L16;rate=24000";
+      if (!base64) throw new Error("Gemini TTS returned no audio");
+      const rateMatch = mime.match(/rate=(\d+)/);
+      const rate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+      return { pcm: base64ToBytes(base64), rate };
+    }
+
+    lastError = `Gemini TTS error ${res.status}: ${await res.text().catch(() => "")}`;
+    if (!TTS_RETRY_STATUSES.has(res.status) || attempt === TTS_MAX_ATTEMPTS) {
+      throw new Error(lastError);
+    }
+    await new Promise((resolve) => setTimeout(resolve, attempt * 1200));
   }
-  const data = await res.json();
-  const part = data?.candidates?.[0]?.content?.parts?.find(
-    (p: { inlineData?: { data?: string } }) => p?.inlineData?.data
-  );
-  const base64 = part?.inlineData?.data as string | undefined;
-  const mime = (part?.inlineData?.mimeType as string | undefined) ?? "audio/L16;rate=24000";
-  if (!base64) throw new Error("Gemini TTS returned no audio");
-  const rateMatch = mime.match(/rate=(\d+)/);
-  const rate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
-  return { pcm: base64ToBytes(base64), rate };
+
+  throw new Error(lastError);
 }
 
 // ─── Full orchestration ─────────────────────────────────────────────────────────

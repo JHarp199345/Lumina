@@ -290,6 +290,7 @@ export default function VoiceStudio() {
       return;
     }
     setError(null);
+    useAudioStore.setState({ generationSource: "voice" });
     setIsGenerating(true);
     setProgress(mode === "streamed" ? "Streaming narration" : "Generating narration");
     try {
@@ -326,6 +327,7 @@ export default function VoiceStudio() {
       setError(err instanceof Error ? err.message : "Narration generation failed.");
     } finally {
       setIsGenerating(false);
+      useAudioStore.setState({ generationSource: null });
       setProgress("");
     }
   };
