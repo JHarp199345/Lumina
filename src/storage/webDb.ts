@@ -32,6 +32,76 @@ export const STORES = {
   API_KEYS:      "api_keys",        // string values, keyed by key name
 } as const;
 
+// ─── Store registry + lifecycle classes (PLANx) ────────────────────────────────
+//
+// One declarative source of truth for every object store. The lifecycle class is
+// what makes "an app update must never delete the reader's work" enforceable
+// rather than remembered:
+//
+//   userData  — the reader's own irreplaceable data (the book, their annotations,
+//               progress, achievements, API keys). NEVER cleared by an update;
+//               removed only by an explicit reader action (delete book / note).
+//   generated — expensive AI output (images, audio, analysis, study, decks).
+//               Preserved across updates; retired only by explicit Re-Ingest or
+//               delete-book. Remaking it costs the reader real quota.
+//   cache     — purely derived, cheap to rebuild. The ONLY class an update may
+//               prune (by age/size — never a wholesale wipe).
+//
+// Schema evolution is additive-only: append a store here (and bump DB_VERSION).
+// Never remove a store from the registry and never add a destructive op.
+export type StoreLifecycle = "userData" | "generated" | "cache";
+
+interface StoreDef {
+  name: string;
+  lifecycle: StoreLifecycle;
+  /** keyPath for in-line keys; omit for stores that pass an explicit key on put(). */
+  keyPath?: string;
+  indexes?: { name: string; keyPath: string; unique?: boolean }[];
+}
+
+const BOOK_INDEX = [{ name: "bookId", keyPath: "bookId" }];
+
+export const STORE_REGISTRY: StoreDef[] = [
+  { name: STORES.BOOKS,           lifecycle: "userData",  keyPath: "id" },
+  { name: STORES.BOOK_STRUCTURES, lifecycle: "userData" },
+  { name: STORES.EPUBS,           lifecycle: "userData" },
+  { name: STORES.PROGRESS,        lifecycle: "userData",  keyPath: "bookId" },
+  { name: STORES.HIGHLIGHTS,      lifecycle: "userData",  keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.NOTES,           lifecycle: "userData",  keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.STUDY_ATTEMPTS,  lifecycle: "userData",  keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.STUDY_BADGES,    lifecycle: "userData",  keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.BOOK_SETTINGS,   lifecycle: "userData" },
+  { name: STORES.API_KEYS,        lifecycle: "userData" },
+
+  { name: STORES.SEMANTIC_MAPS,   lifecycle: "generated" },
+  { name: STORES.SOURCE_PROFILES, lifecycle: "generated" },
+  { name: STORES.STUDY_GUIDES,    lifecycle: "generated" },
+  { name: STORES.STUDY_QUIZZES,   lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.STUDY_FLASHCARDS,lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.IMAGE_META,      lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.IMAGE_BLOBS,     lifecycle: "generated" },
+  { name: STORES.AUDIO_META,      lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.AUDIO_BLOBS,     lifecycle: "generated" },
+  { name: STORES.PRESENTATIONS,   lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },
+  { name: STORES.ARCHIVE_BOOKS,   lifecycle: "generated" },
+];
+
+/** All store names of a given lifecycle class. */
+export function storesByLifecycle(lifecycle: StoreLifecycle): string[] {
+  return STORE_REGISTRY.filter((s) => s.lifecycle === lifecycle).map((s) => s.name);
+}
+
+// Dev-time guard: every store declared in STORES must appear in STORE_REGISTRY,
+// or it would never be created and its reads would silently return empty. This is
+// the footgun PLANx exists to prevent, caught at load instead of as lost data.
+if (import.meta.env?.DEV) {
+  const registered = new Set(STORE_REGISTRY.map((s) => s.name));
+  const missing = Object.values(STORES).filter((name) => !registered.has(name));
+  if (missing.length > 0) {
+    console.error("[webDb] STORE_REGISTRY is missing stores declared in STORES:", missing);
+  }
+}
+
 // ─── DB singleton ──────────────────────────────────────────────────────────────
 
 let _db: IDBDatabase | null = null;
@@ -39,59 +109,27 @@ let _db: IDBDatabase | null = null;
 export function openDb(): Promise<IDBDatabase> {
   if (_db) return Promise.resolve(_db);
 
-  // Create any stores this build knows about that aren't already present. Runs
-  // inside a versioned upgrade transaction. Adding stores is purely additive —
-  // it never drops or clears existing stores, so user data survives upgrades.
-  const applyUpgrade = (db: IDBDatabase) => {
-      const ensure = (name: string, options?: IDBObjectStoreParameters) => {
-        if (!db.objectStoreNames.contains(name)) {
-          return db.createObjectStore(name, options);
+  // Bring the database up to the current schema from the STORE_REGISTRY. Purely
+  // additive: it only ever CREATES stores/indexes that aren't already present, so
+  // it can run from any prior version (or twice) without dropping or clearing a
+  // single record. No destructive operation exists in this path by construction.
+  const applyUpgrade = (db: IDBDatabase, tx: IDBTransaction | null) => {
+    for (const def of STORE_REGISTRY) {
+      const exists = db.objectStoreNames.contains(def.name);
+      const store = exists
+        ? tx?.objectStore(def.name) ?? null
+        : db.createObjectStore(def.name, def.keyPath ? { keyPath: def.keyPath } : undefined);
+
+      // Ensure indexes — on a freshly created store, and additively on an existing
+      // one that predates an index we've since added.
+      if (store && def.indexes) {
+        for (const idx of def.indexes) {
+          if (!store.indexNames.contains(idx.name)) {
+            store.createIndex(idx.name, idx.keyPath, { unique: idx.unique ?? false });
+          }
         }
-        return null; // already exists
-      };
-
-      ensure(STORES.BOOKS,         { keyPath: "id" });
-      ensure(STORES.BOOK_STRUCTURES);                  // explicit key on put()
-      ensure(STORES.EPUBS);                            // explicit key on put()
-      ensure(STORES.PROGRESS,      { keyPath: "bookId" });
-
-      const hlStore = ensure(STORES.HIGHLIGHTS, { keyPath: "id" });
-      hlStore?.createIndex("bookId", "bookId", { unique: false });
-
-      const noteStore = ensure(STORES.NOTES, { keyPath: "id" });
-      noteStore?.createIndex("bookId", "bookId", { unique: false });
-
-      ensure(STORES.SEMANTIC_MAPS);                    // explicit key on put()
-      ensure(STORES.SOURCE_PROFILES);                  // explicit key on put() (bookId)
-      ensure(STORES.STUDY_GUIDES);                     // explicit key on put() (bookId)
-
-      const studyQuizzes = ensure(STORES.STUDY_QUIZZES, { keyPath: "id" });
-      studyQuizzes?.createIndex("bookId", "bookId", { unique: false });
-
-      const studyAttempts = ensure(STORES.STUDY_ATTEMPTS, { keyPath: "id" });
-      studyAttempts?.createIndex("bookId", "bookId", { unique: false });
-
-      const studyBadges = ensure(STORES.STUDY_BADGES, { keyPath: "id" });
-      studyBadges?.createIndex("bookId", "bookId", { unique: false });
-
-      const studyFlashcards = ensure(STORES.STUDY_FLASHCARDS, { keyPath: "id" });
-      studyFlashcards?.createIndex("bookId", "bookId", { unique: false });
-
-      const imgMeta = ensure(STORES.IMAGE_META, { keyPath: "id" });
-      imgMeta?.createIndex("bookId", "bookId", { unique: false });
-
-      ensure(STORES.IMAGE_BLOBS);                      // explicit key (sceneId)
-
-      const audioMeta = ensure(STORES.AUDIO_META, { keyPath: "id" });
-      audioMeta?.createIndex("bookId", "bookId", { unique: false });
-      ensure(STORES.AUDIO_BLOBS);                      // explicit key (audio artifact id)
-
-      const presentations = ensure(STORES.PRESENTATIONS, { keyPath: "id" });
-      presentations?.createIndex("bookId", "bookId", { unique: false });
-
-      ensure(STORES.BOOK_SETTINGS);                    // explicit key (bookId)
-      ensure(STORES.ARCHIVE_BOOKS);                    // explicit key (bookId)
-      ensure(STORES.API_KEYS);                         // explicit key (name)
+      }
+    }
   };
 
   return new Promise((resolve, reject) => {
@@ -117,7 +155,10 @@ export function openDb(): Promise<IDBDatabase> {
     };
 
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = (event) => applyUpgrade((event.target as IDBOpenDBRequest).result);
+    request.onupgradeneeded = (event) => {
+      const req = event.target as IDBOpenDBRequest;
+      applyUpgrade(req.result, req.transaction);
+    };
     request.onsuccess = () => attach(request.result);
     request.onblocked = () => console.warn("[webDb] upgrade blocked by another open tab");
     request.onerror = () => {
@@ -135,10 +176,19 @@ export function openDb(): Promise<IDBDatabase> {
 
 // ─── Primitive helpers ────────────────────────────────────────────────────────
 
+// Version-skew tolerance (PLANx): if this build is talking to a database that
+// doesn't have a store yet (e.g. a stale PWA bundle opened the DB read-compatibly
+// without running the upgrade), a read must resolve EMPTY and a delete must no-op
+// — never throw. One missing store can never again blank the whole library.
+function hasStore(db: IDBDatabase, store: string): boolean {
+  return db.objectStoreNames.contains(store);
+}
+
 export function dbGet<T>(store: string, key: IDBValidKey): Promise<T | undefined> {
   return openDb().then(
     (db) =>
       new Promise((resolve, reject) => {
+        if (!hasStore(db, store)) return resolve(undefined);
         const req = db.transaction(store, "readonly").objectStore(store).get(key);
         req.onsuccess = () => resolve(req.result as T);
         req.onerror = () => reject(req.error);
@@ -164,6 +214,7 @@ export function dbDelete(store: string, key: IDBValidKey): Promise<void> {
   return openDb().then(
     (db) =>
       new Promise((resolve, reject) => {
+        if (!hasStore(db, store)) return resolve();
         const req = db.transaction(store, "readwrite").objectStore(store).delete(key);
         req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
@@ -175,6 +226,7 @@ export function dbGetAll<T>(store: string): Promise<T[]> {
   return openDb().then(
     (db) =>
       new Promise((resolve, reject) => {
+        if (!hasStore(db, store)) return resolve([]);
         const req = db.transaction(store, "readonly").objectStore(store).getAll();
         req.onsuccess = () => resolve(req.result as T[]);
         req.onerror = () => reject(req.error);
@@ -190,6 +242,7 @@ export function dbGetByIndex<T>(
   return openDb().then(
     (db) =>
       new Promise((resolve, reject) => {
+        if (!hasStore(db, store)) return resolve([]);
         const req = db
           .transaction(store, "readonly")
           .objectStore(store)
@@ -210,6 +263,7 @@ export function dbDeleteByIndex(
   return openDb().then(
     (db) =>
       new Promise((resolve, reject) => {
+        if (!hasStore(db, store)) return resolve();
         const tx = db.transaction(store, "readwrite");
         const objStore = tx.objectStore(store);
         const keyReq = objStore.index(indexName).getAllKeys(key);
@@ -234,6 +288,7 @@ export function dbDeleteByPrefix(store: string, indexName: string, prefix: strin
   return openDb().then(
     (db) =>
       new Promise((resolve, reject) => {
+        if (!hasStore(db, store)) return resolve();
         const range = IDBKeyRange.bound(prefix, prefix + "￿", false, true);
         const tx = db.transaction(store, "readwrite");
         const objStore = tx.objectStore(store);
