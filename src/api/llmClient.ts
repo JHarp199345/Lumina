@@ -142,6 +142,28 @@ async function _callOdysseus(
   throw new Error("Odysseus LLM job timed out (30 min)");
 }
 
+// ── Odysseus skill recording ───────────────────────────────────────────────────
+
+/**
+ * Push a skill outcome record to Odysseus so the skills catalog stays current.
+ * Fire-and-forget — never throws, never blocks the caller.
+ */
+export function recordOdysseusSkillRun(
+  skillName: string,
+  lessons: string[],
+  metrics: { actualWords: number; targetWords: number; expansionLoops: number }
+): void {
+  const base = getOdysseusUrl().replace(/\/$/, "");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getOdysseusToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  fetch(`${base}/api/agents/skills/record`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ skill_name: skillName, lessons, metrics }),
+  }).catch(() => {});
+}
+
 // ── Gemini fallback ────────────────────────────────────────────────────────────
 
 async function _callGemini(prompt: string, options: LLMGenerateOptions): Promise<string> {

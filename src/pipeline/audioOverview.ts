@@ -686,6 +686,15 @@ async function _generateAudioOverviewLocal(
   const fullScript = allScripts.join("\n\n");
   const actualWords = fullScript.split(/\s+/).filter(Boolean).length;
 
+  // Push outcome to Odysseus skills catalog — fire and forget
+  const { recordOdysseusSkillRun } = await import("@/api/llmClient");
+  const wordRatio = targetWords > 0 ? actualWords / targetWords : 1;
+  const lessons: string[] = [];
+  if (wordRatio < 0.75) lessons.push(`First-pass word ratio was ${Math.round(wordRatio * 100)}% — plan ${totalExpansionLoops + 1}+ expansion loops for ${minutes}-min targets`);
+  if (totalExpansionLoops > 0) lessons.push(`Used ${totalExpansionLoops} expansion loop(s) to reach target length`);
+  if (total > 1) lessons.push(`${total}-segment pipeline: comprehension pass per chunk feeds narration pass`);
+  recordOdysseusSkillRun("audio-overview-narration", lessons, { actualWords, targetWords, expansionLoops: totalExpansionLoops });
+
   return {
     script: fullScript,
     audio: { data: finalWav, mimeType: "audio/wav", durationSeconds },
