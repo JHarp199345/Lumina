@@ -608,9 +608,18 @@ async function _generateAudioOverviewLocal(
   const chapters = chaptersForScope(scope, structure);
   const bookTitle = structure.title || "this work";
 
-  // Pull learned strategy from past runs — calibrates expansion loops and injects lessons
+  // Pull learned strategy from past runs
   const { getLearnedStrategy } = await import("@/services/skillMemory");
   const strategy = getLearnedStrategy();
+
+  // Start workflow run tracking
+  const { startWorkflow, recordStep, completeWorkflow, stopwatch } = await import("@/services/workflowTracker");
+  const chapterLabels = chapters.map((c) => c.title || "untitled").join(", ");
+  const workflowId = await startWorkflow(
+    "audio-overview",
+    `${bookTitle} — ${chapterLabels}`,
+    { book_title: bookTitle, target_minutes: minutes, target_words: targetWords }
+  );
 
   // Collect raw text for the scope
   const allWords: string[] = [];
@@ -630,7 +639,6 @@ async function _generateAudioOverviewLocal(
     segments.push([profileSection, outline].filter(Boolean).join("\n\n") || "No source text available.");
   }
 
-  // Words per segment — no floor below 500; expansion handles shortfall
   const segTargetWords = Math.max(Math.round(targetWords / segments.length), 500);
   const total = segments.length;
 
@@ -648,35 +656,86 @@ async function _generateAudioOverviewLocal(
 
     // Pass 1 — comprehension (reading agent)
     onProgress?.(`Analyzing section ${n} of ${total}…`);
+    let sw = stopwatch();
     const understanding = await _buildChunkUnderstanding(segments[i], bookTitle, priorUnderstanding, apiKey);
+    await recordStep(workflowId, {
+      name: "comprehension",
+      agent: "reading",
+      skill: "audio-overview-comprehension",
+      duration_ms: sw(),
+      metrics: { segment: n, total_segments: total, output_chars: understanding.length },
+    });
 
-    // Pass 2 — narration script (narrator agent, with learned lessons)
+    // Pass 2 — narration script (narrator agent)
     onProgress?.(`Writing section ${n} of ${total}…`);
+    sw = stopwatch();
     const rawScript = await _buildChunkScript(
       understanding, bookTitle, i, total, segTargetWords, userPrompt, priorScriptTail, apiKey,
       strategy.lessons
     );
+    const rawWords = rawScript.trim().split(/\s+/).filter(Boolean).length;
+    await recordStep(workflowId, {
+      name: "narration",
+      agent: "narrator",
+      skill: "audio-overview-narration",
+      duration_ms: sw(),
+      metrics: {
+        segment: n,
+        word_count: rawWords,
+        target_words: segTargetWords,
+        word_ratio: segTargetWords > 0 ? rawWords / segTargetWords : 1,
+      },
+    });
 
-    // Pass 2b — iterative expansion until within 88% of target
+    // Pass 2b — iterative expansion
+    sw = stopwatch();
     const { script: segScript, loopsUsed } = await _expandToTarget(
       rawScript.trim(), understanding, bookTitle, segTargetWords, apiKey,
       strategy.maxExpansionLoops, onProgress
     );
     totalExpansionLoops += loopsUsed;
+    const finalWords = segScript.split(/\s+/).filter(Boolean).length;
+    if (loopsUsed > 0) {
+      await recordStep(workflowId, {
+        name: "expansion",
+        agent: "narrator",
+        duration_ms: sw(),
+        metrics: {
+          segment: n,
+          loops_used: loopsUsed,
+          words_before: rawWords,
+          words_after: finalWords,
+          word_ratio: segTargetWords > 0 ? finalWords / segTargetWords : 1,
+        },
+      });
+    }
     allScripts.push(segScript);
 
-    // Carry forward context for next segment
     priorUnderstanding = understanding.slice(-1000);
     priorScriptTail = segScript.slice(-400);
 
-    // Pass 3 — TTS (job-based + chunked internally)
+    // Pass 3 — TTS synthesis
     onProgress?.(`Voicing section ${n} of ${total}…`);
-    const segAudio = await synthesizeOverviewAudio(segScript, voiceName, apiKey, onProgress);
+    sw = stopwatch();
+    let ttsError: string | undefined;
+    let segAudio: Awaited<ReturnType<typeof synthesizeOverviewAudio>>;
+    try {
+      segAudio = await synthesizeOverviewAudio(segScript, voiceName, apiKey, onProgress);
+    } catch (e) {
+      ttsError = String(e);
+      throw e;
+    } finally {
+      await recordStep(workflowId, {
+        name: "tts",
+        agent: "kokoro",
+        duration_ms: sw(),
+        metrics: { segment: n, word_count: finalWords, error: ttsError },
+      });
+    }
 
-    // Extract raw PCM (skip 44-byte WAV header) for stitching
-    const view = new DataView(segAudio.data.buffer, segAudio.data.byteOffset);
+    const view = new DataView(segAudio!.data.buffer, segAudio!.data.byteOffset);
     sampleRate = view.getUint32(24, true);
-    pcmParts.push(segAudio.data.slice(44));
+    pcmParts.push(segAudio!.data.slice(44));
   }
 
   onProgress?.("Assembling final audio…");
@@ -685,10 +744,23 @@ async function _generateAudioOverviewLocal(
   const durationSeconds = combinedPcm.length / (sampleRate * 2);
   const fullScript = allScripts.join("\n\n");
   const actualWords = fullScript.split(/\s+/).filter(Boolean).length;
-
-  // Push outcome to Odysseus skills catalog — fire and forget
-  const { recordOdysseusSkillRun } = await import("@/api/llmClient");
   const wordRatio = targetWords > 0 ? actualWords / targetWords : 1;
+
+  // Complete workflow run — triggers auto-grading and optimization notes
+  await completeWorkflow(workflowId, {
+    outcome_metrics: {
+      actual_words: actualWords,
+      target_words: targetWords,
+      word_ratio: wordRatio,
+      duration_seconds: durationSeconds,
+      target_seconds: minutes * 60,
+      expansion_loops: totalExpansionLoops,
+      num_segments: total,
+    },
+  });
+
+  // Also push to skills catalog
+  const { recordOdysseusSkillRun } = await import("@/api/llmClient");
   const lessons: string[] = [];
   if (wordRatio < 0.75) lessons.push(`First-pass word ratio was ${Math.round(wordRatio * 100)}% — plan ${totalExpansionLoops + 1}+ expansion loops for ${minutes}-min targets`);
   if (totalExpansionLoops > 0) lessons.push(`Used ${totalExpansionLoops} expansion loop(s) to reach target length`);
