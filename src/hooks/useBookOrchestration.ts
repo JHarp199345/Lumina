@@ -301,6 +301,11 @@ export function useBookOrchestration() {
         percent: 2,
       });
 
+      const { startWorkflow, recordStep, completeWorkflow, stopwatch } =
+        await import("@/services/workflowTracker");
+
+      let wfId: string | null = null;
+
       try {
         const googleKey = await storage.loadApiKey("lumina_google_ai_key");
         if (!googleKey && getProvider() === "gemini") {
@@ -315,9 +320,36 @@ export function useBookOrchestration() {
           return;
         }
 
+        const bookTitle = useBookStore.getState().activeBook?.title ?? label;
+        wfId = await startWorkflow("book-ingestion", `${bookTitle} — ${label}`, {
+          book_id: book.id,
+          book_title: bookTitle,
+          chapter_count: structure.chapters.length,
+          semantic_book_id: semanticBookId,
+          provider: getProvider(),
+        });
+
+        // Step 1 — semantic analysis
+        let sw = stopwatch();
         const baseSemanticMap = await analyzeBook(structure, googleKey ?? "", reportProgress);
+        await recordStep(wfId, {
+          name: "semantic-analysis",
+          agent: "analyzer",
+          skill: "book-semantic-analysis",
+          duration_ms: sw(),
+          metrics: {
+            scenes: baseSemanticMap.scenes.length,
+            arc_shape: baseSemanticMap.arcShape,
+            golden_number: baseSemanticMap.goldenNumber,
+            protocol: baseSemanticMap.analysisProtocol,
+            chapters: structure.chapters.length,
+          },
+        });
+
         const isExpository = baseSemanticMap.analysisProtocol === "expository";
 
+        // Step 2 — visual lore (fiction only)
+        sw = stopwatch();
         const visualLore = isExpository
           ? null
           : await buildVisualLoreDossier({
@@ -325,10 +357,26 @@ export function useBookOrchestration() {
               apiKey: googleKey ?? "",
               onProgress: reportProgress,
             });
+        if (!isExpository) {
+          await recordStep(wfId, {
+            name: "visual-lore",
+            agent: "lore",
+            skill: "visual-lore-dossier",
+            duration_ms: sw(),
+            metrics: {
+              characters: (visualLore as any)?.characters?.length ?? 0,
+              locations: (visualLore as any)?.locations?.length ?? 0,
+            },
+          });
+        }
+
         const loreSemanticMap = visualLore
           ? { ...baseSemanticMap, visualLore }
           : baseSemanticMap;
         const styleSeed = getStyleSeedById(styleSeedId);
+
+        // Step 3 — visual director briefs (fiction only)
+        sw = stopwatch();
         const directedScenes =
           styleSeed && !isExpository
             ? await createVisualDirectorBriefs({
@@ -340,6 +388,19 @@ export function useBookOrchestration() {
                 onProgress: reportProgress,
               })
             : loreSemanticMap.scenes;
+        if (styleSeed && !isExpository) {
+          await recordStep(wfId, {
+            name: "visual-direction",
+            agent: "director",
+            skill: "scene-visual-direction",
+            duration_ms: sw(),
+            metrics: {
+              scenes_directed: directedScenes.length,
+              style_seed: styleSeedId,
+            },
+          });
+        }
+
         const semanticMap = { ...loreSemanticMap, scenes: directedScenes };
 
         await storage.saveSemanticMap(semanticMap).catch((e) =>
@@ -358,9 +419,20 @@ export function useBookOrchestration() {
             if (!apiKey && getProvider() === "gemini") return;
             const existing = await storage.loadSourceProfile(semanticMap.bookId).catch(() => null);
             if (existing) return;
+            const sipSw = stopwatch();
             const { buildSourceProfile } = await import("@/pipeline/sourceProfile");
             const profile = await buildSourceProfile(structure, semanticMap, apiKey ?? "");
             await storage.saveSourceProfile(profile).catch(() => {});
+            await recordStep(wfId, {
+              name: "source-profile",
+              agent: "reader",
+              skill: "source-intelligence-profile",
+              duration_ms: sipSw(),
+              metrics: {
+                book_id: semanticMap.bookId,
+                chapters: structure.chapters.length,
+              },
+            });
           } catch (err) {
             diagnosticWarn("source_profile.prewarm_failed", "SIP pre-warm failed", {
               error: err instanceof Error ? err.message : String(err),
@@ -389,7 +461,14 @@ export function useBookOrchestration() {
             total: semanticMap.scenes.length,
             itemLabel: semanticMap.scenes[0]?.symbolicMotifs.slice(0, 2).join(" + "),
           });
+          sw = stopwatch();
           await _ensureOpeningImage(semanticMap, styleSeedId, semanticBookId);
+          await recordStep(wfId, {
+            name: "opening-image",
+            agent: "image-gen",
+            duration_ms: sw(),
+            metrics: { scene_id: semanticMap.scenes[0]?.id ?? null },
+          });
         }
 
         setPhase({
@@ -410,6 +489,18 @@ export function useBookOrchestration() {
           current: Math.min(1, semanticMap.scenes.length),
           total: semanticMap.scenes.length,
         });
+
+        await completeWorkflow(wfId, {
+          outcome_metrics: {
+            scenes: semanticMap.scenes.length,
+            arc_shape: semanticMap.arcShape,
+            golden_number: semanticMap.goldenNumber,
+            storyboard_beats: semanticMap.storyboard?.beats.length ?? 0,
+            is_expository: isExpository,
+            chapter_count: structure.chapters.length,
+          },
+        });
+
         setIsAnalyzing(false);
         setAnalysisProgress("");
         setAnalysisProgressDetail(null);
@@ -419,6 +510,13 @@ export function useBookOrchestration() {
           semanticBookId,
           error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
         });
+        // Record the failure in the workflow log so the AI can see what broke
+        await completeWorkflow(wfId, {
+          outcome_metrics: {
+            error: err instanceof Error ? err.message : String(err),
+            failed: true,
+          },
+        }).catch(() => {});
         setIsAnalyzing(false);
         setAnalysisProgressDetail({
           phase: "error",
