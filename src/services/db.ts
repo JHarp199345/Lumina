@@ -25,6 +25,7 @@ import type {
   AudioArtifact,
   PresentationDeck,
   ArchiveBook,
+  LuminaNotification,
 } from "@/types";
 
 let _db: Database | null = null;
@@ -90,6 +91,20 @@ async function initSchema(db: Database): Promise<void> {
       note_text TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      feature TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT,
+      artifact_id TEXT,
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
     );
   `);
 
@@ -477,6 +492,54 @@ export async function dbUpdateNote(noteId: string, text: string): Promise<void> 
 export async function dbDeleteNote(noteId: string): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM notes WHERE id = $1`, [noteId]);
+}
+
+// ─── Notifications ──────────────────────────────────────────────────────────────
+
+export async function dbSaveNotification(n: LuminaNotification): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO notifications
+     (id, book_id, feature, kind, title, detail, artifact_id, read, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [n.id, n.bookId, n.feature, n.kind, n.title, n.detail ?? null, n.artifactId ?? null, n.read ? 1 : 0, n.createdAt]
+  );
+}
+
+export async function dbLoadNotifications(bookId: string): Promise<LuminaNotification[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM notifications WHERE book_id = $1 ORDER BY created_at ASC`,
+    [bookId]
+  );
+  return rows.map((row) => ({
+    id: String(row.id),
+    bookId: String(row.book_id),
+    feature: String(row.feature) as LuminaNotification["feature"],
+    kind: String(row.kind) as LuminaNotification["kind"],
+    title: String(row.title),
+    ...(row.detail ? { detail: String(row.detail) } : {}),
+    ...(row.artifact_id ? { artifactId: String(row.artifact_id) } : {}),
+    read: Number(row.read) === 1,
+    createdAt: String(row.created_at),
+  }));
+}
+
+export async function dbMarkNotificationsRead(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDb();
+  const placeholders = ids.map((_, i) => `$${i + 1}`).join(", ");
+  await db.execute(`UPDATE notifications SET read = 1 WHERE id IN (${placeholders})`, ids);
+}
+
+export async function dbDeleteNotification(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM notifications WHERE id = $1`, [id]);
+}
+
+export async function dbClearNotifications(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM notifications WHERE book_id = $1`, [bookId]);
 }
 
 // ─── Semantic Maps ────────────────────────────────────────────────────────────

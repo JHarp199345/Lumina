@@ -43,6 +43,7 @@ import type {
   CachedImage,
 } from "@/types";
 import { useReaderStore } from "@/store/readerStore";
+import { useNotificationStore } from "@/store/notificationStore";
 
 export function useBookOrchestration() {
   const {
@@ -233,34 +234,54 @@ export function useBookOrchestration() {
       const slice = getAnalysisSlice(structure, 0);
       diagnosticInfo("reingest.start", "Re-ingesting book", { bookId: book.id });
 
-      // 1. Archive the current generation and clear the active generated artifacts.
-      await storage.archiveAndResetGeneration(book).catch((err) =>
-        diagnosticWarn("reingest.archive_failed", "Archive/reset failed", {
+      try {
+        // 1. Archive the current generation and clear the active generated artifacts.
+        await storage.archiveAndResetGeneration(book).catch((err) =>
+          diagnosticWarn("reingest.archive_failed", "Archive/reset failed", {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        );
+
+        // 2. Clear in-memory generation state so nothing old lingers in the gallery.
+        clearQueue();
+        clearImageCache();
+        setActiveSemanticMap(null);
+
+        // 3. Re-lay the groundwork: fresh analysis. The opening image generates;
+        //    the rest fill in one-at-a-time as the reader reaches each slot.
+        await _runAnalysis(slice.structure, seedId, slice.semanticBookId, slice.label, {
+          ensureOpeningImage: true,
+        });
+
+        // 4. Return the reader to the start of the fresh generation.
+        const win = window as Window & { luminaNavigate?: (target: string) => void };
+        win.luminaNavigate?.("lumina://chapter/0/page/0");
+        useReaderStore.getState().setCurrentCfi("lumina://chapter/0/page/0");
+        useReaderStore.getState().setCurrentChapterIndex(0);
+        useReaderStore.getState().setPercentComplete(0);
+        useReaderStore.getState().setWordPosition(0);
+        useImageStore.getState().markNavigationJump();
+
+        diagnosticInfo("reingest.complete", "Re-ingestion complete", { bookId: book.id });
+        void useNotificationStore.getState().notify({
+          bookId: book.id,
+          feature: "re-ingest",
+          kind: "success",
+          title: "Re-ingestion complete",
+          detail: "Fresh analysis and imagery are ready for this book.",
+        });
+      } catch (err) {
+        diagnosticWarn("reingest.failed", "Re-ingestion failed", {
           error: err instanceof Error ? err.message : String(err),
-        })
-      );
-
-      // 2. Clear in-memory generation state so nothing old lingers in the gallery.
-      clearQueue();
-      clearImageCache();
-      setActiveSemanticMap(null);
-
-      // 3. Re-lay the groundwork: fresh analysis. The opening image generates;
-      //    the rest fill in one-at-a-time as the reader reaches each slot.
-      await _runAnalysis(slice.structure, seedId, slice.semanticBookId, slice.label, {
-        ensureOpeningImage: true,
-      });
-
-      // 4. Return the reader to the start of the fresh generation.
-      const win = window as Window & { luminaNavigate?: (target: string) => void };
-      win.luminaNavigate?.("lumina://chapter/0/page/0");
-      useReaderStore.getState().setCurrentCfi("lumina://chapter/0/page/0");
-      useReaderStore.getState().setCurrentChapterIndex(0);
-      useReaderStore.getState().setPercentComplete(0);
-      useReaderStore.getState().setWordPosition(0);
-      useImageStore.getState().markNavigationJump();
-
-      diagnosticInfo("reingest.complete", "Re-ingestion complete", { bookId: book.id });
+        });
+        void useNotificationStore.getState().notify({
+          bookId: book.id,
+          feature: "re-ingest",
+          kind: "error",
+          title: "Re-ingestion failed",
+          detail: err instanceof Error ? err.message : "Re-ingestion could not complete.",
+        });
+      }
     },
     [setActiveSemanticMap, clearQueue, clearImageCache]
   );

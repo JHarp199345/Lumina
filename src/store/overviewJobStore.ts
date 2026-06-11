@@ -11,6 +11,7 @@ import {
   type AudioOverviewJobParams,
 } from "@/services/audioOverviewJob";
 import { useAudioStore } from "@/store/audioStore";
+import { useNotificationStore } from "@/store/notificationStore";
 
 export type OverviewJobStatus = "idle" | "running" | "completed" | "failed";
 
@@ -112,6 +113,15 @@ export const useOverviewJobStore = create<OverviewJobStore>()((set, get) => ({
           progress: "Overview ready.",
           completedArtifactId: artifact.id,
         });
+
+        void useNotificationStore.getState().notify({
+          bookId: params.bookId,
+          feature: "audio-overview",
+          kind: "success",
+          title: "Audio Overview ready",
+          detail: "Your guided summary finished generating.",
+          artifactId: artifact.id,
+        });
       } catch (err) {
         if (isStale()) return;
         console.error("[AudioOverview] generation failed:", err);
@@ -119,6 +129,14 @@ export const useOverviewJobStore = create<OverviewJobStore>()((set, get) => ({
           status: "failed",
           error: err instanceof Error ? err.message : "Overview generation failed.",
           progress: "",
+        });
+
+        void useNotificationStore.getState().notify({
+          bookId: params.bookId,
+          feature: "audio-overview",
+          kind: "error",
+          title: "Audio Overview failed",
+          detail: err instanceof Error ? err.message : "Overview generation failed.",
         });
       } finally {
         clearInterval(heartbeatId);

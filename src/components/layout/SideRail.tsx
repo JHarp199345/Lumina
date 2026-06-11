@@ -4,6 +4,7 @@ import { useReaderStore } from "@/store/readerStore";
 import { useBookStore } from "@/store/bookStore";
 import { useDrawerStore } from "@/store/drawerStore";
 import { useAnnotationStore } from "@/store/annotationStore";
+import { useNotificationStore, unreadCount } from "@/store/notificationStore";
 import type { Theme } from "@/types";
 import type { ReactNode } from "react";
 
@@ -33,6 +34,8 @@ export default function SideRail({
   const { activeBook } = useBookStore();
   const openDrawer = useDrawerStore((s) => s.open);
   const { getHighlightsForBook, getNotesForBook } = useAnnotationStore();
+  const notifications = useNotificationStore((s) => s.notifications);
+  const unreadNotifications = unreadCount(notifications);
 
   const annotationCount = activeBook
     ? getHighlightsForBook(activeBook.id).length + getNotesForBook(activeBook.id).length
@@ -87,12 +90,24 @@ export default function SideRail({
 
         {activeBook && (
           <div className="relative">
-            <RailButton label="Annotations" onClick={() => openDrawer("menu")}>
+            <RailButton
+              label={unreadNotifications > 0 ? "Annotations — new updates" : "Annotations"}
+              onClick={() => openDrawer("menu")}
+            >
               <NotebookTabs size={17} />
             </RailButton>
             {annotationCount > 0 && (
               <span className="pointer-events-none absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-lumina-gold px-1 text-[9px] font-semibold text-black">
                 {annotationCount > 99 ? "99+" : annotationCount}
+              </span>
+            )}
+            {/* Notification dot — distinct from the annotation count: signals
+                "what's new" from background work, pulsing until the reader opens
+                the feature it belongs to. */}
+            {unreadNotifications > 0 && (
+              <span className="pointer-events-none absolute -left-0.5 -top-0.5 flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lumina-gold/70" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-lumina-gold ring-2 ring-panel" />
               </span>
             )}
           </div>

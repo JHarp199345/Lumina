@@ -30,6 +30,7 @@ import type {
   AudioArtifact,
   PresentationDeck,
   ArchiveBook,
+  LuminaNotification,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -85,6 +86,14 @@ export interface StorageAdapter {
   loadNotes(bookId: string): Promise<Note[]>;
   updateNote(noteId: string, text: string): Promise<void>;
   deleteNote(noteId: string): Promise<void>;
+
+  // ── Notifications ─────────────────────────────────────────────────────────
+
+  saveNotification(notification: LuminaNotification): Promise<void>;
+  loadNotifications(bookId: string): Promise<LuminaNotification[]>;
+  markNotificationsRead(ids: string[]): Promise<void>;
+  deleteNotification(id: string): Promise<void>;
+  clearNotifications(bookId: string): Promise<void>;
 
   // ── Semantic map ──────────────────────────────────────────────────────────
 

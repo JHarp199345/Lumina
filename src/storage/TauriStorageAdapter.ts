@@ -29,6 +29,7 @@ import type {
   AudioArtifact,
   PresentationDeck,
   ArchiveBook,
+  LuminaNotification,
 } from "@/types";
 import {
   openEpubDialog,
@@ -59,6 +60,11 @@ import {
   dbLoadNotes,
   dbUpdateNote,
   dbDeleteNote,
+  dbSaveNotification,
+  dbLoadNotifications,
+  dbMarkNotificationsRead,
+  dbDeleteNotification,
+  dbClearNotifications,
   dbSaveSemanticMap,
   dbLoadSemanticMap,
   dbDeleteSemanticMap,
@@ -197,6 +203,28 @@ export class TauriStorageAdapter implements StorageAdapter {
 
   async deleteNote(noteId: string): Promise<void> {
     await dbDeleteNote(noteId);
+  }
+
+  // ── Notifications ────────────────────────────────────────────────────────
+
+  async saveNotification(notification: LuminaNotification): Promise<void> {
+    await dbSaveNotification(notification);
+  }
+
+  async loadNotifications(bookId: string): Promise<LuminaNotification[]> {
+    return dbLoadNotifications(bookId);
+  }
+
+  async markNotificationsRead(ids: string[]): Promise<void> {
+    await dbMarkNotificationsRead(ids);
+  }
+
+  async deleteNotification(id: string): Promise<void> {
+    await dbDeleteNotification(id);
+  }
+
+  async clearNotifications(bookId: string): Promise<void> {
+    await dbClearNotifications(bookId);
   }
 
   // ── Semantic map ─────────────────────────────────────────────────────────

@@ -31,6 +31,7 @@ import type {
   AudioArtifact,
   PresentationDeck,
   ArchiveBook,
+  LuminaNotification,
 } from "@/types";
 import {
   STORES,
@@ -234,6 +235,33 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async deleteNote(noteId: string): Promise<void> {
     await dbDelete(STORES.NOTES, noteId);
+  }
+
+  // ── Notifications ─────────────────────────────────────────────────────────
+
+  async saveNotification(notification: LuminaNotification): Promise<void> {
+    await dbPut(STORES.NOTIFICATIONS, notification);
+  }
+
+  async loadNotifications(bookId: string): Promise<LuminaNotification[]> {
+    return dbGetByIndex<LuminaNotification>(STORES.NOTIFICATIONS, "bookId", bookId);
+  }
+
+  async markNotificationsRead(ids: string[]): Promise<void> {
+    await Promise.all(
+      ids.map(async (id) => {
+        const n = await dbGet<LuminaNotification>(STORES.NOTIFICATIONS, id);
+        if (n && !n.read) await dbPut(STORES.NOTIFICATIONS, { ...n, read: true });
+      })
+    );
+  }
+
+  async deleteNotification(id: string): Promise<void> {
+    await dbDelete(STORES.NOTIFICATIONS, id);
+  }
+
+  async clearNotifications(bookId: string): Promise<void> {
+    await dbDeleteByIndex(STORES.NOTIFICATIONS, "bookId", bookId);
   }
 
   // ── Semantic map ─────────────────────────────────────────────────────────

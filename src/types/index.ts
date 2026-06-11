@@ -918,3 +918,36 @@ export interface AudioAlignmentSpan {
   absoluteWordStart: number;
   absoluteWordEnd: number;
 }
+
+// ─── Notifications ──────────────────────────────────────────────────────────────
+//
+// A per-book ledger of "what's new" events raised by background work (generation
+// jobs completing, re-ingest finishing, jobs failing). Surfaced at three levels:
+// the rail badge (aggregate unread), the drawer menu (which feature is new), and
+// inside the feature view (what the notice relates to). See PLANxi.md.
+
+/**
+ * The drawer destination a notification is attributed to. Most map to a
+ * `DrawerView`; `re-ingest` is a book-level event with no single feature, shown in
+ * the drawer's "What's new" summary and counted in the rail aggregate.
+ */
+export type NotificationFeature =
+  | "audio-overview"
+  | "study-guide"
+  | "presentation-studio"
+  | "voice-studio"
+  | "re-ingest";
+
+export type NotificationKind = "success" | "error";
+
+export interface LuminaNotification {
+  id: string;
+  bookId: string;
+  feature: NotificationFeature;
+  kind: NotificationKind;
+  title: string;            // short headline, e.g. "Audio Overview ready"
+  detail?: string;          // one-line context, e.g. "Your guided summary finished generating"
+  artifactId?: string;      // the produced artifact, when the notice points at one
+  read: boolean;
+  createdAt: string;
+}

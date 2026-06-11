@@ -8,7 +8,7 @@
  * See PLANiv.md, "PART ONE — THE KNOWLEDGE LAYER".
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   X,
@@ -28,10 +28,12 @@ import {
   Play,
 } from "lucide-react";
 import WatchAlong from "@/components/knowledge/WatchAlong";
-import { useDrawerStore } from "@/store/drawerStore";
+import { useDrawerStore, type DrawerView } from "@/store/drawerStore";
 import { useAnnotationStore } from "@/store/annotationStore";
+import { useNotificationStore, unreadByFeature } from "@/store/notificationStore";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
+import type { LuminaNotification, NotificationFeature } from "@/types";
 import {
   groupHighlightsByChapter,
   groupNotesByChapter,
@@ -51,8 +53,35 @@ const LENS_EDGE: Record<string, string> = {
   red: "border-l-[#d56a52]",
 };
 
+/** The drawer view a notification feature maps to (for mark-read on open). */
+function viewToFeature(view: DrawerView): NotificationFeature | null {
+  switch (view) {
+    case "audio-overview":
+      return "audio-overview";
+    case "study-guide":
+      return "study-guide";
+    case "presentation-studio":
+      return "presentation-studio";
+    case "voice-studio":
+      return "voice-studio";
+    default:
+      return null;
+  }
+}
+
 export default function AnnotationsDrawer() {
   const { isOpen, view, close, setView } = useDrawerStore();
+  const notifications = useNotificationStore((s) => s.notifications);
+  const markFeatureRead = useNotificationStore((s) => s.markFeatureRead);
+
+  // Level 3 — opening any feature view clears its "what's new" marker, no matter
+  // how the reader arrived (menu pick, deep link, or after a job auto-opens it).
+  useEffect(() => {
+    const feature = viewToFeature(view);
+    if (isOpen && feature) void markFeatureRead(feature);
+  }, [isOpen, view, markFeatureRead]);
+
+  const unreadMap = useMemo(() => unreadByFeature(notifications), [notifications]);
 
   return (
     <AnimatePresence>
@@ -76,7 +105,14 @@ export default function AnnotationsDrawer() {
             transition={{ type: "spring", damping: 32, stiffness: 320 }}
             className="fixed right-0 top-0 z-[56] flex h-full w-[min(360px,92vw)] flex-col border-l border-hair bg-surface-dark shadow-2xl shadow-black/40"
           >
-            {view === "menu" && <MenuView onPick={setView} onClose={close} />}
+            {view === "menu" && (
+              <MenuView
+                onPick={setView}
+                onClose={close}
+                unread={unreadMap}
+                notifications={notifications}
+              />
+            )}
             {view === "glossary" && (
               <GlossaryView onBack={() => setView("menu")} onClose={close} />
             )}
@@ -147,9 +183,27 @@ function DrawerHeader({
 
 // ─── Menu (the navigation hub) ──────────────────────────────────────────────────
 
+/** The drawer view a notification feature opens to (null = no dedicated view). */
+function featureToView(feature: NotificationFeature): DrawerView | null {
+  switch (feature) {
+    case "audio-overview":
+      return "audio-overview";
+    case "study-guide":
+      return "study-guide";
+    case "presentation-studio":
+      return "presentation-studio";
+    case "voice-studio":
+      return "voice-studio";
+    case "re-ingest":
+      return null;
+  }
+}
+
 function MenuView({
   onPick,
   onClose,
+  unread,
+  notifications,
 }: {
   onPick: (
     v:
@@ -163,15 +217,62 @@ function MenuView({
       | "watch-along"
   ) => void;
   onClose: () => void;
+  unread: Partial<Record<NotificationFeature, number>>;
+  notifications: LuminaNotification[];
 }) {
   const { activeBook } = useBookStore();
   const { getHighlightsForBook, getNotesForBook } = useAnnotationStore();
+  const markFeatureRead = useNotificationStore((s) => s.markFeatureRead);
   const highlightCount = activeBook ? getHighlightsForBook(activeBook.id).length : 0;
   const noteCount = activeBook ? getNotesForBook(activeBook.id).length : 0;
+
+  const recentUnread = useMemo(
+    () => notifications.filter((n) => !n.read).slice(0, 4),
+    [notifications]
+  );
+
+  const openNotice = (n: LuminaNotification) => {
+    const target = featureToView(n.feature);
+    if (target) onPick(target as Parameters<typeof onPick>[0]); // Level-3 effect marks read
+    else void markFeatureRead(n.feature); // book-level notice (re-ingest) — clear in place
+  };
 
   return (
     <>
       <DrawerHeader title="Annotations" onClose={onClose} />
+
+      {/* What's new — the aggregate "annotate at every level" summary. Lists the
+          most recent unread notices across all features, including book-level ones
+          (re-ingest) that have no feature button of their own. */}
+      {recentUnread.length > 0 && (
+        <div className="border-b border-hair px-3 py-2.5">
+          <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-lumina-gold/70">
+            What's new
+          </p>
+          <div className="flex flex-col gap-1">
+            {recentUnread.map((n) => (
+              <button
+                key={n.id}
+                onClick={() => openNotice(n)}
+                className="flex items-start gap-2 rounded-lg border border-hair bg-ink/[0.02] px-2.5 py-2 text-left transition-colors hover:border-lumina-gold/30 hover:bg-lumina-gold/[0.06]"
+              >
+                <span
+                  className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${
+                    n.kind === "error" ? "bg-red-400" : "bg-lumina-gold"
+                  }`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium text-ink/85">{n.title}</span>
+                  {n.detail && (
+                    <span className="block truncate text-[11px] text-ink-faint">{n.detail}</span>
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-2 p-3">
         <HubButton
           icon={<Highlighter size={18} />}
@@ -199,6 +300,7 @@ function MenuView({
           label="Study Guide"
           sub="Segments, quizzes, and review"
           count={0}
+          news={unread["study-guide"] ?? 0}
           onClick={() => onPick("study-guide")}
         />
         <HubButton
@@ -206,6 +308,7 @@ function MenuView({
           label="Voice Studio"
           sub="Narration, audio cache, and queue"
           count={0}
+          news={unread["voice-studio"] ?? 0}
           onClick={() => onPick("voice-studio")}
         />
         <HubButton
@@ -213,6 +316,7 @@ function MenuView({
           label="Audio Overview"
           sub="Guided summaries and chapter briefings"
           count={0}
+          news={unread["audio-overview"] ?? 0}
           onClick={() => onPick("audio-overview")}
         />
         <HubButton
@@ -220,6 +324,7 @@ function MenuView({
           label="Presentation Studio"
           sub="Slides from the book, guide, and notes"
           count={0}
+          news={unread["presentation-studio"] ?? 0}
           onClick={() => onPick("presentation-studio")}
         />
         <HubButton
@@ -338,12 +443,14 @@ function HubButton({
   label,
   sub,
   count,
+  news = 0,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   sub: string;
   count: number;
+  news?: number;
   onClick: () => void;
 }) {
   return (
@@ -351,17 +458,31 @@ function HubButton({
       onClick={onClick}
       className="group flex items-center gap-3 rounded-xl border border-hair bg-ink/[0.03] px-4 py-3.5 text-left transition-colors hover:border-lumina-gold/30 hover:bg-lumina-gold/[0.06]"
     >
-      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink/[0.05] text-lumina-gold/85 group-hover:bg-lumina-gold/12">
+      <span className="relative flex h-10 w-10 items-center justify-center rounded-lg bg-ink/[0.05] text-lumina-gold/85 group-hover:bg-lumina-gold/12">
         {icon}
+        {/* Level 2 — which feature is new. The dot pulses until the reader opens
+            this feature, which marks its notifications read. */}
+        {news > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lumina-gold/70" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-lumina-gold ring-2 ring-surface-dark" />
+          </span>
+        )}
       </span>
       <span className="flex-1">
         <span className="block text-sm font-medium text-ink/85">{label}</span>
         <span className="block text-[11px] text-ink-faint">{sub}</span>
       </span>
-      {count > 0 && (
-        <span className="rounded-full bg-ink/[0.07] px-2 py-0.5 text-[11px] text-ink-soft">
-          {count}
+      {news > 0 ? (
+        <span className="rounded-full bg-lumina-gold/15 px-2 py-0.5 text-[11px] font-medium text-lumina-gold">
+          {news} new
         </span>
+      ) : (
+        count > 0 && (
+          <span className="rounded-full bg-ink/[0.07] px-2 py-0.5 text-[11px] text-ink-soft">
+            {count}
+          </span>
+        )
       )}
       <ChevronRight size={15} className="text-ink-faint transition-transform group-hover:translate-x-0.5" />
     </button>

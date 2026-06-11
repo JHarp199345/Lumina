@@ -221,15 +221,25 @@ function ReadAlongParagraph({
   wordCursor: { current: number };
   activeWordPosition: number | null;
 }) {
+  const pClassName = `mb-5 break-inside-avoid-column text-ink ${
+    paragraphIndex === 0
+      ? "first-letter:float-left first-letter:mr-2 first-letter:font-serif first-letter:text-[3.1em] first-letter:leading-[0.85] first-letter:text-lumina-gold/80"
+      : ""
+  }`;
+
+  // When not actively reading along, render the paragraph as a single text node.
+  // The per-word <span> structure is only needed to light up the active word during
+  // audio playback; rendering it always fragments lens highlights into one rounded
+  // pill per word. Plain text lets a highlight paint as one continuous, unbroken band.
+  // The cursor still advances so word positions stay correct once read-along begins.
+  if (activeWordPosition === null) {
+    wordCursor.current += wordCount(paragraph);
+    return <p className={pClassName}>{paragraph}</p>;
+  }
+
   const parts = paragraph.split(/(\s+)/);
   return (
-    <p
-      className={`mb-5 break-inside-avoid-column text-ink ${
-        paragraphIndex === 0
-          ? "first-letter:float-left first-letter:mr-2 first-letter:font-serif first-letter:text-[3.1em] first-letter:leading-[0.85] first-letter:text-lumina-gold/80"
-          : ""
-      }`}
-    >
+    <p className={pClassName}>
       {parts.map((part, index) => {
         if (/^\s+$/.test(part)) return part;
         const absoluteWord = pageStartWord + wordCursor.current;

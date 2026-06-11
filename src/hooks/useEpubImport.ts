@@ -4,6 +4,7 @@ import { parseEpub, extractCoverImage } from "@/pipeline/epubParser";
 import type { EpubImportContext } from "@/pipeline/epubEdition";
 import { useBookStore } from "@/store/bookStore";
 import { useAnnotationStore } from "@/store/annotationStore";
+import { useNotificationStore } from "@/store/notificationStore";
 import { useImageStore } from "@/store/imageStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useStudyStore } from "@/store/studyStore";
@@ -369,6 +370,7 @@ export function useEpubImport() {
       if (semanticMap) setActiveSemanticMap(semanticMap);
       if (seedId) setActiveStyleSeed(seedId);
       loadAnnotations(highlights, notes);
+      void useNotificationStore.getState().loadForBook(book.id);
       // SINGLE SOURCE OF TRUTH: when a current analysis exists, only its own scenes'
       // images may enter the cache / display. This prevents an orphaned image from a
       // prior generation (e.g. an expository diagram from a wrong classification) from
