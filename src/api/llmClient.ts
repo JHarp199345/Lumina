@@ -26,7 +26,8 @@ export function setOdysseusUrl(url: string): void {
 }
 
 export function getOdysseusToken(): string {
-  return localStorage.getItem(TOKEN_KEY) || "";
+  const raw = localStorage.getItem(TOKEN_KEY) || "";
+  return raw.replace(/^Bearer\s+/i, "").trim();
 }
 
 export function setOdysseusToken(token: string): void {
@@ -111,6 +112,14 @@ async function _callOdysseus(
   const token = getOdysseusToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
+  // Workflow telemetry headers — Odysseus logs steps server-side if /workflow/start failed
+  try {
+    const { getWorkflowAgentHeaders, adoptWorkflowId } = await import("@/services/workflowTracker");
+    Object.assign(headers, getWorkflowAgentHeaders(agent));
+  } catch {
+    /* optional */
+  }
+
   const body: Record<string, unknown> = {
     messages: [{ role: "user", content: prompt }],
   };
@@ -126,7 +135,16 @@ async function _callOdysseus(
     const text = await startRes.text().catch(() => "");
     throw new Error(`Odysseus ${startRes.status}: ${text}`);
   }
-  const { job_id } = await startRes.json() as { job_id: string };
+  const startJson = await startRes.json() as { job_id: string; workflow_id?: string };
+  const { job_id } = startJson;
+  if (startJson.workflow_id) {
+    try {
+      const { adoptWorkflowId } = await import("@/services/workflowTracker");
+      adoptWorkflowId(startJson.workflow_id);
+    } catch {
+      /* optional */
+    }
+  }
 
   // Poll up to 30 min (600 × 3 s)
   const pollHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};

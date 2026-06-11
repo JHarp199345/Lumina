@@ -2,14 +2,61 @@
  * workflowTracker.ts
  *
  * Client for the Odysseus workflow telemetry API (/api/workflow).
- * Lumina pipelines call this while provider = "odysseus" so runs appear
+ * Lumina pipelines call this when Odysseus is configured so runs appear
  * live in the Odysseus Skills Library workflow log.
  *
- * Failures are logged but never block the pipeline.
+ * Agent calls also carry workflow headers (see llmClient.ts) so Odysseus
+ * can record steps server-side if /api/workflow/start fails (e.g. 401).
  */
 
 import { getOdysseusUrl, getOdysseusToken, getProvider } from "@/api/llmClient";
 import { diagnosticWarn } from "@/utils/diagnostics";
+
+// ── Active run context (read by llmClient for agent queue headers) ─────────────
+
+export interface ActiveWorkflowContext {
+  id: string | null;
+  type: string;
+  label: string;
+  taskGoal: string;
+  stepName?: string;
+  stepGoal?: string;
+  skill?: string;
+}
+
+let _active: ActiveWorkflowContext | null = null;
+
+export function setWorkflowContext(ctx: ActiveWorkflowContext | null): void {
+  _active = ctx;
+}
+
+export function getWorkflowContext(): ActiveWorkflowContext | null {
+  return _active;
+}
+
+/** Headers for Odysseus agent /queue calls — enables server-side step logging. */
+export function getWorkflowAgentHeaders(
+  agent: string,
+  step?: { name?: string; goal?: string; skill?: string }
+): Record<string, string> {
+  if (!_active) return {};
+  const h: Record<string, string> = {};
+  if (_active.id) h["X-Workflow-Run-Id"] = _active.id;
+  if (_active.type) h["X-Lumina-Workflow-Type"] = _active.type;
+  if (_active.label) h["X-Lumina-Workflow-Label"] = _active.label;
+  if (_active.taskGoal) h["X-Lumina-Workflow-Goal"] = _active.taskGoal;
+  const stepName = step?.name ?? _active.stepName ?? agent;
+  const stepGoal = step?.goal ?? _active.stepGoal;
+  const skill = step?.skill ?? _active.skill;
+  if (stepName) h["X-Workflow-Step-Name"] = stepName;
+  if (stepGoal) h["X-Workflow-Step-Goal"] = stepGoal;
+  if (skill) h["X-Workflow-Step-Skill"] = skill;
+  return h;
+}
+
+export function adoptWorkflowId(id: string): void {
+  if (_active) _active.id = id;
+}
 
 function _base(): string {
   return getOdysseusUrl().replace(/\/$/, "");
@@ -28,13 +75,20 @@ function _logFailure(op: string, err: unknown): void {
   diagnosticWarn(`workflow.${op}_failed`, `Odysseus workflow ${op} failed`, { error: msg });
 }
 
+function _shouldLog(): boolean {
+  return getProvider() === "odysseus";
+}
+
 async function _post(path: string, body: unknown): Promise<unknown> {
   const res = await fetch(`${_base()}/api/workflow${path}`, {
     method: "POST",
     headers: _headers(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`workflow API POST ${path} → ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`workflow API POST ${path} → ${res.status}${text ? `: ${text.slice(0, 120)}` : ""}`);
+  }
   return res.json();
 }
 
@@ -44,18 +98,11 @@ async function _put(path: string, body: unknown): Promise<unknown> {
     headers: _headers(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`workflow API PUT ${path} → ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`workflow API PUT ${path} → ${res.status}${text ? `: ${text.slice(0, 120)}` : ""}`);
+  }
   return res.json();
-}
-
-async function _get(path: string): Promise<unknown> {
-  const res = await fetch(`${_base()}/api/workflow${path}`, { headers: _headers() });
-  if (!res.ok) throw new Error(`workflow API GET ${path} → ${res.status}`);
-  return res.json();
-}
-
-function _enabled(): boolean {
-  return getProvider() === "odysseus";
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -69,14 +116,22 @@ export interface WorkflowContext {
   [key: string]: unknown;
 }
 
-/** Start a workflow run. Returns workflow_id, or null if Odysseus is unavailable. */
+/** Start a workflow run. Returns workflow_id, or null if unavailable. */
 export async function startWorkflow(
   type: string,
   contextLabel: string,
   context: WorkflowContext,
   taskGoal?: string
 ): Promise<string | null> {
-  if (!_enabled()) return null;
+  if (!_shouldLog()) return null;
+
+  setWorkflowContext({
+    id: null,
+    type,
+    label: contextLabel,
+    taskGoal: taskGoal ?? contextLabel,
+  });
+
   try {
     const res = (await _post("/start", {
       type,
@@ -85,10 +140,14 @@ export async function startWorkflow(
       task_goal: taskGoal ?? contextLabel,
     })) as { workflow_id: string };
     const id = res.workflow_id ?? null;
-    if (id) console.log(`[Workflow] started ${type} → ${id}`);
+    if (id) {
+      adoptWorkflowId(id);
+      console.log(`[Workflow] started ${type} → ${id}`);
+    }
     return id;
   } catch (err) {
     _logFailure("start", err);
+    // Keep _active context so agent queue calls can auto-start server-side
     return null;
   }
 }
@@ -106,9 +165,13 @@ export interface StepRecord {
   status?: "running" | "done" | "failed";
 }
 
-/** Record a completed step in one shot. No-op if workflowId is null. */
 export async function recordStep(workflowId: string | null, step: StepRecord): Promise<void> {
   if (!workflowId) return;
+  if (_active) {
+    _active.stepName = step.name;
+    _active.stepGoal = step.goal;
+    _active.skill = step.skill;
+  }
   try {
     await _post(`/${workflowId}/step`, { ...step, status: step.status ?? "done" });
   } catch (err) {
@@ -116,12 +179,16 @@ export async function recordStep(workflowId: string | null, step: StepRecord): P
   }
 }
 
-/** Mark a step as in-progress. Returns sequence number for finishStep. */
 export async function beginStep(
   workflowId: string | null,
   step: Pick<StepRecord, "name" | "goal" | "agent" | "skill" | "notes">
 ): Promise<number | null> {
   if (!workflowId) return null;
+  if (_active) {
+    _active.stepName = step.name;
+    _active.stepGoal = step.goal;
+    _active.skill = step.skill;
+  }
   try {
     const res = (await _post(`/${workflowId}/step`, { ...step, status: "running" })) as {
       sequence: number;
@@ -133,7 +200,6 @@ export async function beginStep(
   }
 }
 
-/** Finalize a step that was started with beginStep. */
 export async function finishStep(
   workflowId: string | null,
   sequence: number | null,
@@ -154,10 +220,6 @@ export interface StepOutcome {
   notes?: string;
 }
 
-/**
- * Track a pipeline step with live updates: posts "running" immediately,
- * then "done" or "failed" when the work finishes.
- */
 export async function trackStep<T>(
   workflowId: string | null,
   spec: Pick<StepRecord, "name" | "goal" | "agent" | "skill">,
@@ -165,6 +227,12 @@ export async function trackStep<T>(
   evaluate: (result: T) => StepOutcome,
   onError?: (err: unknown) => StepOutcome
 ): Promise<T> {
+  if (_active) {
+    _active.stepName = spec.name;
+    _active.stepGoal = spec.goal;
+    _active.skill = spec.skill;
+  }
+
   const sw = stopwatch();
   const seq = await beginStep(workflowId, spec);
   try {
@@ -196,46 +264,28 @@ export interface CompletionRecord {
   user_grade?: number;
 }
 
-/** Close a workflow run and trigger auto-grading. Returns optimization notes. */
 export async function completeWorkflow(
   workflowId: string | null,
   data: CompletionRecord = {}
 ): Promise<string[]> {
-  if (!workflowId) return [];
+  const id = workflowId ?? _active?.id ?? null;
+  if (!id) {
+    setWorkflowContext(null);
+    return [];
+  }
   try {
-    const res = (await _post(`/${workflowId}/complete`, data)) as { optimization_notes?: string[] };
+    const res = (await _post(`/${id}/complete`, data)) as { optimization_notes?: string[] };
     const notes = res.optimization_notes ?? [];
-    if (notes.length) console.log(`[Workflow] ${workflowId} complete —`, notes[0]);
+    if (notes.length) console.log(`[Workflow] ${id} complete —`, notes[0]);
     return notes;
   } catch (err) {
     _logFailure("complete", err);
     return [];
+  } finally {
+    setWorkflowContext(null);
   }
 }
 
-/** Fetch optimization insights for a workflow type. */
-export async function getWorkflowInsights(type: string): Promise<unknown> {
-  if (!_enabled()) return null;
-  try {
-    return await _get(`/insights?type=${encodeURIComponent(type)}`);
-  } catch {
-    return null;
-  }
-}
-
-/** Fetch recent runs for display. */
-export async function getRecentRuns(type?: string, limit = 20): Promise<unknown[]> {
-  if (!_enabled()) return [];
-  try {
-    const q = type ? `?type=${encodeURIComponent(type)}&limit=${limit}` : `?limit=${limit}`;
-    const res = (await _get(`/recent${q}`)) as { runs: unknown[] };
-    return res.runs ?? [];
-  } catch {
-    return [];
-  }
-}
-
-/** Returns a function that, when called, returns elapsed ms since creation. */
 export function stopwatch(): () => number {
   const start = Date.now();
   return () => Date.now() - start;

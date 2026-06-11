@@ -301,10 +301,11 @@ export function useBookOrchestration() {
         percent: 2,
       });
 
-      const { startWorkflow, trackStep, completeWorkflow } =
+      const { startWorkflow, trackStep, completeWorkflow, setWorkflowContext } =
         await import("@/services/workflowTracker");
 
       let wfId: string | null = null;
+      const bookTitleEarly = useBookStore.getState().activeBook?.title ?? label;
 
       try {
         const googleKey = await storage.loadApiKey("lumina_google_ai_key");
@@ -320,7 +321,17 @@ export function useBookOrchestration() {
           return;
         }
 
-        const bookTitle = useBookStore.getState().activeBook?.title ?? label;
+        const bookTitle = bookTitleEarly;
+        setWorkflowContext({
+          id: null,
+          type: "book-ingestion",
+          label: `${bookTitle} — ${label}`,
+          taskGoal: `Ingest "${bookTitle}" — build semantic map and visual plan`,
+          stepName: "semantic-analysis",
+          stepGoal: "Produce semantic map: arc, scenes, and analysis protocol",
+          skill: "book-semantic-analysis",
+        });
+
         wfId = await startWorkflow(
           "book-ingestion",
           `${bookTitle} — ${label}`,
@@ -340,7 +351,7 @@ export function useBookOrchestration() {
           {
             name: "semantic-analysis",
             goal: "Produce semantic map: arc, scenes, and analysis protocol",
-            agent: "analyzer",
+            agent: "reading",
             skill: "book-semantic-analysis",
           },
           () => analyzeBook(structure, googleKey ?? "", reportProgress),
