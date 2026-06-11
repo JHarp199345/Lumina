@@ -2,6 +2,8 @@
 
 Lumina is an intelligent EPUB reader that turns a book into a richer reading environment.
 
+Lumina runs on your own AI backend. It is built **Odysseus-first** — Odysseus is the default engine, driving a set of named agents (reading, writer, narrator, visual analyst, audio director) for analysis, imagery, audio, and study tools — with Google Gemini as a drop-in cloud fallback. Bring your own Odysseus URL and token, or your own Gemini key. Your books and everything Lumina generates stay on your device.
+
 You still read the original text. Lumina does not replace the book, summarize it away, or turn every page into a picture. Instead, it studies the book, builds a narrative map, and uses that map to grow helpful layers around the reading experience: symbolic images, notes, study guides, quizzes, audio overviews, narration, and presentation material.
 
 The core idea is simple:
@@ -204,14 +206,37 @@ Archived material can be reviewed later, or permanently purged when you decide y
 
 ## AI Engines
 
-Lumina supports two AI paths:
+Lumina supports two AI paths, and you decide which one is active:
 
-- **Local / Odysseus** — runs work through a local or self-hosted AI server
-- **Cloud / Gemini** — uses Google AI Studio for analysis and generation
+- **Odysseus (default)** — runs the work through a local or self-hosted Odysseus server
+- **Gemini (fallback)** — uses Google AI Studio for analysis and generation
 
-Image generation can use Google image generation, with optional fallback support where configured. Voice features can use additional voice providers when keys are supplied.
+### Odysseus
 
-Lumina follows a bring-your-own-key model. You decide which services to connect, and the work runs through the providers you choose.
+Lumina is built Odysseus-first. The reading, writing, narration, visual, and audio work is dispatched to **named Odysseus agents** rather than a single model, so each kind of task is handled by the agent suited to it:
+
+- `reading` — narrative analysis and the book's structural map
+- `writer` — study guides, summaries, and presentation text
+- `narrator` — spoken-overview and narration scripting
+- `visual_analyst` — scene selection and image direction
+- `audio_director` — audio overview planning
+
+Under the hood, Lumina talks to the standard Odysseus API surface: it queues a job at `/api/agents/{agent}/queue`, polls `/api/agents/jobs/{job_id}` until the job is done (tolerant of long, tunnel-backed runs), authenticates with an `ody_` bearer token, reports step telemetry to `/api/workflow`, and records skill outcomes to the Odysseus skills catalog so it improves over repeated runs.
+
+To connect Odysseus, open Settings and provide:
+
+- the **Odysseus URL** (defaults to `http://localhost:7860`, and a tunnel URL works too)
+- an **`ody_` access token**
+
+Settings includes a connection test that pings `/api/agents` and reports how many agents answered.
+
+Lumina works with Odysseus; it is not affiliated with or endorsed by the Odysseus project.
+
+### Gemini
+
+If you would rather run in the cloud, switch the provider to Gemini and supply a Google AI Studio key. Gemini then handles the same analysis and generation work. Image generation can use Google image generation, with optional fallback support where configured, and voice features can use additional voice providers when keys are supplied.
+
+Lumina follows a bring-your-own-key model throughout. Nothing is hosted for you — you connect the providers you choose, and the work runs through them.
 
 ## Storage and Privacy
 
