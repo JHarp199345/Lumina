@@ -1,5 +1,6 @@
 import { LUMINA_CONFIG } from "@/config";
 import { useSettingsStore } from "@/store/settingsStore";
+import { normalizeOdysseusUrl } from "@/utils/odysseusUrl";
 
 // ── Provider settings — backed by Zustand persist store ───────────────────────
 // Token is still kept in localStorage with the lk_ prefix (same as Gemini key),
@@ -18,11 +19,15 @@ export function setProvider(p: LLMProvider): void {
 }
 
 export function getOdysseusUrl(): string {
-  return useSettingsStore.getState().odysseusUrl || "http://localhost:7860";
+  try {
+    return normalizeOdysseusUrl(useSettingsStore.getState().odysseusUrl);
+  } catch {
+    return "http://localhost:7860";
+  }
 }
 
 export function setOdysseusUrl(url: string): void {
-  useSettingsStore.getState().setOdysseusUrl(url);
+  useSettingsStore.getState().setOdysseusUrl(normalizeOdysseusUrl(url));
 }
 
 export function getOdysseusToken(): string {
@@ -30,9 +35,16 @@ export function getOdysseusToken(): string {
   return raw.replace(/^Bearer\s+/i, "").trim();
 }
 
+export function getOdysseusTokenPrefix(): string | null {
+  const t = getOdysseusToken();
+  if (!t) return null;
+  return t.startsWith("ody_") ? `${t.slice(0, 12)}…` : `${t.slice(0, 8)}…`;
+}
+
 export function setOdysseusToken(token: string): void {
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
+  const normalized = token.replace(/^Bearer\s+/i, "").trim();
+  if (normalized) {
+    localStorage.setItem(TOKEN_KEY, normalized);
   } else {
     localStorage.removeItem(TOKEN_KEY);
   }
@@ -88,16 +100,56 @@ export async function llmGenerateJSON<T>(
  * Ping Odysseus and return connected agent count.
  * Pass a URL to test a new URL before saving it.
  */
-export async function testOdysseus(url?: string): Promise<{ agents: number }> {
-  const base = (url ?? getOdysseusUrl()).replace(/\/$/, "");
-  const headers: Record<string, string> = {};
+export interface OdysseusTestResult {
+  agents: number;
+  workflowAuth: boolean;
+  tokenPrefix: string | null;
+}
+
+export async function testOdysseus(url?: string): Promise<OdysseusTestResult> {
+  const base = normalizeOdysseusUrl(url ?? useSettingsStore.getState().odysseusUrl);
+  const endpoint = `${base}/api/agents`;
   const token = getOdysseusToken();
+  const tokenPrefix = getOdysseusTokenPrefix();
+  const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${base}/api/agents`, { headers });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch(endpoint, { headers });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Cannot reach ${endpoint} — ${msg}`);
+  }
+
+  if (!res.ok) {
+    const hint = !token
+      ? " — no auth token saved"
+      : !token.startsWith("ody_")
+        ? " — token should start with ody_"
+        : res.status === 404
+          ? " — 404 usually means the URL is wrong or the tunnel is down (Odysseus returns 401, not 404)"
+          : "";
+    throw new Error(`HTTP ${res.status} from ${endpoint}${hint}`);
+  }
   const data: unknown = await res.json();
-  return { agents: Array.isArray(data) ? data.length : 0 };
+
+  let workflowAuth = false;
+  if (token) {
+    const wfRes = await fetch(`${base}/api/workflow/recent?limit=1`, { headers });
+    workflowAuth = wfRes.ok;
+  }
+
+  // Persist normalized URL so the next call uses the absolute URL
+  if (useSettingsStore.getState().odysseusUrl !== base) {
+    useSettingsStore.getState().setOdysseusUrl(base);
+  }
+
+  return {
+    agents: Array.isArray(data) ? data.length : 0,
+    workflowAuth,
+    tokenPrefix,
+  };
 }
 
 // ── Odysseus transport ─────────────────────────────────────────────────────────
@@ -107,7 +159,7 @@ async function _callOdysseus(
   prompt: string,
   options: LLMGenerateOptions
 ): Promise<string> {
-  const base = getOdysseusUrl().replace(/\/$/, "");
+  const base = getOdysseusUrl();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getOdysseusToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -171,7 +223,7 @@ export function recordOdysseusSkillRun(
   lessons: string[],
   metrics: { actualWords: number; targetWords: number; expansionLoops: number }
 ): void {
-  const base = getOdysseusUrl().replace(/\/$/, "");
+  const base = getOdysseusUrl();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getOdysseusToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;

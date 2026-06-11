@@ -66,7 +66,7 @@ export const useSettingsStore = create<SettingsStore>()(
       setVisualInterpretationLevel: (visualInterpretationLevel) =>
         set({ visualInterpretationLevel: Math.max(0, Math.min(100, visualInterpretationLevel)) }),
       setLlmProvider: (llmProvider) => set({ llmProvider }),
-      setOdysseusUrl: (url) => set({ odysseusUrl: url.replace(/\/$/, "") || "http://localhost:7860" }),
+      setOdysseusUrl: (url) => set({ odysseusUrl: url.trim().replace(/\/+$/, "") || "http://localhost:7860" }),
 
       setLayoutPreset: (preset) => {
         const { layout, order } = LAYOUT_PRESETS[preset];

@@ -59,7 +59,7 @@ export function adoptWorkflowId(id: string): void {
 }
 
 function _base(): string {
-  return getOdysseusUrl().replace(/\/$/, "");
+  return getOdysseusUrl();
 }
 
 function _headers(): Record<string, string> {

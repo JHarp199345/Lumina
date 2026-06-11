@@ -17,6 +17,7 @@ import {
   getOdysseusUrl,
   setOdysseusUrl,
   getOdysseusToken,
+  getOdysseusTokenPrefix,
   setOdysseusToken,
   testOdysseus,
   type LLMProvider,
@@ -359,9 +360,27 @@ function AISection() {
   }
 
   function handleUrlChange(val: string) {
-    setOdysseusUrl(val);
+    // Save raw while typing; normalize on blur so partial URLs aren't rewritten.
+    useSettingsStore.setState({ odysseusUrl: val });
     setTestState("idle");
   }
+
+  function handleUrlBlur() {
+    try {
+      setOdysseusUrl(url);
+    } catch (err) {
+      setTestState("error");
+      setTestMsg(err instanceof Error ? err.message : "Invalid Server URL");
+    }
+  }
+
+  const resolvedUrl = (() => {
+    try {
+      return getOdysseusUrl();
+    } catch {
+      return url;
+    }
+  })();
 
   function handleTokenChange(val: string) {
     setTokenState(val);
@@ -372,14 +391,24 @@ function AISection() {
     setTestState("testing");
     setTestMsg("");
     try {
-      const { agents } = await testOdysseus(url);
+      const { agents, workflowAuth, tokenPrefix } = await testOdysseus();
       setTestState("ok");
-      setTestMsg(`Connected · ${agents} agent${agents !== 1 ? "s" : ""}`);
+      const tokenNote = tokenPrefix ? ` · token ${tokenPrefix}` : " · no token saved";
+      const wfNote = tokenPrefix
+        ? workflowAuth
+          ? " · workflow OK"
+          : " · workflow auth failed"
+        : "";
+      setTestMsg(
+        `Connected · ${agents} agent${agents !== 1 ? "s" : ""}${tokenNote}${wfNote}`
+      );
     } catch (err) {
       setTestState("error");
       setTestMsg(err instanceof Error ? err.message : "Connection failed");
     }
   }
+
+  const savedTokenPrefix = getOdysseusTokenPrefix();
 
   return (
     <div className="pb-4">
@@ -407,24 +436,38 @@ function AISection() {
             <div className="space-y-1.5">
               <label className="text-xs text-ink-faint">Server URL</label>
               <input
-                type="text"
+                type="url"
+                inputMode="url"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={url}
                 onChange={(e) => handleUrlChange(e.target.value)}
-                placeholder="http://localhost:7860"
+                onBlur={handleUrlBlur}
+                placeholder="https://your-tunnel.trycloudflare.com"
                 className="w-full bg-black/30 border border-hair rounded-lg px-3 py-2 text-xs text-ink-soft placeholder:text-ink-faint focus:outline-none focus:border-lumina-gold/50 font-mono transition-colors"
               />
+              <p className="text-[10px] text-ink-faint/80">
+                Must start with <code className="text-ink-faint">https://</code> — not the Lumina
+                GitHub link. Calls go to: <span className="font-mono break-all">{resolvedUrl}/api/…</span>
+              </p>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-ink-faint">
-                Auth Token <span className="text-ink-faint/60">optional</span>
+                Auth Token <span className="text-ink-faint/60">required for remote PWA</span>
               </label>
               <input
                 type="password"
                 value={token}
                 onChange={(e) => handleTokenChange(e.target.value)}
-                placeholder="••••••••••••••••"
-                className="w-full bg-black/20 border border-hair rounded-lg px-3 py-2 text-xs text-ink-faint placeholder:text-ink-faint focus:outline-none focus:border-hair font-mono transition-colors"
+                placeholder="Paste ody_… from Odysseus Settings → Integrations"
+                className="w-full bg-black/20 border border-hair rounded-lg px-3 py-2 text-xs text-ink-faint placeholder:text-ink-faint/70 focus:outline-none focus:border-hair font-mono transition-colors"
               />
+              <p className="text-[10px] text-ink-faint/80">
+                {savedTokenPrefix
+                  ? `Saved: ${savedTokenPrefix} (no Bearer prefix)`
+                  : "No token saved — the field above looks empty even if you configured this before on another device."}
+              </p>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -438,7 +481,7 @@ function AISection() {
                 <span className="text-xs text-green-400">{testMsg}</span>
               )}
               {testState === "error" && (
-                <span className="text-xs text-red-400/80 truncate max-w-[160px]" title={testMsg}>
+                <span className="text-xs text-red-400/80 break-all" title={testMsg}>
                   {testMsg}
                 </span>
               )}
