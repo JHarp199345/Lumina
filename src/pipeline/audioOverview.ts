@@ -618,7 +618,8 @@ async function _generateAudioOverviewLocal(
   const workflowId = await startWorkflow(
     "audio-overview",
     `${bookTitle} — ${chapterLabels}`,
-    { book_title: bookTitle, target_minutes: minutes, target_words: targetWords }
+    { book_title: bookTitle, target_minutes: minutes, target_words: targetWords },
+    `Generate ${minutes}-minute audio overview for "${bookTitle}"`
   );
 
   // Collect raw text for the scope
@@ -660,10 +661,13 @@ async function _generateAudioOverviewLocal(
     const understanding = await _buildChunkUnderstanding(segments[i], bookTitle, priorUnderstanding, apiKey);
     await recordStep(workflowId, {
       name: "comprehension",
+      goal: `Understand section ${n}/${total} for narration`,
       agent: "reading",
       skill: "audio-overview-comprehension",
       duration_ms: sw(),
       metrics: { segment: n, total_segments: total, output_chars: understanding.length },
+      goal_achieved: understanding.length > 200 ? 1 : 0.5,
+      unblocked_next: understanding.length > 0,
     });
 
     // Pass 2 — narration script (narrator agent)
@@ -676,6 +680,7 @@ async function _generateAudioOverviewLocal(
     const rawWords = rawScript.trim().split(/\s+/).filter(Boolean).length;
     await recordStep(workflowId, {
       name: "narration",
+      goal: `Write narration script for section ${n}/${total}`,
       agent: "narrator",
       skill: "audio-overview-narration",
       duration_ms: sw(),
@@ -685,6 +690,8 @@ async function _generateAudioOverviewLocal(
         target_words: segTargetWords,
         word_ratio: segTargetWords > 0 ? rawWords / segTargetWords : 1,
       },
+      goal_achieved: segTargetWords > 0 ? Math.min(rawWords / segTargetWords, 1) : 1,
+      unblocked_next: rawWords > 0,
     });
 
     // Pass 2b — iterative expansion
@@ -698,6 +705,7 @@ async function _generateAudioOverviewLocal(
     if (loopsUsed > 0) {
       await recordStep(workflowId, {
         name: "expansion",
+        goal: `Expand section ${n} script to target word count`,
         agent: "narrator",
         duration_ms: sw(),
         metrics: {
@@ -707,6 +715,8 @@ async function _generateAudioOverviewLocal(
           words_after: finalWords,
           word_ratio: segTargetWords > 0 ? finalWords / segTargetWords : 1,
         },
+        goal_achieved: segTargetWords > 0 ? Math.min(finalWords / segTargetWords, 1) : 1,
+        unblocked_next: finalWords > 0,
       });
     }
     allScripts.push(segScript);
@@ -727,9 +737,13 @@ async function _generateAudioOverviewLocal(
     } finally {
       await recordStep(workflowId, {
         name: "tts",
+        goal: `Synthesize audio for section ${n}/${total}`,
         agent: "kokoro",
         duration_ms: sw(),
         metrics: { segment: n, word_count: finalWords, error: ttsError },
+        goal_achieved: ttsError ? 0 : 1,
+        unblocked_next: !ttsError,
+        status: ttsError ? "failed" : "done",
       });
     }
 

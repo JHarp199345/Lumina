@@ -301,7 +301,7 @@ export function useBookOrchestration() {
         percent: 2,
       });
 
-      const { startWorkflow, recordStep, completeWorkflow, stopwatch } =
+      const { startWorkflow, trackStep, completeWorkflow } =
         await import("@/services/workflowTracker");
 
       let wfId: string | null = null;
@@ -321,54 +321,71 @@ export function useBookOrchestration() {
         }
 
         const bookTitle = useBookStore.getState().activeBook?.title ?? label;
-        wfId = await startWorkflow("book-ingestion", `${bookTitle} — ${label}`, {
-          book_id: book.id,
-          book_title: bookTitle,
-          chapter_count: structure.chapters.length,
-          semantic_book_id: semanticBookId,
-          provider: getProvider(),
-        });
+        wfId = await startWorkflow(
+          "book-ingestion",
+          `${bookTitle} — ${label}`,
+          {
+            book_id: book.id,
+            book_title: bookTitle,
+            chapter_count: structure.chapters.length,
+            semantic_book_id: semanticBookId,
+            provider: getProvider(),
+          },
+          `Ingest "${bookTitle}" — build semantic map and visual plan`
+        );
 
         // Step 1 — semantic analysis
-        let sw = stopwatch();
-        const baseSemanticMap = await analyzeBook(structure, googleKey ?? "", reportProgress);
-        await recordStep(wfId, {
-          name: "semantic-analysis",
-          agent: "analyzer",
-          skill: "book-semantic-analysis",
-          duration_ms: sw(),
-          metrics: {
-            scenes: baseSemanticMap.scenes.length,
-            arc_shape: baseSemanticMap.arcShape,
-            golden_number: baseSemanticMap.goldenNumber,
-            protocol: baseSemanticMap.analysisProtocol,
-            chapters: structure.chapters.length,
+        const baseSemanticMap = await trackStep(
+          wfId,
+          {
+            name: "semantic-analysis",
+            goal: "Produce semantic map: arc, scenes, and analysis protocol",
+            agent: "analyzer",
+            skill: "book-semantic-analysis",
           },
-        });
+          () => analyzeBook(structure, googleKey ?? "", reportProgress),
+          (map) => ({
+            metrics: {
+              scenes: map.scenes.length,
+              arc_shape: map.arcShape,
+              golden_number: map.goldenNumber,
+              protocol: map.analysisProtocol,
+              chapters: structure.chapters.length,
+            },
+            goal_achieved: map.scenes.length > 0 ? 1 : 0,
+            unblocked_next: map.scenes.length > 0,
+          })
+        );
 
         const isExpository = baseSemanticMap.analysisProtocol === "expository";
 
         // Step 2 — visual lore (fiction only)
-        sw = stopwatch();
         const visualLore = isExpository
           ? null
-          : await buildVisualLoreDossier({
-              structure,
-              apiKey: googleKey ?? "",
-              onProgress: reportProgress,
-            });
-        if (!isExpository) {
-          await recordStep(wfId, {
-            name: "visual-lore",
-            agent: "lore",
-            skill: "visual-lore-dossier",
-            duration_ms: sw(),
-            metrics: {
-              characters: (visualLore as any)?.characters?.length ?? 0,
-              locations: (visualLore as any)?.locations?.length ?? 0,
-            },
-          });
-        }
+          : await trackStep(
+              wfId,
+              {
+                name: "visual-lore",
+                goal: "Build character and location dossier for visual consistency",
+                agent: "lore",
+                skill: "visual-lore-dossier",
+              },
+              () =>
+                buildVisualLoreDossier({
+                  structure,
+                  apiKey: googleKey ?? "",
+                  onProgress: reportProgress,
+                }),
+              (lore) => {
+                const chars = (lore as { characters?: unknown[] })?.characters?.length ?? 0;
+                const locs = (lore as { locations?: unknown[] })?.locations?.length ?? 0;
+                return {
+                  metrics: { characters: chars, locations: locs },
+                  goal_achieved: chars + locs > 0 ? 1 : 0.5,
+                  unblocked_next: true,
+                };
+              }
+            );
 
         const loreSemanticMap = visualLore
           ? { ...baseSemanticMap, visualLore }
@@ -376,30 +393,32 @@ export function useBookOrchestration() {
         const styleSeed = getStyleSeedById(styleSeedId);
 
         // Step 3 — visual director briefs (fiction only)
-        sw = stopwatch();
         const directedScenes =
           styleSeed && !isExpository
-            ? await createVisualDirectorBriefs({
-                semanticMap: loreSemanticMap,
-                structure,
-                styleSeed,
-                interpretationLevel: visualInterpretationLevel,
-                apiKey: googleKey ?? "",
-                onProgress: reportProgress,
-              })
+            ? await trackStep(
+                wfId,
+                {
+                  name: "visual-direction",
+                  goal: "Write per-scene visual director briefs for image generation",
+                  agent: "director",
+                  skill: "scene-visual-direction",
+                },
+                () =>
+                  createVisualDirectorBriefs({
+                    semanticMap: loreSemanticMap,
+                    structure,
+                    styleSeed,
+                    interpretationLevel: visualInterpretationLevel,
+                    apiKey: googleKey ?? "",
+                    onProgress: reportProgress,
+                  }),
+                (scenes) => ({
+                  metrics: { scenes_directed: scenes.length, style_seed: styleSeedId },
+                  goal_achieved: scenes.length > 0 ? 1 : 0,
+                  unblocked_next: scenes.length > 0,
+                })
+              )
             : loreSemanticMap.scenes;
-        if (styleSeed && !isExpository) {
-          await recordStep(wfId, {
-            name: "visual-direction",
-            agent: "director",
-            skill: "scene-visual-direction",
-            duration_ms: sw(),
-            metrics: {
-              scenes_directed: directedScenes.length,
-              style_seed: styleSeedId,
-            },
-          });
-        }
 
         const semanticMap = { ...loreSemanticMap, scenes: directedScenes };
 
@@ -409,36 +428,46 @@ export function useBookOrchestration() {
 
         setActiveSemanticMap(semanticMap);
 
-        // Pre-warm the Source Intelligence Profile for Audio Overview in the same
-        // ingestion run (one extra consolidation call). Best-effort and fully
-        // detached — it must never affect analysis success. Older books build it
-        // lazily on first Audio Overview open instead.
-        void (async () => {
-          try {
-            const apiKey = await storage.loadApiKey("lumina_google_ai_key");
-            if (!apiKey && getProvider() === "gemini") return;
-            const existing = await storage.loadSourceProfile(semanticMap.bookId).catch(() => null);
-            if (existing) return;
-            const sipSw = stopwatch();
-            const { buildSourceProfile } = await import("@/pipeline/sourceProfile");
-            const profile = await buildSourceProfile(structure, semanticMap, apiKey ?? "");
-            await storage.saveSourceProfile(profile).catch(() => {});
-            await recordStep(wfId, {
-              name: "source-profile",
-              agent: "reader",
-              skill: "source-intelligence-profile",
-              duration_ms: sipSw(),
-              metrics: {
-                book_id: semanticMap.bookId,
-                chapters: structure.chapters.length,
+        // Pre-warm Source Intelligence Profile — best-effort, must finish before workflow complete
+        try {
+          const apiKey = await storage.loadApiKey("lumina_google_ai_key");
+          const canBuild = apiKey || getProvider() === "odysseus";
+          const existing = await storage.loadSourceProfile(semanticMap.bookId).catch(() => null);
+          if (canBuild && !existing) {
+            await trackStep(
+              wfId,
+              {
+                name: "source-profile",
+                goal: "Build Source Intelligence Profile for Audio Overview prompts",
+                agent: "reader",
+                skill: "source-intelligence-profile",
               },
-            });
-          } catch (err) {
-            diagnosticWarn("source_profile.prewarm_failed", "SIP pre-warm failed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
+              async () => {
+                const { buildSourceProfile } = await import("@/pipeline/sourceProfile");
+                const profile = await buildSourceProfile(structure, semanticMap, apiKey ?? "");
+                await storage.saveSourceProfile(profile).catch(() => {});
+                return profile;
+              },
+              () => ({
+                metrics: { book_id: semanticMap.bookId, chapters: structure.chapters.length },
+                goal_achieved: 1,
+                unblocked_next: true,
+              }),
+              (err) => ({
+                metrics: {
+                  book_id: semanticMap.bookId,
+                  error: err instanceof Error ? err.message : String(err),
+                },
+                goal_achieved: 0,
+                unblocked_next: true,
+              })
+            );
           }
-        })();
+        } catch (err) {
+          diagnosticWarn("source_profile.prewarm_failed", "SIP pre-warm failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
 
         console.log(
           `[Orchestration] Analysis complete: arc=${semanticMap.arcShape}, ` +
@@ -461,14 +490,33 @@ export function useBookOrchestration() {
             total: semanticMap.scenes.length,
             itemLabel: semanticMap.scenes[0]?.symbolicMotifs.slice(0, 2).join(" + "),
           });
-          sw = stopwatch();
-          await _ensureOpeningImage(semanticMap, styleSeedId, semanticBookId);
-          await recordStep(wfId, {
-            name: "opening-image",
-            agent: "image-gen",
-            duration_ms: sw(),
-            metrics: { scene_id: semanticMap.scenes[0]?.id ?? null },
-          });
+          await trackStep(
+            wfId,
+            {
+              name: "opening-image",
+              goal: "Generate opening scene image via ComfyUI",
+              agent: "image-gen",
+              skill: "scene-image-generation",
+            },
+            () => _ensureOpeningImage(semanticMap, styleSeedId, semanticBookId),
+            () => ({
+              metrics: {
+                scene_id: semanticMap.scenes[0]?.id ?? null,
+                success: true,
+              },
+              goal_achieved: 1,
+              unblocked_next: true,
+            }),
+            (err) => ({
+              metrics: {
+                scene_id: semanticMap.scenes[0]?.id ?? null,
+                error: err instanceof Error ? err.message : String(err),
+                success: false,
+              },
+              goal_achieved: 0,
+              unblocked_next: true,
+            })
+          );
         }
 
         setPhase({
