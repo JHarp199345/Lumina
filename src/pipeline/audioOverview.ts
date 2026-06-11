@@ -446,6 +446,13 @@ async function geminiTts(
 export interface OverviewResult {
   script: string;
   audio: SynthResult;
+  /** Present only on the local (Odysseus) path — used to record skill outcomes. */
+  skillMeta?: {
+    actualWords: number;
+    targetWords: number;
+    expansionLoops: number;
+    numSegments: number;
+  };
 }
 
 export async function generateAudioOverview(args: ScriptArgs & { voiceName: string }): Promise<OverviewResult> {
@@ -476,27 +483,27 @@ async function _buildChunkUnderstanding(
   apiKey: string
 ): Promise<string> {
   const priorSection = priorUnderstanding
-    ? `Context established from earlier in the work:\n${priorUnderstanding}\n\n`
+    ? `Analysis of the preceding section:\n${priorUnderstanding}\n\n`
     : "";
 
-  const prompt = `You are building a thorough understanding of a section of "${bookTitle}" before explaining it to a listener.
+  const prompt = `Perform a thorough analytical reading of this section of "${bookTitle}".
 
-${priorSection}Read the following material carefully and produce a comprehensive comprehension document that captures:
-- The central thesis, argument, or narrative thread of this section
-- Every key concept, theory, model, or idea — with its precise meaning in this context
+${priorSection}Produce a comprehensive reading document that captures:
+- The central argument, thesis, or narrative thread of this section
+- Every key concept, theory, model, or idea — with its precise meaning in context
 - The logical or narrative progression: how ideas develop, build on each other, or conflict
-- Specific evidence, examples, case studies, experiments, or illustrations used
+- Specific evidence, examples, case studies, experiments, or illustrations
 - Any frameworks, systems, or methodologies introduced
 - Relationships between entities (people, concepts, institutions, events) and how they evolve
-- How this section connects to or extends what came before
-- What a listener must carry forward to understand the rest of the work
+- How this section connects to and extends what came before
+- What a reader must carry forward to understand the rest of the work
 
-Be exhaustive and specific — name the actual concepts, terms, arguments, and examples from the text. Do not condense prematurely. This document is the foundation for a spoken explanation.
+Be exhaustive and specific — name actual concepts, terms, arguments, and examples from the text.
 
-MATERIAL:
+TEXT:
 ${text}`;
 
-  return llmGenerate("audio_director", prompt, { temperature: 0.3, maxTokens: 4096, geminiKey: apiKey });
+  return llmGenerate("reading", prompt, { maxTokens: 4096, geminiKey: apiKey });
 }
 
 async function _buildChunkScript(
@@ -507,41 +514,89 @@ async function _buildChunkScript(
   segTargetWords: number,
   userPrompt: string,
   priorScriptTail: string,
-  apiKey: string
+  apiKey: string,
+  learnedLessons: string[] = []
 ): Promise<string> {
   const sectionNote = totalSegs > 1 ? ` (section ${segIndex + 1} of ${totalSegs})` : "";
   const positionGuide =
     totalSegs <= 1
       ? ""
       : segIndex === 0
-        ? "Open by introducing the work and framing what the listener is about to learn."
+        ? "Open by introducing the work and setting up what the listener is about to learn."
         : segIndex === totalSegs - 1
-          ? "This is the final section. Conclude by synthesizing the contribution of the whole work."
-          : "Continue the explanation naturally from where it left off.";
+          ? "This is the final section — close by drawing the full work together."
+          : "Flow naturally from where the previous section ended.";
 
   const continuationLine = priorScriptTail
-    ? `Continue naturally from this point — do not repeat it:\n"…${priorScriptTail.trim()}"\n\n`
+    ? `Continue from this point — do not repeat it:\n"…${priorScriptTail.trim()}"\n\n`
     : "";
 
   const instructionLine = userPrompt.trim()
-    ? `Follow this reader instruction as your primary guide:\n"${userPrompt.trim()}"\n\n`
+    ? `Reader's focus instruction:\n"${userPrompt.trim()}"\n\n`
     : "";
 
-  const prompt = `You are narrating a spoken audio overview of "${bookTitle}"${sectionNote}.
-${positionGuide}
+  const lessonsLine = learnedLessons.length > 0
+    ? `LEARNED FROM PAST GENERATIONS:\n${learnedLessons.map((l) => `- ${l}`).join("\n")}\n\n`
+    : "";
 
-${instructionLine}${continuationLine}Using the comprehension notes below, write a thorough spoken explanation (~${segTargetWords} words). Cover every concept, argument, example, and relationship in the notes — do not abbreviate, skip, or gloss over any idea. Develop each point fully so the listener builds genuine understanding.
+  const prompt = `Write a spoken audio overview of "${bookTitle}"${sectionNote}. ${positionGuide}
 
-Write CONTINUOUS SPOKEN NARRATION in flowing paragraphs. No headings, bullet points, or markup — only words to be spoken.
+${instructionLine}${lessonsLine}${continuationLine}The analysis below covers every concept, argument, example, and relationship in this section. Translate it into thorough spoken narration (~${segTargetWords} words). Cover every idea fully — develop each concept with context, examples, and explanation. Do not abbreviate or rush past anything.
 
-COMPREHENSION NOTES:
+Speak directly into the substance. Do not announce topics, narrate your process, or use phrases like "let me explain", "we'll now look at", or "in this section". Begin immediately with the content itself. Continuous flowing paragraphs only — no headings, bullets, or markup.
+
+ANALYSIS:
 ${understanding}`;
 
-  return llmGenerate("audio_director", prompt, {
-    temperature: 0.7,
+  return llmGenerate("narrator", prompt, {
     maxTokens: Math.min(8192, Math.round(segTargetWords * 3)),
     geminiKey: apiKey,
   });
+}
+
+/**
+ * Iteratively expand a script until it reaches ≥88% of the target word count.
+ * Each loop appends a continuation drawn from the understanding document.
+ */
+async function _expandToTarget(
+  script: string,
+  understanding: string,
+  bookTitle: string,
+  targetWords: number,
+  apiKey: string,
+  maxLoops: number,
+  onProgress?: (msg: string) => void
+): Promise<{ script: string; loopsUsed: number }> {
+  let result = script;
+  let loopsUsed = 0;
+
+  for (let i = 0; i < maxLoops; i++) {
+    const current = result.split(/\s+/).filter(Boolean).length;
+    if (current >= targetWords * 0.88) break;
+
+    loopsUsed++;
+    const needed = targetWords - current;
+    const pct = Math.round((current / targetWords) * 100);
+    onProgress?.(`Deepening narration (${pct}% of target)…`);
+
+    const prompt = `The narration of "${bookTitle}" is ${current} words and needs to reach ~${targetWords} words. Continue developing the ideas — add examples, context, and elaboration to concepts already mentioned. Do not repeat what was said. Begin immediately with content.
+
+NARRATION (continue from the end):
+…${result.slice(-700).trim()}
+
+ANALYSIS (draw from for depth):
+${understanding.slice(0, 3000)}
+
+Write ${needed}+ words of continuation. No preamble.`;
+
+    const ext = await llmGenerate("narrator", prompt, {
+      maxTokens: Math.min(4096, Math.round(needed * 2.5)),
+      geminiKey: apiKey,
+    });
+    result = result.trimEnd() + " " + ext.trim();
+  }
+
+  return { script: result, loopsUsed };
 }
 
 async function _generateAudioOverviewLocal(
@@ -552,6 +607,10 @@ async function _generateAudioOverviewLocal(
   const targetWords = Math.round(minutes * LUMINA_CONFIG.AUDIO_OVERVIEW_WPM);
   const chapters = chaptersForScope(scope, structure);
   const bookTitle = structure.title || "this work";
+
+  // Pull learned strategy from past runs — calibrates expansion loops and injects lessons
+  const { getLearnedStrategy } = await import("@/services/skillMemory");
+  const strategy = getLearnedStrategy();
 
   // Collect raw text for the scope
   const allWords: string[] = [];
@@ -571,8 +630,8 @@ async function _generateAudioOverviewLocal(
     segments.push([profileSection, outline].filter(Boolean).join("\n\n") || "No source text available.");
   }
 
-  // Words per segment — honour the user's target time but ensure depth floor of ~2.5 min each
-  const segTargetWords = Math.max(Math.round(targetWords / segments.length), 350);
+  // Words per segment — no floor below 500; expansion handles shortfall
+  const segTargetWords = Math.max(Math.round(targetWords / segments.length), 500);
   const total = segments.length;
 
   onProgress?.(`Preparing deep analysis — ${total} section${total > 1 ? "s" : ""} to process…`);
@@ -582,26 +641,35 @@ async function _generateAudioOverviewLocal(
   let sampleRate = 24000;
   let priorUnderstanding = "";
   let priorScriptTail = "";
+  let totalExpansionLoops = 0;
 
   for (let i = 0; i < total; i++) {
     const n = i + 1;
 
-    // Pass 1 — comprehension
+    // Pass 1 — comprehension (reading agent)
     onProgress?.(`Analyzing section ${n} of ${total}…`);
     const understanding = await _buildChunkUnderstanding(segments[i], bookTitle, priorUnderstanding, apiKey);
 
-    // Pass 2 — narration script
+    // Pass 2 — narration script (narrator agent, with learned lessons)
     onProgress?.(`Writing section ${n} of ${total}…`);
-    const segScript = await _buildChunkScript(
-      understanding, bookTitle, i, total, segTargetWords, userPrompt, priorScriptTail, apiKey
+    const rawScript = await _buildChunkScript(
+      understanding, bookTitle, i, total, segTargetWords, userPrompt, priorScriptTail, apiKey,
+      strategy.lessons
     );
-    allScripts.push(segScript.trim());
+
+    // Pass 2b — iterative expansion until within 88% of target
+    const { script: segScript, loopsUsed } = await _expandToTarget(
+      rawScript.trim(), understanding, bookTitle, segTargetWords, apiKey,
+      strategy.maxExpansionLoops, onProgress
+    );
+    totalExpansionLoops += loopsUsed;
+    allScripts.push(segScript);
 
     // Carry forward context for next segment
     priorUnderstanding = understanding.slice(-1000);
     priorScriptTail = segScript.slice(-400);
 
-    // Pass 3 — TTS (already job-based + chunked internally)
+    // Pass 3 — TTS (job-based + chunked internally)
     onProgress?.(`Voicing section ${n} of ${total}…`);
     const segAudio = await synthesizeOverviewAudio(segScript, voiceName, apiKey, onProgress);
 
@@ -615,10 +683,18 @@ async function _generateAudioOverviewLocal(
   const combinedPcm = concatBytes(pcmParts);
   const finalWav = pcmToWav(combinedPcm, sampleRate, 1);
   const durationSeconds = combinedPcm.length / (sampleRate * 2);
+  const fullScript = allScripts.join("\n\n");
+  const actualWords = fullScript.split(/\s+/).filter(Boolean).length;
 
   return {
-    script: allScripts.join("\n\n"),
+    script: fullScript,
     audio: { data: finalWav, mimeType: "audio/wav", durationSeconds },
+    skillMeta: {
+      actualWords,
+      targetWords,
+      expansionLoops: totalExpansionLoops,
+      numSegments: total,
+    },
   };
 }
 

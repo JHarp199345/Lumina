@@ -7,6 +7,7 @@ import {
   Pause,
   Play,
   Sparkles,
+  Star,
   Trash2,
   Wand2,
 } from "lucide-react";
@@ -26,6 +27,7 @@ import {
 } from "@/pipeline/audioOverview";
 import { knowledgeProtocol, knowledgeWorkType } from "@/pipeline/knowledgeGrounding";
 import { buildSourceProfile, fallbackSuggestions, isUsableSourceProfile } from "@/pipeline/sourceProfile";
+import { getSkillMemory, rateSkillRun, type SkillRating, type OverallQuality } from "@/services/skillMemory";
 import SuggestionComposer from "@/components/knowledge/SuggestionComposer";
 import type { AudioArtifact, SourceIntelligenceProfile, SourceProfileSuggestion } from "@/types";
 
@@ -69,6 +71,11 @@ export default function AudioOverview() {
   const [profileBuilding, setProfileBuilding] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [hasKey, setHasKey] = useState(true);
+
+  // Rating UI state
+  const [ratingOpenId, setRatingOpenId] = useState<string | null>(null);
+  const [ratingDraft, setRatingDraft] = useState<Partial<SkillRating>>({});
+  const [ratedIds, setRatedIds] = useState<Set<string>>(new Set());
 
   // The angles offered in the composer. Tailored ones come from the book's
   // Source Intelligence Profile; until that exists we still offer real,
@@ -461,58 +468,193 @@ export default function AudioOverview() {
             <p className="py-4 text-center text-xs text-ink-faint">No overviews yet.</p>
           ) : (
             <div className="mt-2 space-y-1.5">
-              {overviewArtifacts.map((artifact) => (
-                <div
-                  key={artifact.id}
-                  className={`group/artifact rounded-lg border px-2.5 py-2 transition-colors ${
-                    activeAudioId === artifact.id
-                      ? "border-lumina-gold/40 bg-lumina-gold/[0.07]"
-                      : "border-hair bg-ink/[0.02]"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => playArtifact(artifact)}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-hair text-lumina-gold/80 hover:bg-lumina-gold/10"
-                      aria-label={activeAudioId === artifact.id && isPlaying ? "Pause" : "Play"}
-                    >
-                      {activeAudioId === artifact.id && isPlaying ? (
-                        <Pause size={13} />
-                      ) : (
-                        <Play size={13} />
-                      )}
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[12px] font-medium text-ink/85">
-                        {artifact.segmentTitle}
-                      </p>
-                      <p className="text-[10px] text-ink-faint">
-                        ~{artifact.overviewMinutes ?? "?"} min ·{" "}
-                        {(artifact.provider === "local" ? KOKORO_VOICES : GEMINI_VOICES).find(
-                          (v) => v.id === artifact.voiceId
-                        )?.label ?? artifact.voiceId}
-                        {artifact.overviewPrompt ? " · custom" : " · default"}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      {activeAudioId === artifact.id && (
-                        <CheckCircle2 size={14} className="text-lumina-gold/75" />
-                      )}
+              {overviewArtifacts.map((artifact) => {
+                const actualMin = artifact.durationSeconds
+                  ? Math.round(artifact.durationSeconds / 60)
+                  : null;
+                const targetMin = artifact.overviewMinutes ?? null;
+                const durationOk = actualMin !== null && targetMin !== null
+                  ? Math.abs(actualMin - targetMin) <= 2
+                  : true;
+                const isRatingOpen = ratingOpenId === artifact.id;
+                const existingRating = getSkillMemory(artifact.id)?.rating;
+                const hasRating = ratedIds.has(artifact.id) || Boolean(existingRating);
+
+                return (
+                  <div
+                    key={artifact.id}
+                    className={`group/artifact rounded-lg border transition-colors ${
+                      activeAudioId === artifact.id
+                        ? "border-lumina-gold/40 bg-lumina-gold/[0.07]"
+                        : "border-hair bg-ink/[0.02]"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 px-2.5 py-2">
                       <button
-                        onClick={async () => {
-                          removeArtifact(artifact.id);
-                          await storage.deleteAudioArtifact(artifact.id).catch(() => {});
-                        }}
-                        className="rounded p-1 text-ink-faint opacity-0 transition-opacity hover:text-rose-400 group-hover/artifact:opacity-100"
-                        aria-label="Delete overview"
-                        title="Delete"
+                        onClick={() => playArtifact(artifact)}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-hair text-lumina-gold/80 hover:bg-lumina-gold/10"
+                        aria-label={activeAudioId === artifact.id && isPlaying ? "Pause" : "Play"}
                       >
-                        <Trash2 size={12} />
+                        {activeAudioId === artifact.id && isPlaying ? (
+                          <Pause size={13} />
+                        ) : (
+                          <Play size={13} />
+                        )}
                       </button>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[12px] font-medium text-ink/85">
+                          {artifact.segmentTitle}
+                        </p>
+                        <p className={`text-[10px] ${durationOk ? "text-ink-faint" : "text-amber-400/80"}`}>
+                          {actualMin !== null ? `${actualMin} min actual` : `~${targetMin ?? "?"} min`}
+                          {targetMin !== null && actualMin !== null && ` (target ${targetMin})`}
+                          {" · "}
+                          {(artifact.provider === "local" ? KOKORO_VOICES : GEMINI_VOICES).find(
+                            (v) => v.id === artifact.voiceId
+                          )?.label ?? artifact.voiceId}
+                          {artifact.overviewPrompt ? " · custom" : " · default"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {activeAudioId === artifact.id && (
+                          <CheckCircle2 size={14} className="text-lumina-gold/75" />
+                        )}
+                        {/* Rating toggle — only for local (skill-tracked) overviews */}
+                        {artifact.provider === "local" && (
+                          <button
+                            onClick={() => {
+                              if (isRatingOpen) {
+                                setRatingOpenId(null);
+                              } else {
+                                setRatingDraft(existingRating ?? {});
+                                setRatingOpenId(artifact.id);
+                              }
+                            }}
+                            className={`rounded p-1 transition-colors ${
+                              hasRating
+                                ? "text-lumina-gold/60"
+                                : "text-ink-faint opacity-0 group-hover/artifact:opacity-100"
+                            } hover:text-lumina-gold`}
+                            aria-label="Rate overview"
+                            title="Rate this overview"
+                          >
+                            <Star size={12} className={hasRating ? "fill-lumina-gold/40" : ""} />
+                          </button>
+                        )}
+                        <button
+                          onClick={async () => {
+                            removeArtifact(artifact.id);
+                            await storage.deleteAudioArtifact(artifact.id).catch(() => {});
+                          }}
+                          className="rounded p-1 text-ink-faint opacity-0 transition-opacity hover:text-rose-400 group-hover/artifact:opacity-100"
+                          aria-label="Delete overview"
+                          title="Delete"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Inline rating form */}
+                    {isRatingOpen && (
+                      <div className="border-t border-hair px-3 pb-3 pt-2.5">
+                        <p className="mb-2 text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+                          Rate this overview
+                        </p>
+                        <div className="space-y-1.5">
+                          {(
+                            [
+                              { key: "duration", label: "Duration", hint: "How close to target length?" },
+                              { key: "coverage", label: "Coverage", hint: "Did it cover key concepts?" },
+                              { key: "depth",    label: "Depth",    hint: "Were ideas developed fully?" },
+                              { key: "flow",     label: "Flow",     hint: "Did it sound natural?" },
+                            ] as const
+                          ).map(({ key, label, hint }) => (
+                            <div key={key} className="flex items-center gap-2">
+                              <span className="w-16 shrink-0 text-[10px] text-ink-faint" title={hint}>
+                                {label}
+                              </span>
+                              <div className="flex gap-0.5">
+                                {[1, 2, 3, 4, 5].map((v) => (
+                                  <button
+                                    key={v}
+                                    onClick={() => setRatingDraft((d) => ({ ...d, [key]: v }))}
+                                    className={`h-4 w-4 rounded-sm transition-colors ${
+                                      (ratingDraft[key] ?? 0) >= v
+                                        ? "bg-lumina-gold/70"
+                                        : "bg-ink/[0.08] hover:bg-lumina-gold/30"
+                                    }`}
+                                    aria-label={`${label} ${v}/5`}
+                                  />
+                                ))}
+                              </div>
+                              <span className="text-[10px] text-ink-faint">
+                                {ratingDraft[key] ? `${ratingDraft[key]}/5` : "—"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Overall quality */}
+                        <div className="mt-2 flex gap-1">
+                          {(["poor", "ok", "good", "excellent"] as OverallQuality[]).map((q) => (
+                            <button
+                              key={q}
+                              onClick={() => setRatingDraft((d) => ({ ...d, overall: q }))}
+                              className={`flex-1 rounded border py-1 text-[10px] capitalize transition-colors ${
+                                ratingDraft.overall === q
+                                  ? "border-lumina-gold/50 bg-lumina-gold/10 text-lumina-gold"
+                                  : "border-hair text-ink-faint hover:text-ink-soft"
+                              }`}
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Notes */}
+                        <input
+                          type="text"
+                          value={ratingDraft.notes ?? ""}
+                          onChange={(e) => setRatingDraft((d) => ({ ...d, notes: e.target.value }))}
+                          placeholder="Notes — what was good or off? (optional)"
+                          className="mt-2 w-full rounded border border-hair bg-ink/[0.04] px-2 py-1.5 text-[11px] text-ink-soft placeholder-ink-faint/50 focus:outline-none"
+                        />
+
+                        <div className="mt-2 flex gap-1.5">
+                          <button
+                            onClick={() => {
+                              if (!ratingDraft.overall) return;
+                              const rating: SkillRating = {
+                                duration: ratingDraft.duration ?? 3,
+                                coverage: ratingDraft.coverage ?? 3,
+                                depth:    ratingDraft.depth    ?? 3,
+                                flow:     ratingDraft.flow     ?? 3,
+                                notes:    ratingDraft.notes    ?? "",
+                                overall:  ratingDraft.overall,
+                                ratedAt:  Date.now(),
+                              };
+                              rateSkillRun(artifact.id, rating);
+                              setRatedIds((prev) => new Set([...prev, artifact.id]));
+                              setRatingOpenId(null);
+                            }}
+                            disabled={!ratingDraft.overall}
+                            className="flex-1 rounded border border-lumina-gold/30 bg-lumina-gold/10 py-1 text-[10px] text-lumina-gold/90 transition-colors hover:bg-lumina-gold/15 disabled:cursor-default disabled:opacity-40"
+                          >
+                            Save rating
+                          </button>
+                          <button
+                            onClick={() => setRatingOpenId(null)}
+                            className="rounded border border-hair px-2 py-1 text-[10px] text-ink-faint hover:text-ink-soft"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

@@ -106,56 +106,40 @@ async function _callOdysseus(
   prompt: string,
   options: LLMGenerateOptions
 ): Promise<string> {
-  const base = getOdysseusUrl();
-  const url = `${base}/api/agents/${encodeURIComponent(agent)}/run`;
-
+  const base = getOdysseusUrl().replace(/\/$/, "");
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getOdysseusToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const body: Record<string, unknown> = {
     messages: [{ role: "user", content: prompt }],
-    stream: true,  // streaming keeps the tunnel alive; each token resets Cloudflare's idle timer
   };
   if (options.temperature !== undefined) body.temperature = options.temperature;
   if (options.maxTokens !== undefined) body.max_tokens = options.maxTokens;
 
-  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Odysseus ${res.status}: ${text}`);
+  // POST to queue endpoint — returns job_id immediately, avoids Cloudflare 100s timeout
+  const startRes = await fetch(
+    `${base}/api/agents/${encodeURIComponent(agent)}/queue`,
+    { method: "POST", headers, body: JSON.stringify(body) }
+  );
+  if (!startRes.ok) {
+    const text = await startRes.text().catch(() => "");
+    throw new Error(`Odysseus ${startRes.status}: ${text}`);
   }
+  const { job_id } = await startRes.json() as { job_id: string };
 
-  // Read SSE stream: data: {"delta": "..."} … data: [DONE]
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error("Odysseus: no response body");
-
-  const decoder = new TextDecoder();
-  let content = "";
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";   // keep incomplete last line for next chunk
-
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const payload = line.slice(6).trim();
-      if (payload === "[DONE]") return content;
-      try {
-        const parsed = JSON.parse(payload) as { delta?: string; content?: string };
-        content += parsed.delta ?? parsed.content ?? "";
-      } catch {
-        // malformed chunk — skip
-      }
-    }
+  // Poll up to 30 min (600 × 3 s)
+  const pollHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  for (let i = 0; i < 600; i++) {
+    await new Promise<void>((r) => setTimeout(r, 3000));
+    const pollRes = await fetch(`${base}/api/agents/jobs/${job_id}`, { headers: pollHeaders });
+    if (!pollRes.ok) continue;
+    const job = await pollRes.json() as { status: string; content?: string; error?: string };
+    if (job.status === "done") return job.content ?? "";
+    if (job.status === "error") throw new Error(`Odysseus LLM failed: ${job.error ?? "unknown"}`);
+    // status === "pending" | "running" → keep polling
   }
-
-  return content;
+  throw new Error("Odysseus LLM job timed out (30 min)");
 }
 
 // ── Gemini fallback ────────────────────────────────────────────────────────────

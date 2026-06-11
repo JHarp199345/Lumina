@@ -11,6 +11,7 @@ import {
   type OverviewScope,
 } from "@/pipeline/audioOverview";
 import { buildSourceProfile, isUsableSourceProfile } from "@/pipeline/sourceProfile";
+import { recordSkillRun } from "@/services/skillMemory";
 import { storage } from "@/storage";
 import type { AudioArtifact, BookStructure, SemanticMap, SourceIntelligenceProfile } from "@/types";
 
@@ -52,7 +53,7 @@ export async function runAudioOverviewJob(
   if (params.isStale()) return null;
 
   const effectivePrompt = params.userPrompt.trim();
-  const { script, audio } = await generateAudioOverview({
+  const { script, audio, skillMeta } = await generateAudioOverview({
     scope: params.scope,
     structure: params.structure,
     semanticMap: params.semanticMap,
@@ -95,5 +96,15 @@ export async function runAudioOverviewJob(
   };
   const filePath = await storage.saveAudioArtifact(meta, audio.data);
   if (params.isStale()) return null;
+
+  // Record skill run for local generations so future runs can learn from this one
+  if (skillMeta && getProvider() === "odysseus") {
+    recordSkillRun(
+      id,
+      { targetMinutes: params.minutes, targetWords: skillMeta.targetWords, numSegments: skillMeta.numSegments },
+      { actualMinutes: audio.durationSeconds / 60, actualWords: skillMeta.actualWords, expansionLoops: skillMeta.expansionLoops }
+    );
+  }
+
   return { ...meta, filePath };
 }
