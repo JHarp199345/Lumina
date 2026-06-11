@@ -6,7 +6,10 @@
  */
 
 import { llmGenerateJSON } from "@/api/llmClient";
-import { lookupExternalClassification } from "@/pipeline/bookClassificationLookup";
+import {
+  lookupExternalClassification,
+  titleSuggestsFiction,
+} from "@/pipeline/bookClassificationLookup";
 import type {
   AnalysisProtocol,
   AnalysisProgressReporter,
@@ -184,7 +187,25 @@ export async function resolveWorkProtocol(
   }
 
   const heuristic = heuristicProtocol(structure);
-  if (heuristic && heuristic.protocol === "narrative" && !external) return heuristic;
+  if (heuristic?.protocol === "narrative") {
+    if (!external || external.confidence < 0.72) {
+      return { ...heuristic, classificationSource: external ? "heuristic+catalog-weak" : "heuristic" };
+    }
+  }
+  if (titleSuggestsFiction(structure.title) && (!external || external.confidence < 0.72)) {
+    const result: WorkProtocolResult = {
+      protocol: "narrative",
+      workType: "fiction",
+      domain: "general",
+      domainStyleHint: "",
+      classificationSource: "title-fiction-hint",
+      classificationEvidence: [`Title pattern: ${structure.title}`],
+    };
+    diagnosticInfo("work_protocol.title_hint", "Fiction from title pattern (trilogy/saga/novel)", {
+      title: structure.title,
+    });
+    return result;
+  }
 
   const sampleChapters = structure.chapters
     .filter((ch) => (ch.rawText || "").trim().length > 100)
@@ -227,7 +248,7 @@ Rules:
       workType?: WorkType;
       structureKind?: string;
       domain?: ExpositoryDomain;
-    }>("council", prompt, { temperature: 0.2, maxTokens: 400, geminiKey: apiKey });
+    }>("reading", prompt, { temperature: 0.2, maxTokens: 400, geminiKey: apiKey });
 
     const workType = parsed.workType ?? "other";
     const isMemoirNarrative = workType === "memoir" && parsed.structureKind === "narrative";
@@ -277,16 +298,31 @@ Rules:
       workType: result.workType,
     });
     return result;
-  } catch {
+  } catch (err) {
+    diagnosticInfo("work_protocol.llm_failed", "Classification LLM failed — using fallbacks", {
+      title: structure.title,
+      error: err instanceof Error ? err.message : String(err),
+    });
     if (external && external.confidence >= 0.6) return fromExternal(external);
     if (heuristic) return { ...heuristic, classificationSource: "heuristic" };
+    if (titleSuggestsFiction(structure.title)) {
+      return {
+        protocol: "narrative",
+        workType: "fiction",
+        domain: "general",
+        domainStyleHint: "",
+        classificationSource: "fallback-title-fiction",
+      };
+    }
 
-    const scholarlyToc = /introduction|chapter\s+\d|appendix|conclusion/i.test(
-      structure.chapters.map((ch) => ch.title).join(" ")
-    );
-    if (scholarlyToc) {
+    const chapterTitles = structure.chapters.map((ch) => ch.title).join(" ");
+    const scholarlyToc = /introduction|appendix|methods|bibliography|index/i.test(chapterTitles);
+    const numberedChaptersOnly =
+      /chapter\s+\d/i.test(chapterTitles) &&
+      !/introduction|appendix|methods/i.test(chapterTitles);
+    if (scholarlyToc && !numberedChaptersOnly) {
       const domain = inferDomainFromSignals(structure.title, "");
-      diagnosticInfo("work_protocol.fallback", "Defaulting ambiguous scholarly TOC to expository", {
+      diagnosticInfo("work_protocol.fallback", "Scholarly TOC → expository", {
         title: structure.title,
       });
       return {

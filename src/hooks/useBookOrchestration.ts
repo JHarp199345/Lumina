@@ -370,7 +370,49 @@ export function useBookOrchestration() {
 
         const isExpository = baseSemanticMap.analysisProtocol === "expository";
 
-        // Step 2 — visual lore (fiction only)
+        // Step 2 — source profile (early — before visual pipeline; uses semantic map only)
+        try {
+          const apiKey = await storage.loadApiKey("lumina_google_ai_key");
+          const canBuild = apiKey || getProvider() === "odysseus";
+          const bookId = String(baseSemanticMap.bookId);
+          const existing = await storage.loadSourceProfile(bookId).catch(() => null);
+          if (canBuild && !existing) {
+            await trackStep(
+              wfId,
+              {
+                name: "source-profile",
+                goal: "Build Source Intelligence Profile for Audio Overview prompts",
+                agent: "reading",
+                skill: "source-intelligence-profile",
+              },
+              async () => {
+                const { buildSourceProfile } = await import("@/pipeline/sourceProfile");
+                const profile = await buildSourceProfile(structure, baseSemanticMap, apiKey ?? "");
+                await storage.saveSourceProfile(profile).catch(() => {});
+                return profile;
+              },
+              () => ({
+                metrics: { book_id: bookId, chapters: structure.chapters.length },
+                goal_achieved: 1,
+                unblocked_next: true,
+              }),
+              (err) => ({
+                metrics: {
+                  book_id: bookId,
+                  error: err instanceof Error ? err.message : String(err),
+                },
+                goal_achieved: 0,
+                unblocked_next: true,
+              })
+            );
+          }
+        } catch (err) {
+          diagnosticWarn("source_profile.prewarm_failed", "SIP pre-warm failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        // Step 3 — visual lore (fiction only)
         const visualLore = isExpository
           ? null
           : await trackStep(
@@ -378,7 +420,7 @@ export function useBookOrchestration() {
               {
                 name: "visual-lore",
                 goal: "Build character and location dossier for visual consistency",
-                agent: "lore",
+                agent: "visual_analyst",
                 skill: "visual-lore-dossier",
               },
               () =>
@@ -388,11 +430,13 @@ export function useBookOrchestration() {
                   onProgress: reportProgress,
                 }),
               (lore) => {
-                const chars = (lore as { characters?: unknown[] })?.characters?.length ?? 0;
-                const locs = (lore as { locations?: unknown[] })?.locations?.length ?? 0;
+                const entities =
+                  (lore as { entities?: { category?: string }[] } | null | undefined)?.entities ?? [];
+                const chars = entities.filter((e) => e.category === "character").length;
+                const locs = entities.filter((e) => e.category === "place").length;
                 return {
-                  metrics: { characters: chars, locations: locs },
-                  goal_achieved: chars + locs > 0 ? 1 : 0.5,
+                  metrics: { characters: chars, locations: locs, entities: entities.length },
+                  goal_achieved: chars > 0 && locs > 0 ? 1 : entities.length > 0 ? 0.75 : 0.5,
                   unblocked_next: true,
                 };
               }
@@ -403,7 +447,7 @@ export function useBookOrchestration() {
           : baseSemanticMap;
         const styleSeed = getStyleSeedById(styleSeedId);
 
-        // Step 3 — visual director briefs (fiction only)
+        // Step 4 — visual director briefs (fiction only)
         const directedScenes =
           styleSeed && !isExpository
             ? await trackStep(
@@ -411,7 +455,7 @@ export function useBookOrchestration() {
                 {
                   name: "visual-direction",
                   goal: "Write per-scene visual director briefs for image generation",
-                  agent: "director",
+                  agent: "visual_analyst",
                   skill: "scene-visual-direction",
                 },
                 () =>
@@ -439,47 +483,6 @@ export function useBookOrchestration() {
 
         setActiveSemanticMap(semanticMap);
 
-        // Pre-warm Source Intelligence Profile — best-effort, must finish before workflow complete
-        try {
-          const apiKey = await storage.loadApiKey("lumina_google_ai_key");
-          const canBuild = apiKey || getProvider() === "odysseus";
-          const existing = await storage.loadSourceProfile(semanticMap.bookId).catch(() => null);
-          if (canBuild && !existing) {
-            await trackStep(
-              wfId,
-              {
-                name: "source-profile",
-                goal: "Build Source Intelligence Profile for Audio Overview prompts",
-                agent: "reader",
-                skill: "source-intelligence-profile",
-              },
-              async () => {
-                const { buildSourceProfile } = await import("@/pipeline/sourceProfile");
-                const profile = await buildSourceProfile(structure, semanticMap, apiKey ?? "");
-                await storage.saveSourceProfile(profile).catch(() => {});
-                return profile;
-              },
-              () => ({
-                metrics: { book_id: semanticMap.bookId, chapters: structure.chapters.length },
-                goal_achieved: 1,
-                unblocked_next: true,
-              }),
-              (err) => ({
-                metrics: {
-                  book_id: semanticMap.bookId,
-                  error: err instanceof Error ? err.message : String(err),
-                },
-                goal_achieved: 0,
-                unblocked_next: true,
-              })
-            );
-          }
-        } catch (err) {
-          diagnosticWarn("source_profile.prewarm_failed", "SIP pre-warm failed", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-
         console.log(
           `[Orchestration] Analysis complete: arc=${semanticMap.arcShape}, ` +
             `scenes=${semanticMap.scenes.length}, golden=${semanticMap.goldenNumber}`
@@ -506,7 +509,7 @@ export function useBookOrchestration() {
             {
               name: "opening-image",
               goal: "Generate opening scene image via ComfyUI",
-              agent: "image-gen",
+              agent: "image_director",
               skill: "scene-image-generation",
             },
             () => _ensureOpeningImage(semanticMap, styleSeedId, semanticBookId),

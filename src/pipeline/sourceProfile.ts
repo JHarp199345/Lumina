@@ -401,7 +401,7 @@ export function defaultSpineForType(workType: WorkType, minutes: number, targetW
 // ─── Gemini JSON helper ─────────────────────────────────────────────────────────
 
 async function geminiJson(prompt: string, apiKey: string): Promise<RawProfile> {
-  const text = await llmGenerate("retrieval", prompt, {
+  const text = await llmGenerate("reading", prompt, {
     temperature: 0.6,
     maxTokens: 4096,
     geminiKey: apiKey,

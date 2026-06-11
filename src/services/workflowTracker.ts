@@ -11,6 +11,7 @@
 
 import { getOdysseusUrl, getOdysseusToken, getProvider } from "@/api/llmClient";
 import { diagnosticWarn } from "@/utils/diagnostics";
+import { httpHeaderSafe } from "@/utils/httpHeaders";
 
 // ── Active run context (read by llmClient for agent queue headers) ─────────────
 
@@ -42,15 +43,15 @@ export function getWorkflowAgentHeaders(
   if (!_active) return {};
   const h: Record<string, string> = {};
   if (_active.id) h["X-Workflow-Run-Id"] = _active.id;
-  if (_active.type) h["X-Lumina-Workflow-Type"] = _active.type;
-  if (_active.label) h["X-Lumina-Workflow-Label"] = _active.label;
-  if (_active.taskGoal) h["X-Lumina-Workflow-Goal"] = _active.taskGoal;
+  if (_active.type) h["X-Lumina-Workflow-Type"] = httpHeaderSafe(_active.type);
+  if (_active.label) h["X-Lumina-Workflow-Label"] = httpHeaderSafe(_active.label);
+  if (_active.taskGoal) h["X-Lumina-Workflow-Goal"] = httpHeaderSafe(_active.taskGoal);
   const stepName = step?.name ?? _active.stepName ?? agent;
   const stepGoal = step?.goal ?? _active.stepGoal;
   const skill = step?.skill ?? _active.skill;
-  if (stepName) h["X-Workflow-Step-Name"] = stepName;
-  if (stepGoal) h["X-Workflow-Step-Goal"] = stepGoal;
-  if (skill) h["X-Workflow-Step-Skill"] = skill;
+  if (stepName) h["X-Workflow-Step-Name"] = httpHeaderSafe(stepName);
+  if (stepGoal) h["X-Workflow-Step-Goal"] = httpHeaderSafe(stepGoal);
+  if (skill) h["X-Workflow-Step-Skill"] = httpHeaderSafe(skill);
   return h;
 }
 

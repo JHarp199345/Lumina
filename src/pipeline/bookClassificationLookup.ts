@@ -22,7 +22,11 @@ interface OpenLibraryDoc {
 }
 
 const FICTION_SUBJECT_RE =
-  /\b(fiction|novel|novella|short\s+stories|fairy\s+tales?|science\s+fiction|sci[- ]?fi|fantasy|romance|mystery|thriller|horror|detective|adventure\s+stories|drama|literature|literary|comics?|graphic\s+novels?|space\s+opera|mythology|legends?|epic\s+poetry)\b/i;
+  /\b(fiction|novel|novella|short\s+stories|fairy\s+tales?|science\s+fiction|sci[- ]?fi|fantasy|romance|mystery|thriller|horror|detective|adventure\s+stories|drama|literature|literary|comics?|graphic\s+novels?|space\s+opera|cyberpunk|dystopias?|dystopian|grim\s*dark|mythology|legends?|epic\s+poetry|hard\s+science\s+fiction|steampunk)\b/i;
+
+/** Title shapes that strongly suggest fiction even when catalog lookup fails. */
+const FICTION_TITLE_RE =
+  /\b(trilogy|omnibus|saga|chronicles|cycle|book\s+one|book\s+1|a\s+novel|novels?)\b/i;
 
 // Known fiction franchises / shared-universe markers. Library catalogs often tag
 // these works WITHOUT the literal word "fiction" (e.g. only "Warhammer 40K"), so we
@@ -151,24 +155,37 @@ async function lookupByTitleAndAuthor(title: string, author: string): Promise<Ex
   const authorLine = cleanAuthor(author);
   if (!title.trim()) return null;
 
-  const docs = await fetchOpenLibraryDocs({
-    title: cleanTitle(title),
-    ...(authorLine ? { author: authorLine } : {}),
-  });
+  const variants = titleSearchVariants(title);
+  let docs: OpenLibraryDoc[] = [];
 
-  if (docs.length === 0 && authorLine) {
-    const fallback = await fetchOpenLibraryDocs({ title: cleanTitle(title) });
-    docs.push(...fallback);
+  for (const variant of variants) {
+    const batch = await fetchOpenLibraryDocs({
+      title: variant,
+      ...(authorLine ? { author: authorLine } : {}),
+    });
+    docs.push(...batch);
+    if (batch.length > 0) break;
+  }
+
+  if (docs.length === 0) {
+    for (const variant of variants) {
+      const batch = await fetchOpenLibraryDocs({ title: variant });
+      docs.push(...batch);
+      if (batch.length > 0) break;
+    }
   }
 
   let best: { doc: OpenLibraryDoc; score: number } | null = null;
   for (const doc of docs) {
     if (!doc.subject?.length) continue;
-    const score = titleOverlap(title, doc.title ?? "");
+    const score = Math.max(
+      ...variants.map((v) => titleOverlap(v, doc.title ?? "")),
+      titleOverlap(title, doc.title ?? "")
+    );
     if (!best || score > best.score) best = { doc, score };
   }
 
-  if (!best || best.score < 0.45) return null;
+  if (!best || best.score < 0.4) return null;
 
   const classified = classifySubjects(best.doc.subject ?? []);
   if (classified.confidence < 0.65) return null;
@@ -195,7 +212,7 @@ async function lookupByAuthorProfile(author: string): Promise<ExternalClassifica
   if (allSubjects.length === 0) return null;
 
   const classified = classifySubjects([...new Set(allSubjects)]);
-  if (classified.protocol !== "expository" || classified.confidence < 0.7) return null;
+  if (classified.confidence < 0.7) return null;
 
   return {
     ...classified,
@@ -210,6 +227,28 @@ function cleanTitle(title: string): string {
     .replace(/\s*[\[(].*?[\])]\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Strip collection/series suffixes so "Altered Carbon Trilogy" → "Altered Carbon". */
+function titleSearchVariants(title: string): string[] {
+  const cleaned = cleanTitle(title);
+  const variants = [cleaned];
+  const stripped = cleaned
+    .replace(/\b(the\s+)?(complete|full|entire)\s+/gi, "")
+    .replace(
+      /\b(trilogy|omnibus|collection|box\s*set|series|saga|anthology|compendium|edition)\b/gi,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+  if (stripped && stripped !== cleaned && stripped.length >= 4) {
+    variants.push(stripped);
+  }
+  return [...new Set(variants)];
+}
+
+export function titleSuggestsFiction(title: string): boolean {
+  return FICTION_TITLE_RE.test(title);
 }
 
 function cleanAuthor(author: string): string {

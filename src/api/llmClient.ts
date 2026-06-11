@@ -198,10 +198,10 @@ async function _callOdysseus(
     }
   }
 
-  // Poll up to 30 min (600 × 3 s)
+  // Poll up to 30 min — check immediately, then every 3s
   const pollHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   for (let i = 0; i < 600; i++) {
-    await new Promise<void>((r) => setTimeout(r, 3000));
+    if (i > 0) await new Promise<void>((r) => setTimeout(r, 3000));
     const pollRes = await fetch(`${base}/api/agents/jobs/${job_id}`, { headers: pollHeaders });
     if (!pollRes.ok) continue;
     const job = await pollRes.json() as { status: string; content?: string; error?: string };
