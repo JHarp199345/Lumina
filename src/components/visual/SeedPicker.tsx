@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 import { STYLE_SEEDS } from "@/data/styleSeeds";
 import { getDisplayThumb } from "@/utils/styleThumbs";
 import type { StyleSeedId } from "@/types";
@@ -8,6 +8,7 @@ import type { StyleSeedId } from "@/types";
 interface SeedPickerProps {
   onSelect: (seedId: StyleSeedId) => void;
   bookTitle: string;
+  onCancel?: () => void;
 }
 
 const STYLE_GROUPS: { label: string; ids: Set<string> }[] = [
@@ -52,7 +53,7 @@ function pickThumbs(): Record<string, string> {
   return map;
 }
 
-export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
+export default function SeedPicker({ onSelect, bookTitle, onCancel }: SeedPickerProps) {
   const [selected, setSelected] = useState<StyleSeedId | null>(null);
   // Pick randomly (or pinned) once per mount — re-pick if a new image is generated
   const [realThumbs, setRealThumbs] = useState<Record<string, string>>(pickThumbs);
@@ -70,6 +71,16 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col"
     >
+      {onCancel && (
+        <button
+          onClick={onCancel}
+          className="absolute right-5 top-5 z-10 flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/[0.025] text-white/45 transition-colors hover:border-lumina-gold/35 hover:bg-white/[0.06] hover:text-lumina-gold/85"
+          aria-label="Close visual style picker"
+        >
+          <X size={18} />
+        </button>
+      )}
+
       {/* ── Header ── pinned, centered */}
       <motion.div
         initial={{ opacity: 0, y: -12 }}

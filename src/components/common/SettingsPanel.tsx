@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { animate, motion, AnimatePresence, useMotionValue } from "framer-motion";
 import { X, Key, Image, Type, Trash2, RefreshCw, Palette, FolderOpen, Server } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useBookStore } from "@/store/bookStore";
@@ -316,68 +316,48 @@ function StyleThumbnailsSection() {
   );
 }
 
-function ReIngestSlider({ onConfirm, busy }: { onConfirm: () => void; busy: boolean }) {
+function ReIngestSlider({ onConfirm, busy }: { onConfirm: () => void | Promise<void>; busy: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const draggingRef = useRef(false);
-  const pctRef = useRef(0);
-  const [pct, setPct] = useState(0);
-  const CONFIRM_AT = 90;
+  const x = useMotionValue(0);
+  const [maxX, setMaxX] = useState(0);
+  const [confirmed, setConfirmed] = useState(false);
+  const HANDLE = 40;
+  const PADDING = 4;
 
-  const setFromPointer = (clientX: number) => {
-    const rect = trackRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const p = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
-    pctRef.current = p;
-    setPct(p);
-  };
+  useEffect(() => {
+    const measure = () => {
+      if (!trackRef.current) return;
+      setMaxX(Math.max(0, trackRef.current.offsetWidth - HANDLE - PADDING * 2));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
 
-  const onPointerDown = (e: React.PointerEvent) => {
+  useEffect(() => {
     if (busy) return;
-    e.preventDefault();
-    e.stopPropagation();
-    draggingRef.current = true;
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-    setFromPointer(e.clientX);
-  };
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!draggingRef.current) return;
-    setFromPointer(e.clientX);
-  };
-  const onPointerUp = (e: React.PointerEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!draggingRef.current) return;
-    setFromPointer(e.clientX);
-    draggingRef.current = false;
-    if (pctRef.current >= CONFIRM_AT) onConfirm();
-    pctRef.current = 0;
-    setPct(0);
-  };
+    setConfirmed(false);
+    animate(x, 0, { type: "spring", stiffness: 420, damping: 38 });
+  }, [busy, x]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (busy) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      onConfirm();
+      setConfirmed(true);
+      void onConfirm();
     }
   };
 
-  const fill = busy ? 100 : pct;
   const label = busy
     ? "Re-ingesting…"
-    : pct >= CONFIRM_AT
-      ? "Release to confirm"
-      : pct > 4
-        ? "Keep sliding…"
-        : "Slide to Re-Ingest";
+    : confirmed
+      ? "Starting re-ingest…"
+      : "Slide to Re-Ingest";
 
   return (
     <div
       ref={trackRef}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
       onKeyDown={onKeyDown}
       tabIndex={0}
       className="relative h-11 w-full select-none overflow-hidden rounded-lg border border-lumina-gold/30 bg-ink/[0.05] touch-none"
@@ -387,25 +367,38 @@ function ReIngestSlider({ onConfirm, busy }: { onConfirm: () => void; busy: bool
     >
       {/* fill */}
       <div
-        className="absolute inset-y-0 left-0 bg-lumina-gold/18 transition-[width] duration-75"
-        style={{ width: `${fill}%` }}
+        className="absolute inset-y-0 left-0 bg-lumina-gold/18 transition-[width] duration-200"
+        style={{ width: busy || confirmed ? "100%" : `${Math.min(100, maxX ? (x.get() / maxX) * 100 : 0)}%` }}
       />
       {/* label */}
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <span className="flex items-center gap-1.5 text-xs font-medium text-lumina-gold/90">
           {busy && <RefreshCw size={12} className="animate-spin" />}
           {label}
-          {!busy && pct <= 4 && <span className="text-lumina-gold/55">→</span>}
+          {!busy && !confirmed && <span className="text-lumina-gold/55">→</span>}
         </span>
       </div>
       {/* knob */}
       {!busy && (
-        <div
-          className="pointer-events-none absolute top-1 bottom-1 flex w-9 items-center justify-center rounded-md border border-lumina-gold/40 bg-lumina-gold/25"
-          style={{ left: `calc(${fill}% - ${fill > 0 ? 38 : 2}px)` }}
+        <motion.div
+          drag={confirmed ? false : "x"}
+          dragConstraints={{ left: 0, right: maxX }}
+          dragElastic={0}
+          dragMomentum={false}
+          style={{ x, left: PADDING, width: HANDLE }}
+          onDragEnd={() => {
+            if (x.get() >= maxX - 6) {
+              setConfirmed(true);
+              animate(x, maxX, { type: "spring", stiffness: 420, damping: 38 });
+              void onConfirm();
+            } else {
+              animate(x, 0, { type: "spring", stiffness: 420, damping: 38 });
+            }
+          }}
+          className="absolute top-1 bottom-1 flex cursor-grab items-center justify-center rounded-md border border-lumina-gold/40 bg-lumina-gold/25 active:cursor-grabbing"
         >
           <RefreshCw size={13} className="text-lumina-gold/90" />
-        </div>
+        </motion.div>
       )}
     </div>
   );

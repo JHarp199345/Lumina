@@ -51,6 +51,7 @@ function App() {
     analysisProgressDetail,
     setAnalysisProgress,
     setAnalysisProgressDetail,
+    setActiveStyleSeed,
   } = useBookStore();
   const [showOnboarding, setShowOnboarding] = useState(!hasCompletedOnboarding);
   const { importEpub, importEpubFile, loadLibrary, openBook } = useEpubImport();
@@ -139,7 +140,9 @@ function App() {
 
   const [pendingSeedSelection, setPendingSeedSelection] = useState<{
     structure: BookStructure;
+    forceReanalyze?: boolean;
   } | null>(null);
+  const [forceStylePickerForAnalysis, setForceStylePickerForAnalysis] = useState(false);
 
   // ── Analysis-from-open-book trigger ─────────────────────────────────────────
   // VisualPanel sets analysisRequested when the user clicks "Analyze This Book".
@@ -214,14 +217,17 @@ function App() {
 
         setAnalysisRequested(false);
 
-        if (activeStyleSeed) {
+        if (activeStyleSeed && !forceStylePickerForAnalysis) {
           if (useBookStore.getState().activeSemanticMap) {
             await reAnalyzeBook(structure);
           } else {
             await startOrchestration(structure, activeStyleSeed);
           }
         } else {
-          setPendingSeedSelection({ structure });
+          setPendingSeedSelection({
+            structure,
+            forceReanalyze: Boolean(useBookStore.getState().activeSemanticMap),
+          });
         }
       } catch (err) {
         console.error("[Lumina Analysis] Failed to start:", err);
@@ -235,6 +241,8 @@ function App() {
             ? `Analysis failed: ${err.message}`
             : "Analysis failed before it could start."
         );
+      } finally {
+        setForceStylePickerForAnalysis(false);
       }
     };
 
@@ -248,6 +256,7 @@ function App() {
     activeBook,
     activeStructure,
     activeStyleSeed,
+    forceStylePickerForAnalysis,
     setAnalysisRequested,
     setActiveStructure,
     startOrchestration,
@@ -349,11 +358,17 @@ function App() {
 
   const handleSeedSelected = async (seedId: StyleSeedId) => {
     if (!pendingSeedSelection) return;
-    const { structure } = pendingSeedSelection;
+    const { structure, forceReanalyze } = pendingSeedSelection;
     setPendingSeedSelection(null);
     try {
       setImportFailed(false);
-      await startOrchestration(structure, seedId);
+      if (forceReanalyze && activeBook) {
+        setActiveStyleSeed(seedId);
+        await storage.saveBookStyleSeed(activeBook.id, seedId).catch(() => {});
+        await reAnalyzeBook(structure);
+      } else {
+        await startOrchestration(structure, seedId);
+      }
     } catch (err) {
       console.error("[Lumina Analysis] Failed after style selection:", err);
       diagnosticError("analysis.seed_selection.failed", "Analysis failed after style selection", {
@@ -448,6 +463,10 @@ function App() {
           <SeedPicker
             bookTitle={activeBook.title}
             onSelect={handleSeedSelected}
+            onCancel={() => {
+              setPendingSeedSelection(null);
+              setForceStylePickerForAnalysis(false);
+            }}
           />
         )}
       </AnimatePresence>
@@ -488,7 +507,11 @@ function App() {
           analysisPhase={analysisProgressDetail?.phase}
           onVisitPassage={visitPassage}
           onGenerateScene={generateForScene}
-          onAnalyze={() => setAnalysisRequested(true)}
+          onAnalyze={() => {
+            closeGallery();
+            setForceStylePickerForAnalysis(true);
+            setAnalysisRequested(true);
+          }}
           onRegenerateAll={regenerateAllImages}
           onClose={closeGallery}
         />
