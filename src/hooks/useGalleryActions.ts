@@ -3,6 +3,8 @@ import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useUiStore } from "@/store/uiStore";
 import { generateForVisualSlot } from "@/services/slotImageGeneration";
+import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 
 export function useGalleryActions() {
@@ -35,16 +37,74 @@ export function useGalleryActions() {
   }, []);
 
   const generateForScene = useCallback(async (sceneId: string) => {
-    const { activeBook, activeSemanticMap } = useBookStore.getState();
+    const { activeBook, activeSemanticMap, activeStructure } = useBookStore.getState();
     if (!activeBook || !activeSemanticMap) return;
 
     const scene = activeSemanticMap.scenes.find((s) => s.id === sceneId);
     if (!scene) return;
 
-    const result = await generateForVisualSlot({
-      scene,
-      bookId: activeBook.id,
-      force: true,
+    const chapters = activeStructure?.chapters ?? EMPTY_CHAPTERS;
+    const wordPosition = computeSceneWordPosition(scene, chapters);
+    const visualSlotKey = visualSlotKeyForScene(scene, chapters);
+    const { startWorkflow, trackStep, completeWorkflow } = await import("@/services/workflowTracker");
+    const workflowId = await startWorkflow(
+      "manual-image-generation",
+      `${activeBook.title} — manual scene image`,
+      {
+        book_id: activeBook.id,
+        book_title: activeBook.title,
+        scene_id: scene.id,
+        visual_slot_key: visualSlotKey,
+        word_position: wordPosition,
+      },
+      "Generate one user-requested visual story image"
+    );
+
+    const result = await trackStep(
+      workflowId,
+      {
+        name: "manual-scene-image",
+        goal: "Generate and persist the requested visual slot image",
+        agent: "image_director",
+        skill: "scene-image-generation",
+      },
+      () =>
+        generateForVisualSlot({
+          scene,
+          bookId: activeBook.id,
+          force: true,
+        }),
+      (outcome) => ({
+        metrics: {
+          ok: outcome.ok,
+          reason: outcome.ok ? "generated" : outcome.reason,
+          scene_id: scene.id,
+          visual_slot_key: visualSlotKey,
+          word_position: wordPosition,
+          image_id: outcome.ok ? outcome.image.id : null,
+        },
+        goal_achieved: outcome.ok ? 1 : outcome.reason === "cached" ? 0.75 : 0,
+        unblocked_next: outcome.ok || outcome.reason === "cached",
+      }),
+      (err) => ({
+        metrics: {
+          scene_id: scene.id,
+          visual_slot_key: visualSlotKey,
+          word_position: wordPosition,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        goal_achieved: 0,
+        unblocked_next: true,
+      })
+    );
+
+    await completeWorkflow(workflowId, {
+      outcome_metrics: {
+        scene_id: scene.id,
+        visual_slot_key: visualSlotKey,
+        ok: result.ok,
+        reason: result.ok ? "generated" : result.reason,
+      },
     });
 
     if (!result.ok && result.reason === "error") {

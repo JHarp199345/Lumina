@@ -68,9 +68,11 @@ import {
   dbSaveSemanticMap,
   dbLoadSemanticMap,
   dbDeleteSemanticMap,
+  dbDeleteSemanticMapsForBookPrefix,
   dbSaveSourceProfile,
   dbLoadSourceProfile,
   dbDeleteSourceProfile,
+  dbDeleteSourceProfilesForBookPrefix,
   dbSaveStudyGuide,
   dbLoadStudyGuide,
   dbDeleteStudyGuide,
@@ -465,8 +467,8 @@ export class TauriStorageAdapter implements StorageAdapter {
     await this._saveArchiveEntry(bookId, book.title, book.author, counts);
 
     // 2. Clear the active generated artifacts (book + user data stay).
-    await this.deleteSemanticMap(bookId).catch(() => {});
-    await this.deleteSourceProfile(bookId).catch(() => {});
+    await dbDeleteSemanticMapsForBookPrefix(bookId).catch(() => {});
+    await dbDeleteSourceProfilesForBookPrefix(bookId).catch(() => {});
     await this.deleteImages(bookId).catch(() => {});
     await this.deleteAudioArtifacts(bookId).catch(() => {});
 

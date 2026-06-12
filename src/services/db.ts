@@ -569,6 +569,11 @@ export async function dbDeleteSemanticMap(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1`, [bookId]);
 }
 
+export async function dbDeleteSemanticMapsForBookPrefix(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, `${bookId}::%`]);
+}
+
 export async function dbLoadSemanticMap(bookId: string): Promise<SemanticMap | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
@@ -657,6 +662,11 @@ export async function dbLoadSourceProfile(bookId: string): Promise<SourceIntelli
 export async function dbDeleteSourceProfile(bookId: string): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM source_profiles WHERE book_id = $1`, [bookId]);
+}
+
+export async function dbDeleteSourceProfilesForBookPrefix(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM source_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, `${bookId}::%`]);
 }
 
 export async function dbSaveStudyQuiz(quiz: StudyQuiz): Promise<void> {
@@ -823,7 +833,7 @@ function rowToCachedImage(row: Record<string, unknown>): CachedImage {
 
 export async function dbDeleteImageCache(bookId: string): Promise<void> {
   const db = await getDb();
-  await db.execute(`DELETE FROM image_cache WHERE book_id = $1`, [bookId]);
+  await db.execute(`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, `${bookId}::%`]);
 }
 
 // ─── Audio Cache ──────────────────────────────────────────────────────────────

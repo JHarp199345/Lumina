@@ -10,6 +10,7 @@ import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnos
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const MAX_LORE_TERMS = 25;
+const VISUAL_LORE_MAX_CONCURRENCY = 4;
 
 // Words that get capitalized at sentence starts but are NOT proper nouns.
 // Pronouns are the primary offender: "She", "He", "His" etc. repeat the most.
@@ -72,7 +73,8 @@ export async function buildVisualLoreDossier(params: {
     itemLabel: terms.slice(0, 3).join(", "),
   });
 
-  // Odysseus: one dedicated agent per entity, run in parallel for richer descriptions
+  // Odysseus: one dedicated agent per entity, with concurrency capped to the
+  // real worker throughput. Higher values mostly create waiting tasks in logs.
   if (getProvider() === "odysseus") {
     try {
       const dossier = await buildLoreOdysseus(params.structure, terms, params.onProgress);
@@ -224,7 +226,7 @@ async function buildLoreOdysseus(
       context: { book_title: structure.title, entity_count: terms.length },
     },
     tasks,
-    max_concurrency: 8,
+    max_concurrency: VISUAL_LORE_MAX_CONCURRENCY,
   });
 
   const entities: VisualLoreEntity[] = [];

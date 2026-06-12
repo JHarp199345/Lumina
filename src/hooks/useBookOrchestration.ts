@@ -561,33 +561,49 @@ export function useBookOrchestration() {
             total: semanticMap.scenes.length,
             itemLabel: semanticMap.scenes[0]?.symbolicMotifs.slice(0, 2).join(" + "),
           });
-          await trackStep(
-            wfId,
-            {
-              name: "opening-image",
-              goal: "Generate opening scene image via ComfyUI",
-              agent: "image_director",
-              skill: "scene-image-generation",
-            },
-            () => _ensureOpeningImage(semanticMap, styleSeedId, semanticBookId),
-            () => ({
-              metrics: {
-                scene_id: semanticMap.scenes[0]?.id ?? null,
-                success: true,
+          try {
+            await trackStep(
+              wfId,
+              {
+                name: "opening-image",
+                goal: "Generate opening scene image via ComfyUI",
+                agent: "image_director",
+                skill: "scene-image-generation",
               },
-              goal_achieved: 1,
-              unblocked_next: true,
-            }),
-            (err) => ({
-              metrics: {
-                scene_id: semanticMap.scenes[0]?.id ?? null,
-                error: err instanceof Error ? err.message : String(err),
-                success: false,
+              async () => {
+                const image = await _ensureOpeningImage(semanticMap, styleSeedId, semanticBookId);
+                if (!image) {
+                  throw new Error("Opening image was not generated or restored.");
+                }
+                return image;
               },
-              goal_achieved: 0,
-              unblocked_next: true,
-            })
-          );
+              (image) => ({
+                metrics: {
+                  scene_id: semanticMap.scenes[0]?.id ?? null,
+                  image_id: image.id,
+                  visual_slot_key: image.visualSlotKey ?? null,
+                  success: true,
+                },
+                goal_achieved: 1,
+                unblocked_next: true,
+              }),
+              (err) => ({
+                metrics: {
+                  scene_id: semanticMap.scenes[0]?.id ?? null,
+                  error: err instanceof Error ? err.message : String(err),
+                  success: false,
+                },
+                goal_achieved: 0,
+                unblocked_next: true,
+              })
+            );
+          } catch (err) {
+            diagnosticWarn("opening_image.failed", "Opening image was not ready after analysis", {
+              semanticBookId,
+              sceneId: semanticMap.scenes[0]?.id ?? null,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
 
         setPhase({
@@ -666,8 +682,8 @@ export function useBookOrchestration() {
       styleSeedId: StyleSeedId,
       semanticBookId: string,
       options: { display?: boolean } = {}
-    ) => {
-      if (!scene) return;
+    ): Promise<CachedImage | null> => {
+      if (!scene) return null;
       const shouldDisplay = options.display !== false;
 
       const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
@@ -686,7 +702,7 @@ export function useBookOrchestration() {
             setCurrentImage(cached);
             setCurrentThemes(cached.emotionalThemes);
           }
-          return;
+          return cached;
         }
       }
 
@@ -712,15 +728,15 @@ export function useBookOrchestration() {
           bookId: semanticBookId,
           visualSlotKey: slotKey,
         });
-        return;
+        return persisted;
       }
 
       const styleSeed = getStyleSeedById(styleSeedId);
       const googleKey = await storage.loadApiKey("lumina_google_ai_key");
       const falKey = await storage.loadApiKey("lumina_fal_key");
-      if (!styleSeed || (!googleKey && getProvider() === "gemini")) return;
+      if (!styleSeed || (!googleKey && getProvider() === "gemini")) return null;
 
-      if (slotKey && !store.claimGenerationSlot(slotKey)) return;
+      if (slotKey && !store.claimGenerationSlot(slotKey)) return null;
 
       setIsGenerating(true);
       try {
@@ -751,6 +767,7 @@ export function useBookOrchestration() {
           bookId: semanticBookId,
           filePath: generated.filePath,
         });
+        return generated;
       } catch (err) {
         console.warn("[Orchestration] Scene image failed:", err);
         diagnosticError("image.scene.failed", "Scene image failed", {
@@ -767,6 +784,7 @@ export function useBookOrchestration() {
           status: "pending",
           description: scene.directorBrief?.finalPrompt || scene.imageDescription || "",
         });
+        return null;
       } finally {
         setIsGenerating(false);
         if (slotKey) store.releaseGenerationSlot();
@@ -779,7 +797,7 @@ export function useBookOrchestration() {
   // governing-section trigger. Generating must not force a future image on screen.
   const _ensureOpeningImage = useCallback(
     async (semanticMap: { scenes: IdentifiedScene[] }, styleSeedId: StyleSeedId, semanticBookId: string) => {
-      await _ensureSceneImage(semanticMap.scenes[0], styleSeedId, semanticBookId, { display: false });
+      return _ensureSceneImage(semanticMap.scenes[0], styleSeedId, semanticBookId, { display: false });
     },
     [_ensureSceneImage]
   );
