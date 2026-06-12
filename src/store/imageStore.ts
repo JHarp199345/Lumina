@@ -16,6 +16,8 @@ interface ImageStore {
   isGenerating: boolean;
   /** Slot currently being generated — only one API call at a time. */
   activeGenerationSlot: string | null;
+  /** When the current generation started — used to recover from stuck state. */
+  generationStartedAt: number | null;
   navigationJumpUntil: number;
   regenerateCooldownUntil: number;
 
@@ -35,6 +37,11 @@ interface ImageStore {
   /** Returns false if another slot is generating or this slot already has an image. */
   claimGenerationSlot: (slotKey: string, allowReplace?: boolean) => boolean;
   releaseGenerationSlot: () => void;
+  markGenerationStarted: () => void;
+  isSlotBusy: (slotKey: string) => boolean;
+  clearQueueForSlot: (slotKey: string) => void;
+  completeQueueForSlot: (slotKey: string) => void;
+  failQueueForSlot: (slotKey: string) => void;
 
   enqueue: (item: GenerationQueueItem) => void;
   dequeue: () => GenerationQueueItem | undefined;
@@ -53,6 +60,7 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   queue: [],
   isGenerating: false,
   activeGenerationSlot: null,
+  generationStartedAt: null,
   navigationJumpUntil: 0,
   regenerateCooldownUntil: 0,
 
@@ -131,13 +139,55 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
 
   claimGenerationSlot: (slotKey, allowReplace = false) => {
     const state = get();
-    if (state.isGenerating || state.activeGenerationSlot) return false;
+    // Recover ghost claim left without isGenerating (e.g. aborted gallery run).
+    if (state.activeGenerationSlot && !state.isGenerating) {
+      set({ activeGenerationSlot: null, generationStartedAt: null });
+    }
+    if (state.isGenerating && state.activeGenerationSlot && state.activeGenerationSlot !== slotKey) {
+      return false;
+    }
+    if (state.activeGenerationSlot && state.activeGenerationSlot !== slotKey) return false;
     if (!allowReplace && slotHasCachedImage(state.imageCache, slotKey)) return false;
+    const slotInFlight = state.queue.some(
+      (q) => q.visualSlotKey === slotKey && q.status === "generating"
+    );
+    if (slotInFlight && state.activeGenerationSlot !== slotKey) return false;
     set({ activeGenerationSlot: slotKey });
     return true;
   },
 
-  releaseGenerationSlot: () => set({ activeGenerationSlot: null }),
+  releaseGenerationSlot: () => set({ activeGenerationSlot: null, generationStartedAt: null }),
+
+  markGenerationStarted: () => set({ generationStartedAt: Date.now() }),
+
+  isSlotBusy: (slotKey) => {
+    const state = get();
+    if (state.activeGenerationSlot === slotKey && state.isGenerating) return true;
+    return state.queue.some(
+      (q) => q.visualSlotKey === slotKey && (q.status === "pending" || q.status === "generating")
+    );
+  },
+
+  clearQueueForSlot: (slotKey) =>
+    set((state) => ({
+      queue: state.queue.filter((q) => q.visualSlotKey !== slotKey),
+    })),
+
+  completeQueueForSlot: (slotKey) =>
+    set((state) => ({
+      queue: state.queue.map((q) =>
+        q.visualSlotKey === slotKey ? { ...q, status: "complete" as const } : q
+      ),
+    })),
+
+  failQueueForSlot: (slotKey) =>
+    set((state) => ({
+      queue: state.queue.map((q) =>
+        q.visualSlotKey === slotKey && q.status !== "complete"
+          ? { ...q, status: "failed" as const }
+          : q
+      ),
+    })),
 
   enqueue: (item) =>
     set((state) => {
@@ -201,7 +251,14 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
 
   clearImageCache: () => {
     console.info("[ImageStore] clearImageCache");
-    set({ imageCache: {}, currentImage: null, currentThemes: [], activeGenerationSlot: null });
+    set({
+      imageCache: {},
+      currentImage: null,
+      currentThemes: [],
+      activeGenerationSlot: null,
+      generationStartedAt: null,
+      isGenerating: false,
+    });
   },
 
   clearImagesForUnmount: () => {
@@ -214,6 +271,7 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       queue: [],
       isGenerating: false,
       activeGenerationSlot: null,
+      generationStartedAt: null,
       navigationJumpUntil: 0,
       regenerateCooldownUntil: 0,
     });

@@ -2,6 +2,13 @@ import { create } from "zustand";
 
 /** Which panel, if any, is expanded to fill the reading area. */
 export type FocusMode = "reader" | "visual" | null;
+export type PhonePanel = "reader" | "visual" | "toc";
+
+export interface PendingReaderNavigation {
+  target: string;
+  wordOffset?: number;
+  createdAt: number;
+}
 
 interface UiStore {
   focusMode: FocusMode;
@@ -24,6 +31,13 @@ interface UiStore {
   /** Reading spot saved when jumping from gallery to a passage. */
   returnCfi: string | null;
   setReturnCfi: (cfi: string | null) => void;
+
+  /** Phone shell surface and queued reader navigation when reader is unmounted. */
+  phonePanel: PhonePanel;
+  setPhonePanel: (panel: PhonePanel) => void;
+  pendingReaderNavigation: PendingReaderNavigation | null;
+  requestReaderNavigation: (target: string, wordOffset?: number) => void;
+  clearPendingReaderNavigation: () => void;
 }
 
 export const useUiStore = create<UiStore>()((set, get) => ({
@@ -53,4 +67,18 @@ export const useUiStore = create<UiStore>()((set, get) => ({
 
   returnCfi: null,
   setReturnCfi: (returnCfi) => set({ returnCfi }),
+
+  phonePanel: "reader",
+  setPhonePanel: (phonePanel) => set({ phonePanel }),
+  pendingReaderNavigation: null,
+  requestReaderNavigation: (target, wordOffset) =>
+    set({
+      pendingReaderNavigation: {
+        target,
+        ...(wordOffset !== undefined ? { wordOffset } : {}),
+        createdAt: Date.now(),
+      },
+      phonePanel: "reader",
+    }),
+  clearPendingReaderNavigation: () => set({ pendingReaderNavigation: null }),
 }));

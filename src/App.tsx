@@ -33,6 +33,7 @@ import VisualDebugOverlay from "@/components/debug/VisualDebugOverlay";
 import { useGalleryActions } from "@/hooks/useGalleryActions";
 import { useImageStore } from "@/store/imageStore";
 import { useUiStore } from "@/store/uiStore";
+import { hydrateOdysseusConfig } from "@/api/llmClient";
 import type { StyleSeedId, BookStructure } from "@/types";
 
 function App() {
@@ -87,6 +88,10 @@ function App() {
   const visualDebugEnabled =
     new URLSearchParams(window.location.search).get("debug") === "visuals" ||
     window.localStorage.getItem("lumina.debug.visuals") === "1";
+
+  useEffect(() => {
+    void hydrateOdysseusConfig();
+  }, []);
 
   // TOC open/closed state for tablet layouts.
   // In landscape the rail starts open; in portrait the drawer starts closed.

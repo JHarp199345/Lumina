@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Key, Image, Type, Trash2, RefreshCw, Palette, FolderOpen, Server } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -18,6 +18,7 @@ import {
   setOdysseusUrl,
   getOdysseusToken,
   getOdysseusTokenPrefix,
+  hydrateOdysseusConfig,
   setOdysseusToken,
   testOdysseus,
   type LLMProvider,
@@ -353,6 +354,16 @@ function AISection() {
   const [token, setTokenState] = useState(() => getOdysseusToken());
   const [testState, setTestState] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [testMsg, setTestMsg] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    hydrateOdysseusConfig().then(() => {
+      if (!cancelled) setTokenState(getOdysseusToken());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function applyProvider(p: LLMProvider) {
     setProvider(p);

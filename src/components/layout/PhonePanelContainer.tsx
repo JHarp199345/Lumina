@@ -6,38 +6,81 @@
  */
 
 import { BookOpen, Image, List } from "lucide-react";
-import { useState } from "react";
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 import ReaderPanel from "./ReaderPanel";
 import TocPanel from "./TocPanel";
 import VisualPanel from "./VisualPanel";
-
-type PhonePanel = "reader" | "visual" | "toc";
+import { useUiStore } from "@/store/uiStore";
 
 interface Props {
   onImport?: () => void;
 }
 
 export default function PhonePanelContainer({ onImport }: Props) {
-  const [panel, setPanel] = useState<PhonePanel>("reader");
+  const {
+    phonePanel: panel,
+    setPhonePanel,
+    pendingReaderNavigation,
+    clearPendingReaderNavigation,
+  } = useUiStore();
+
+  useEffect(() => {
+    if (panel !== "reader" || !pendingReaderNavigation) return;
+    let attempts = 0;
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const win = window as Window & {
+        luminaNavigateToScene?: (target: string, wordOffset?: number) => void;
+        luminaNavigate?: (target: string) => void;
+      };
+      const target = pendingReaderNavigation.target;
+      const isReaderRoute = target.startsWith("lumina://");
+      if (isReaderRoute && win.luminaNavigate) {
+        win.luminaNavigate(target);
+        clearPendingReaderNavigation();
+        return;
+      }
+      if (!isReaderRoute && win.luminaNavigateToScene) {
+        win.luminaNavigateToScene(
+          target,
+          pendingReaderNavigation.wordOffset ?? 0
+        );
+        clearPendingReaderNavigation();
+        return;
+      }
+      if (!isReaderRoute && win.luminaNavigate) {
+        win.luminaNavigate(target);
+        clearPendingReaderNavigation();
+        return;
+      }
+      if (attempts < 12) window.setTimeout(run, 50);
+    };
+    window.setTimeout(run, 0);
+    return () => {
+      cancelled = true;
+    };
+  }, [panel, pendingReaderNavigation, clearPendingReaderNavigation]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-hidden">
         {panel === "reader" && <ReaderPanel onImport={onImport} />}
         {panel === "visual" && <VisualPanel />}
-        {panel === "toc" && <TocPanel onNavigate={() => setPanel("reader")} />}
+        {panel === "toc" && <TocPanel onNavigate={() => setPhonePanel("reader")} />}
       </div>
 
       <div className="pointer-events-none absolute bottom-3 left-1/2 z-40 flex -translate-x-1/2 justify-center">
         <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/10 bg-sky-100/[0.08] p-1.5 shadow-[0_12px_34px_rgba(0,0,0,0.36)] backdrop-blur-xl">
-          <PhonePanelButton active={panel === "toc"} label="Contents" onClick={() => setPanel("toc")}>
+          <PhonePanelButton active={panel === "toc"} label="Contents" onClick={() => setPhonePanel("toc")}>
             <List size={17} />
           </PhonePanelButton>
-          <PhonePanelButton active={panel === "reader"} label="Reader" onClick={() => setPanel("reader")}>
+          <PhonePanelButton active={panel === "reader"} label="Reader" onClick={() => setPhonePanel("reader")}>
             <BookOpen size={17} />
           </PhonePanelButton>
-          <PhonePanelButton active={panel === "visual"} label="Visuals" onClick={() => setPanel("visual")}>
+          <PhonePanelButton active={panel === "visual"} label="Visuals" onClick={() => setPhonePanel("visual")}>
             <Image size={17} />
           </PhonePanelButton>
         </div>

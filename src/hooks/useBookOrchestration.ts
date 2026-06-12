@@ -171,6 +171,7 @@ export function useBookOrchestration() {
       if (!seedId) return;
 
       const slice = getAnalysisSlice(structure, 0);
+      const bookId = state.activeBook.id;
 
       // Delete cached segment map so _runAnalysis doesn't find it.
       await storage.deleteSemanticMap(slice.semanticBookId).catch(() => {});
@@ -182,7 +183,16 @@ export function useBookOrchestration() {
       });
 
       const semanticMap = useBookStore.getState().activeSemanticMap;
-      if (!semanticMap) return;
+      if (!semanticMap) {
+        void useNotificationStore.getState().notify({
+          bookId,
+          feature: "re-ingest",
+          kind: "error",
+          title: "Re-analysis failed",
+          detail: "Visual analysis did not finish. Check the progress panel or diagnostics.",
+        });
+        return;
+      }
 
       const chapters = structure.chapters;
       const scenesById = new Map(semanticMap.scenes.map((scene) => [scene.id, scene]));
@@ -213,6 +223,13 @@ export function useBookOrchestration() {
         semanticBookId: slice.semanticBookId,
         persistedImages: hydrated.length,
         displayedSceneId: imageToDisplay?.sceneId ?? null,
+      });
+      void useNotificationStore.getState().notify({
+        bookId,
+        feature: "re-ingest",
+        kind: "success",
+        title: "Re-analysis complete",
+        detail: "The visual plan was refreshed. Existing imagery is still preserved unless regenerated.",
       });
     },
     [setActiveSemanticMap, clearQueue, addToCache, setCurrentImage, setCurrentThemes]

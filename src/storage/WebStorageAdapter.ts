@@ -4,7 +4,7 @@
  * Implements StorageAdapter using browser-native APIs:
  *   - IndexedDB (via webDb.ts helpers) for all structured data
  *   - ArrayBuffer blobs in IndexedDB for EPUB files and generated images
- *   - localStorage for API keys (simple, survives session with clear warning)
+ *   - IndexedDB for API keys, with localStorage as migration/fallback
  *   - Blob URLs for displaying images and loading EPUBs into EPUB.js
  *
  * Blob URLs (blob:...) are session-scoped — they are recreated from stored
@@ -454,20 +454,42 @@ export class WebStorageAdapter implements StorageAdapter {
   }
 
   // ── API keys ─────────────────────────────────────────────────────────────
-  // Stored in localStorage with an "lk_" prefix.
-  // Browser localStorage is device-local but not encrypted — appropriate for
-  // a local-first app where the user provides their own API key.
+  // Stored primarily in IndexedDB. localStorage remains a compatibility mirror
+  // for older builds and for synchronous callers such as llmClient token headers.
 
   async saveApiKey(name: string, value: string): Promise<void> {
-    localStorage.setItem(`lk_${name}`, value);
+    await dbPut(STORES.API_KEYS, value, name);
+    try {
+      localStorage.setItem(`lk_${name}`, value);
+    } catch {
+      // IndexedDB is the durable source; localStorage is only a mirror.
+    }
   }
 
   async loadApiKey(name: string): Promise<string | null> {
-    return localStorage.getItem(`lk_${name}`);
+    const stored = await dbGet<string>(STORES.API_KEYS, name).catch(() => undefined);
+    if (typeof stored === "string") {
+      try {
+        localStorage.setItem(`lk_${name}`, stored);
+      } catch {
+        // Nonessential mirror.
+      }
+      return stored;
+    }
+    try {
+      return localStorage.getItem(`lk_${name}`);
+    } catch {
+      return null;
+    }
   }
 
   async deleteApiKey(name: string): Promise<void> {
-    localStorage.removeItem(`lk_${name}`);
+    await dbDelete(STORES.API_KEYS, name).catch(() => {});
+    try {
+      localStorage.removeItem(`lk_${name}`);
+    } catch {
+      // ignore
+    }
   }
 
   // ── Archive ──────────────────────────────────────────────────────────────

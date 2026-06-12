@@ -1,14 +1,18 @@
 import { LUMINA_CONFIG } from "@/config";
 import { useSettingsStore } from "@/store/settingsStore";
+import { storage } from "@/storage";
 import { normalizeOdysseusUrl } from "@/utils/odysseusUrl";
 
 // ── Provider settings — backed by Zustand persist store ───────────────────────
-// Token is still kept in localStorage with the lk_ prefix (same as Gemini key),
-// since it's a credential rather than a setting.
+// The PWA stores URL/provider/token in IndexedDB-backed storage and mirrors the
+// token to localStorage for synchronous auth-header reads.
 
 export type LLMProvider = "odysseus" | "gemini";
 
 const TOKEN_KEY = "lk_lumina_odysseus_token";
+const TOKEN_STORAGE_NAME = "lumina_odysseus_token";
+const URL_STORAGE_NAME = "lumina_odysseus_url";
+const PROVIDER_STORAGE_NAME = "lumina_llm_provider";
 
 export function getProvider(): LLMProvider {
   return useSettingsStore.getState().llmProvider ?? "odysseus";
@@ -16,6 +20,7 @@ export function getProvider(): LLMProvider {
 
 export function setProvider(p: LLMProvider): void {
   useSettingsStore.getState().setLlmProvider(p);
+  void storage.saveApiKey(PROVIDER_STORAGE_NAME, p).catch(() => {});
 }
 
 export function getOdysseusUrl(): string {
@@ -27,11 +32,18 @@ export function getOdysseusUrl(): string {
 }
 
 export function setOdysseusUrl(url: string): void {
-  useSettingsStore.getState().setOdysseusUrl(normalizeOdysseusUrl(url));
+  const normalized = normalizeOdysseusUrl(url);
+  useSettingsStore.getState().setOdysseusUrl(normalized);
+  void storage.saveApiKey(URL_STORAGE_NAME, normalized).catch(() => {});
 }
 
 export function getOdysseusToken(): string {
-  const raw = localStorage.getItem(TOKEN_KEY) || "";
+  let raw = "";
+  try {
+    raw = localStorage.getItem(TOKEN_KEY) || "";
+  } catch {
+    raw = "";
+  }
   return raw.replace(/^Bearer\s+/i, "").trim();
 }
 
@@ -44,9 +56,45 @@ export function getOdysseusTokenPrefix(): string | null {
 export function setOdysseusToken(token: string): void {
   const normalized = token.replace(/^Bearer\s+/i, "").trim();
   if (normalized) {
-    localStorage.setItem(TOKEN_KEY, normalized);
+    try {
+      localStorage.setItem(TOKEN_KEY, normalized);
+    } catch {
+      // IndexedDB storage below is the durable source.
+    }
+    void storage.saveApiKey(TOKEN_STORAGE_NAME, normalized).catch(() => {});
   } else {
-    localStorage.removeItem(TOKEN_KEY);
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      // ignore
+    }
+    void storage.deleteApiKey(TOKEN_STORAGE_NAME).catch(() => {});
+  }
+}
+
+export async function hydrateOdysseusConfig(): Promise<void> {
+  const [provider, url, token] = await Promise.all([
+    storage.loadApiKey(PROVIDER_STORAGE_NAME).catch(() => null),
+    storage.loadApiKey(URL_STORAGE_NAME).catch(() => null),
+    storage.loadApiKey(TOKEN_STORAGE_NAME).catch(() => null),
+  ]);
+
+  if (provider === "odysseus" || provider === "gemini") {
+    useSettingsStore.getState().setLlmProvider(provider);
+  }
+  if (url) {
+    try {
+      useSettingsStore.getState().setOdysseusUrl(normalizeOdysseusUrl(url));
+    } catch {
+      // Keep the existing URL if the stored value is invalid.
+    }
+  }
+  if (token) {
+    try {
+      localStorage.setItem(TOKEN_KEY, token.replace(/^Bearer\s+/i, "").trim());
+    } catch {
+      // Synchronous mirror unavailable; async storage still has the token.
+    }
   }
 }
 
@@ -239,7 +287,7 @@ export function recordOdysseusSkillRun(
 async function _callGemini(prompt: string, options: LLMGenerateOptions): Promise<string> {
   const apiKey =
     options.geminiKey ||
-    localStorage.getItem("lk_lumina_google_ai_key") ||
+    (await storage.loadApiKey("lumina_google_ai_key").catch(() => null)) ||
     "";
 
   if (!apiKey) throw new Error("No Google AI key configured. Add one in Settings.");

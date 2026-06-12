@@ -19,6 +19,8 @@ import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useBookStore } from "@/store/bookStore";
+import { useImageStore } from "@/store/imageStore";
+import { visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { getImageForScene } from "@/utils/imagePosition";
 import { segmentScenesForSemanticMap } from "@/utils/sceneDedup";
 import { EMPTY_BEATS, EMPTY_CHAPTERS, EMPTY_SCENES } from "@/utils/stableEmpty";
@@ -89,6 +91,7 @@ export default function GalleryFocalView({
   const startIndex = Math.max(0, items.findIndex((it) => it.scene.id === startSceneId));
   const [index, setIndex] = useState(startIndex < 0 ? 0 : startIndex);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [showBookMenu, setShowBookMenu] = useState(false);
   const selectedThumbRef = useRef<HTMLButtonElement>(null);
   const openedAtRef = useRef(Date.now());
@@ -108,9 +111,12 @@ export default function GalleryFocalView({
 
   const runGenerate = async (sceneId: string) => {
     if (generatingId) return;
+    setGenerateError(null);
     setGeneratingId(sceneId);
     try {
       await onGenerateScene(sceneId);
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : "Image generation failed");
     } finally {
       setGeneratingId(null);
     }
@@ -150,7 +156,13 @@ export default function GalleryFocalView({
       ""
     : "";
   const beatLabel = current?.beat?.beatType?.replace(/_/g, " ") ?? "scene";
-  const currentGenerating = current ? generatingId === current.scene.id : false;
+  const activeSlot = useImageStore((s) => s.activeGenerationSlot);
+  const isGenerating = useImageStore((s) => s.isGenerating);
+  const currentSlotKey = current ? visualSlotKeyForScene(current.scene, chapters) : null;
+  const currentGenerating = current
+    ? generatingId === current.scene.id ||
+      (isGenerating && !!currentSlotKey && activeSlot === currentSlotKey)
+    : false;
 
   const handleBackdropClose = () => {
     if (Date.now() - openedAtRef.current < 350) return;
@@ -364,6 +376,9 @@ export default function GalleryFocalView({
                       >
                         Generate image
                       </button>
+                      {generateError && (
+                        <p className="max-w-xs text-[11px] leading-relaxed text-rose-300/80">{generateError}</p>
+                      )}
                     </>
                   )}
                 </div>

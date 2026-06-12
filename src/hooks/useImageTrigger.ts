@@ -11,9 +11,9 @@ import { useReaderStore } from "@/store/readerStore";
 import { useBookStore } from "@/store/bookStore";
 import { useImageStore } from "@/store/imageStore";
 import { useSettingsStore } from "@/store/settingsStore";
-import { generateImage, extractPaletteContext } from "@/pipeline/imageGenerator";
+import { extractPaletteContext } from "@/pipeline/imageGenerator";
+import { generateForVisualSlot, reconcileStaleGeneration } from "@/services/slotImageGeneration";
 import { getStyleSeedById } from "@/data/styleSeeds";
-import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
@@ -24,15 +24,13 @@ import {
   resolveImageWordPosition,
 } from "@/utils/imagePosition";
 import {
-  findImageForVisualSlot,
   segmentScenesForSemanticMap,
   slotHasQueuedOrCachedImage,
   visualSlotKeyForScene,
 } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
-import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
-import { getProvider } from "@/api/llmClient";
-import type { IdentifiedScene, CachedImage } from "@/types";
+import { diagnosticInfo } from "@/utils/diagnostics";
+import type { IdentifiedScene } from "@/types";
 
 function scenePositions(
   scenes: IdentifiedScene[],
@@ -252,6 +250,8 @@ export function useImageTrigger() {
   const processQueue = useCallback(async () => {
     if (isGeneratingRef.current) return;
 
+    reconcileStaleGeneration();
+
     const store = useImageStore.getState();
     const next = store.dequeue();
     if (!next || next.status !== "pending") return;
@@ -283,107 +283,44 @@ export function useImageTrigger() {
     }
 
     const slotKey = visualSlotKeyForScene(scene, chapters) ?? next.visualSlotKey ?? null;
-    const mapScenes = segmentScenesForSemanticMap(semanticMap.scenes, chapters, semanticMap);
-
     if (!slotKey) {
       store.updateQueueItemStatus(next.sceneId, "complete");
       return;
     }
 
-    const cachedForSlot = store.getCachedImageForSlot(slotKey);
-    if (cachedForSlot) {
-      store.updateQueueItemStatus(next.sceneId, "complete");
-      return;
-    }
-
-    const existingMemoryImage = findImageForVisualSlot(
-      slotKey,
-      Object.values(store.imageCache),
-      mapScenes,
-      chapters
-    );
-    if (existingMemoryImage) {
-      store.addToCache(existingMemoryImage);
-      store.updateQueueItemStatus(next.sceneId, "complete");
-      return;
-    }
-
-    const persistedImages = await storage.loadImages(next.bookId).catch(() => [] as CachedImage[]);
-    const existingPersistedImage = findImageForVisualSlot(
-      slotKey,
-      persistedImages,
-      mapScenes,
-      chapters
-    );
-    if (existingPersistedImage) {
-      store.addToCache(existingPersistedImage);
-      store.updateQueueItemStatus(next.sceneId, "complete");
-      return;
-    }
-
-    if (!store.claimGenerationSlot(slotKey)) {
-      diagnosticInfo("image.generation.slot_busy", "Skipped generation — slot already claimed or cached", {
-        sceneId: next.sceneId,
-        visualSlotKey: slotKey,
-      });
-      return;
-    }
-
-    const styleSeed = activeStyleSeed ? getStyleSeedById(activeStyleSeed) : null;
-    if (!styleSeed) {
-      store.releaseGenerationSlot();
+    if (store.isSlotBusy(slotKey) && store.activeGenerationSlot !== slotKey) {
       return;
     }
 
     isGeneratingRef.current = true;
-    store.setIsGenerating(true);
     store.updateQueueItemStatus(next.sceneId, "generating");
 
-    try {
-      const googleKey = await storage.loadApiKey("lumina_google_ai_key");
-      const falKey = await storage.loadApiKey("lumina_fal_key");
+    const result = await generateForVisualSlot({
+      scene,
+      bookId: next.bookId,
+      onComplete: (img) => {
+        if (activeStyleSeed) {
+          const styleSeed = getStyleSeedById(activeStyleSeed);
+          if (styleSeed) {
+            priorPromptRef.current = extractPaletteContext(styleSeed, [img.descriptionUsed]);
+          }
+        }
+      },
+    });
 
-      if (!googleKey && getProvider() === "gemini") {
-        store.updateQueueItemStatus(next.sceneId, "failed");
-        return;
-      }
-
-      const priorContext = priorPromptRef.current || undefined;
-
-      const cachedImage = await generateImage({
-        scene,
-        styleSeed,
-        bookId: next.bookId,
-        wordPosition: scenePosition,
-        visualSlotKey: slotKey,
-        googleApiKey: googleKey ?? "",
-        falApiKey: falKey || undefined,
-        priorPaletteContext: priorContext,
-        onComplete: async (img) => {
-          store.addToCache(img);
-          priorPromptRef.current = extractPaletteContext(styleSeed, [img.descriptionUsed]);
-        },
-      });
-
-      store.addToCache(cachedImage);
+    if (result.ok) {
       store.updateQueueItemStatus(next.sceneId, "complete");
-      diagnosticInfo("image.generation.complete", "Image generation complete", {
-        sceneId: cachedImage.sceneId,
-        visualSlotKey: slotKey,
-        wordPosition: scenePosition,
-      });
-    } catch (err) {
-      diagnosticError("image.generation.failed", "Image generation failed", {
-        sceneId: next.sceneId,
-        visualSlotKey: slotKey,
-        error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
-      });
+    } else if (result.reason === "cached") {
+      store.updateQueueItemStatus(next.sceneId, "complete");
+    } else if (result.reason === "busy") {
+      store.updateQueueItemStatus(next.sceneId, "pending");
+    } else if (result.reason === "error") {
       store.updateQueueItemStatus(next.sceneId, "failed");
-    } finally {
-      isGeneratingRef.current = false;
-      store.setIsGenerating(false);
-      store.releaseGenerationSlot();
+    } else {
+      store.updateQueueItemStatus(next.sceneId, "complete");
     }
+
+    isGeneratingRef.current = false;
   }, [activeSemanticMap, activeStyleSeed]);
 
   const updateDisplayRef = useRef(updateDisplay);
@@ -412,7 +349,10 @@ export function useImageTrigger() {
   }, [activeSemanticMap?.bookId, activeSemanticMap?.visualPlanVersion, activeStyleSeed, pendingQueueCount]);
 
   useEffect(() => {
-    const interval = setInterval(() => processQueueRef.current(), 3000);
+    const interval = setInterval(() => {
+      reconcileStaleGeneration();
+      processQueueRef.current();
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 

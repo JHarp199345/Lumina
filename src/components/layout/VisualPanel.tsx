@@ -302,10 +302,11 @@ export default function VisualPanel() {
         ) : hasFailed ? (
           <AmbientFailureState gradient={ambientGradient} onRetry={handleRegenerate} />
         ) : (() => {
+          const queueGenerating = queue.some((q) => q.status === "generating");
           const waitingPhase = resolveWaitingPhase({
             apiKeyConfigured: effectiveApiKeyConfigured,
             activeSemanticMap: activeSemanticMap ?? null,
-            isGenerating,
+            isGenerating: isGenerating || queueGenerating,
             hasPendingInQueue: queue.some((q) => q.status === "pending"),
             hasFailedInQueue: queue.some((q) => q.status === "failed"),
           });

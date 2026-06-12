@@ -93,6 +93,10 @@ export function findImageForVisualSlot(
   chapters: Chapter[]
 ): CachedImage | undefined {
   for (const image of images) {
+    if (image.visualSlotKey) {
+      if (image.visualSlotKey === slotKey) return image;
+      continue;
+    }
     const scene = scenes.find((item) => item.id === image.sceneId);
     if (!scene) continue;
     if (visualSlotKeyForScene(scene, chapters) === slotKey) return image;

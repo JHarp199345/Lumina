@@ -115,7 +115,7 @@ export default function GlobalProgressOverlay({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[95] flex items-center justify-center bg-black/72 p-4 backdrop-blur-md"
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-black/72 p-4 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
           aria-label={title}

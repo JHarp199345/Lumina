@@ -348,22 +348,46 @@ async function generateWithComfyUI(prompt: string, negativePrompt: string): Prom
   });
   if (!startRes.ok) {
     const msg = await startRes.text().catch(() => "");
+    if (startRes.status === 401 || startRes.status === 403) {
+      throw new Error(
+        `Odysseus image auth failed (${startRes.status}). Check your API token in Settings.`
+      );
+    }
     throw new Error(`ComfyUI queue error ${startRes.status}: ${msg}`);
   }
   const { job_id } = await startRes.json() as { job_id: string };
 
   // Poll every 3s for up to 6 minutes. Each request is short — avoids the
   // Cloudflare 100-second tunnel timeout that would kill a blocking generate call.
+  let authFailures = 0;
   for (let attempt = 0; attempt < 120; attempt++) {
     await new Promise<void>((r) => setTimeout(r, 3000));
 
     const pollRes = await fetch(`${base}/api/images/jobs/${job_id}`, { headers: authHeaders });
-    if (!pollRes.ok) continue;
+    if (!pollRes.ok) {
+      if (pollRes.status === 401 || pollRes.status === 403) {
+        authFailures += 1;
+        if (authFailures >= 2) {
+          throw new Error(
+            `Odysseus image poll auth failed (${pollRes.status}). Check your API token in Settings.`
+          );
+        }
+      }
+      continue;
+    }
+    authFailures = 0;
     const job = await pollRes.json() as { status: string; image_url?: string; error?: string };
 
     if (job.status === "done" && job.image_url) {
       const imgRes = await fetch(`${base}${job.image_url}`, { headers: authHeaders });
-      if (!imgRes.ok) throw new Error(`ComfyUI image fetch error ${imgRes.status}`);
+      if (!imgRes.ok) {
+        if (imgRes.status === 401 || imgRes.status === 403) {
+          throw new Error(
+            `Odysseus image fetch auth failed (${imgRes.status}). Check your API token in Settings.`
+          );
+        }
+        throw new Error(`ComfyUI image fetch error ${imgRes.status}`);
+      }
       return new Uint8Array(await imgRes.arrayBuffer());
     }
     if (job.status === "error") {
