@@ -5,6 +5,7 @@ import { useBookStore } from "@/store/bookStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useImageStore } from "@/store/imageStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
+import { navigateReader } from "@/utils/readerNavigation";
 import type { Book, BookStructure, CachedImage, Highlight, Note, SemanticMap } from "@/types";
 
 interface SearchResult {
@@ -71,18 +72,12 @@ export default function SearchBar({ onClose }: SearchBarProps) {
     }
 
     const win = window as Window & {
-      luminaNavigate?:         (target: string) => void;
-      luminaNavigateToScene?:  (target: string, wordOffset?: number) => void;
       luminaMarkSearchResult?: (cfi: string) => void;
       luminaClearSearchMarks?: () => void;
     };
     win.luminaClearSearchMarks?.();
     if (result.target) {
-      if (result.wordOffset != null && win.luminaNavigateToScene) {
-        win.luminaNavigateToScene(result.target, result.wordOffset);
-      } else {
-        win.luminaNavigate?.(result.target);
-      }
+      navigateReader(result.target, result.wordOffset);
       // Apply visible mark after a short delay to let section render
       if (result.target.startsWith("epubcfi(") && win.luminaMarkSearchResult) {
         setTimeout(() => win.luminaMarkSearchResult!(result.target), 350);

@@ -13,6 +13,7 @@ import Epub from "epubjs";
 import type { Book as EpubBook, Rendition, NavItem } from "epubjs";
 import { useReaderStore } from "@/store/readerStore";
 import { useBookStore } from "@/store/bookStore";
+import { useImageStore } from "@/store/imageStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useSelectionStore } from "@/store/selectionStore";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -616,6 +617,7 @@ export default function EpubRenderer({
     };
 
     win.luminaNavigate = (target: string) => {
+      useImageStore.getState().markNavigationJump();
       const structure = useBookStore.getState().activeStructure;
       const index = resolveChapterIndex(structure, target);
       if (index >= 0 && structure?.chapters[index]) {
@@ -627,6 +629,7 @@ export default function EpubRenderer({
       navigateToTarget(target);
     };
     win.luminaNavigateToScene = (target: string, wordOffset = 0) => {
+      useImageStore.getState().markNavigationJump();
       const structure = useBookStore.getState().activeStructure;
       const index = resolveChapterIndex(structure, target);
       if (index >= 0 && structure?.chapters[index]) {

@@ -5,6 +5,7 @@ import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useAnnotationStore } from "@/store/annotationStore";
 import SearchBar from "@/components/reader/SearchBar";
+import { showReaderAndNavigate } from "@/utils/readerNavigation";
 import type { Chapter, Highlight, Note } from "@/types";
 import { formatChapterTitle } from "@/utils/chapterTitles";
 
@@ -143,8 +144,7 @@ function ChapterList({
                 : "border-l-2 border-transparent hover:bg-ink/5"
             }`}
             onClick={() => {
-              const nav = (window as Window & { luminaNavigate?: (target: string) => void }).luminaNavigate;
-              if (nav) nav(`lumina://chapter/${chapter.index}/page/0`);
+              showReaderAndNavigate(`lumina://chapter/${chapter.index}/page/0`);
               onNavigate?.();
             }}
           >

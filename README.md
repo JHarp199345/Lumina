@@ -287,6 +287,178 @@ Lumina currently includes:
 
 Some areas are still evolving, but the main direction is clear: Lumina is becoming a complete reading companion built around the book itself.
 
+## How Lumina Builds a Book
+
+Lumina's generated features all start from the same place: the book is turned into a narrative map.
+
+That map is not one giant prompt asking the AI to "understand the book." Lumina breaks the work into focused passes. Each pass has a job, and each job adds a different kind of understanding that later features can reuse.
+
+### 1. Book Parsing
+
+Lumina first turns the EPUB into a usable book structure.
+
+It extracts:
+
+- title and author information
+- chapters
+- table of contents entries
+- raw chapter text
+- word counts
+- reading sections
+- collection boundaries when one EPUB contains multiple books or parts
+
+This gives Lumina the physical map of the book: where things are, how long they are, and how the reader can move through them.
+
+### 2. Semantic Analysis
+
+Semantic analysis builds the first version of the narrative map.
+
+This stage is focused on what the book is doing. It can identify:
+
+- whether the book should be treated as narrative, expository, or another reading mode
+- the emotional shape of the book
+- major changes in tone or direction
+- important scenes or idea sections
+- central themes
+- symbolic motifs
+- recurring concepts
+- visual candidates
+- the "golden number" of visual moments Lumina should aim for
+
+Internally, this stage is split into smaller phases:
+
+- **Preparation** decides how the book should be analyzed.
+- **Chapter scoring** studies the emotional and structural weight of each chapter.
+- **Arc fitting** finds the book's larger movement.
+- **Scene identification** chooses moments that deserve visual or study attention.
+- **Image description drafting** writes the first plain-language visual description for each scene.
+- **Narrative blueprinting** tracks setups, payoffs, threads, and recurring ideas.
+
+The output is the base semantic map.
+
+### 3. Source Intelligence Profile
+
+After the base map exists, Lumina can build a source intelligence profile.
+
+This profile helps the study, audio, and presentation tools understand what kind of material they are working with. A novel, a philosophical text, a mythology collection, and a practical nonfiction book should not all produce the same kind of summary, quiz, or presentation.
+
+The source profile helps Lumina decide:
+
+- what kind of work the book is
+- what a useful explanation should emphasize
+- what kinds of study prompts make sense
+- what angles an audio overview might take
+- what presentation directions would fit the material
+
+This is one reason the same book map can power many different tools without each tool starting over from zero.
+
+### 4. Visual Lore
+
+For fiction and story-like books, Lumina builds visual lore.
+
+This is a continuity layer for generated imagery. It gathers recurring visual information about:
+
+- characters
+- places
+- objects
+- factions
+- symbols
+- atmosphere
+- repeated visual cues
+
+The point is consistency. If a person, place, or object matters across the book, Lumina tries to carry that memory into future image direction instead of treating every scene like an unrelated prompt.
+
+For informational or expository books, this step can be skipped or handled differently because the useful visual layer may be diagrams, concepts, argument structure, or symbolic explanation rather than character continuity.
+
+### 5. Visual Direction
+
+Visual direction turns planned scenes into image-ready creative briefs.
+
+This is where Lumina decides how a scene should be shown. It considers:
+
+- the selected visual style
+- the reader's interpretive-to-depictive setting
+- the narrative map
+- visual lore
+- the scene's emotional role
+- whether the image should be symbolic, atmospheric, concrete, or explanatory
+
+The result is a director brief for each visual moment. That brief is what image generation uses.
+
+### 6. Opening Image and Read-Ahead Generation
+
+Lumina usually creates an opening image first so the visual layer has an immediate anchor.
+
+After that, images are generated as the reader moves through the book. Lumina watches the current reading position, looks ahead to upcoming planned visual moments, and queues images close to where they will be needed.
+
+The goal is:
+
+- no image for every page
+- no random image spam
+- no waiting every time the reader reaches a meaningful moment
+- no old image pretending to belong to a new passage
+
+If a planned visual moment has no generated image yet, Lumina should show an empty planned state with actions to generate the image or visit the passage.
+
+### 7. Reuse Across the App
+
+Once the map exists, other features build from it.
+
+- **Visual Reading** uses the scene plan and director briefs.
+- **Gallery** shows generated images and ungenerated planned moments.
+- **Study Guide** uses the book structure and study segments.
+- **Quizzes** use the current segment, chapter, or whole-book scope.
+- **Flashcards** use the study map and important concepts.
+- **Audio Overview** uses the semantic map and source profile to create a focused spoken briefing.
+- **Voice Studio** uses the book structure to generate narration sections.
+- **Presentation Studio** uses the map, source profile, notes, and selected scope to create decks.
+- **Highlights and Notes** stay attached to passages and can send the reader back to the text.
+- **Archive** preserves generated layers when the book is removed or re-ingested.
+
+That is the important design choice: Lumina does not ask each feature to rediscover the book. The book is mapped once, and the rest of the app grows from that shared understanding.
+
+## Navigation Philosophy
+
+Lumina has several surfaces: reader, contents, visual panel, gallery, notes, study tools, and audio tools.
+
+The rule is simple:
+
+> The table of contents always moves the book. The gallery views or creates art for the book. The reader remains the source of truth for where you are.
+
+On desktop, multiple panels can sit beside each other. On phone, only one major surface is visible at a time, so navigation has to be more deliberate.
+
+Mobile navigation now follows these ideas:
+
+- tapping the table of contents always goes to the passage in the reader
+- if the reader panel is not mounted yet, Lumina queues the navigation and performs it when the reader opens
+- the visual panel follows the current passage rather than holding onto stale art
+- if a passage has a planned image but no generated image, Lumina shows a planned placeholder
+- the gallery can visit a passage whether or not that scene has an image yet
+- mobile gallery controls can return to contents, reader, or visuals without trapping the user
+
+This keeps the app from feeling like separate screens that disagree with each other.
+
+## Evolution
+
+Lumina started as a simple idea: an EPUB reader that could add images to books.
+
+The first version was closer to a basic reader with a visual panel. It could import a book, show text, and generate occasional images. That was enough to prove the feeling, but not enough to make the app coherent.
+
+The project has since grown through several layers:
+
+- **Reader foundation** — importing EPUBs, saving a library, restoring progress, and making the text comfortable to read.
+- **Visual layer** — identifying meaningful book moments and generating symbolic images instead of constant illustrations.
+- **Narrative map** — building a reusable understanding of the book so every feature can work from the same source.
+- **Knowledge layer** — highlights, notes, lens colors, and a drawer for returning to what mattered.
+- **Study layer** — study guides, quizzes, flashcards, and badges.
+- **Audio layer** — spoken overviews, narration tools, voice choices, and a floating player.
+- **Presentation layer** — turning book understanding into decks for teaching, review, or discussion.
+- **Archive layer** — preserving generated work instead of deleting everything when a book is removed or rebuilt.
+- **Responsive shell** — reshaping the app for desktop, tablet, and phone instead of assuming one screen size.
+- **Provider layer** — making Lumina Odysseus-first while keeping Gemini available as a cloud fallback.
+
+The direction is still changing as the app becomes more capable. This README is meant to be a living document that tracks that evolution, not just a setup note.
+
 ## Development
 
 Install dependencies:

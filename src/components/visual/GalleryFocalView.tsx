@@ -14,12 +14,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ModalPortal from "@/components/common/ModalPortal";
 import { animate, AnimatePresence, motion, useMotionValue } from "framer-motion";
-import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, RefreshCw, Check, AlertTriangle } from "lucide-react";
+import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, RefreshCw, Check, AlertTriangle, BookOpen, Image, List } from "lucide-react";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useBookStore } from "@/store/bookStore";
 import { useImageStore } from "@/store/imageStore";
+import { useUiStore } from "@/store/uiStore";
 import { visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { getImageForScene } from "@/utils/imagePosition";
 import { segmentScenesForSemanticMap } from "@/utils/sceneDedup";
@@ -158,6 +159,7 @@ export default function GalleryFocalView({
   const beatLabel = current?.beat?.beatType?.replace(/_/g, " ") ?? "scene";
   const activeSlot = useImageStore((s) => s.activeGenerationSlot);
   const isGenerating = useImageStore((s) => s.isGenerating);
+  const setPhonePanel = useUiStore((s) => s.setPhonePanel);
   const currentSlotKey = current ? visualSlotKeyForScene(current.scene, chapters) : null;
   const currentGenerating = current
     ? generatingId === current.scene.id ||
@@ -166,6 +168,11 @@ export default function GalleryFocalView({
 
   const handleBackdropClose = () => {
     if (Date.now() - openedAtRef.current < 350) return;
+    onClose();
+  };
+
+  const switchPhonePanel = (panel: "reader" | "visual" | "toc") => {
+    setPhonePanel(panel);
     onClose();
   };
 
@@ -188,6 +195,29 @@ export default function GalleryFocalView({
           {index + 1} / {items.length}
         </p>
         <div className="flex items-center gap-2">
+          <div className="mr-1 flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.025] p-1 md:hidden">
+            <button
+              onClick={() => switchPhonePanel("toc")}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-white/42 transition-colors hover:bg-white/[0.06] hover:text-lumina-gold/85"
+              aria-label="Contents"
+            >
+              <List size={16} />
+            </button>
+            <button
+              onClick={() => switchPhonePanel("reader")}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-white/42 transition-colors hover:bg-white/[0.06] hover:text-lumina-gold/85"
+              aria-label="Reader"
+            >
+              <BookOpen size={16} />
+            </button>
+            <button
+              onClick={() => switchPhonePanel("visual")}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-white/42 transition-colors hover:bg-white/[0.06] hover:text-lumina-gold/85"
+              aria-label="Visuals"
+            >
+              <Image size={16} />
+            </button>
+          </div>
           <button
             onClick={() => setShowBookMenu((open) => !open)}
             className="flex h-10 w-10 items-center justify-center rounded-md border border-white/10 bg-white/[0.025] text-white/42 backdrop-blur-sm transition-colors hover:border-lumina-gold/35 hover:bg-white/[0.06] hover:text-lumina-gold/85"
@@ -390,15 +420,13 @@ export default function GalleryFocalView({
           <div className="mt-5 max-w-xl text-center">
             <p className="text-[10px] uppercase tracking-[0.28em] text-lumina-gold/55">{beatLabel}</p>
             {caption && <p className="mt-2 font-serif text-sm leading-relaxed text-white/55">{caption}</p>}
-            {current.image && (
-              <button
-                onClick={() => onVisitPassage(current.scene.id)}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-white/45 transition-colors hover:border-lumina-gold/40 hover:text-lumina-gold/80"
-              >
-                <MapPin size={12} />
-                Visit passage
-              </button>
-            )}
+            <button
+              onClick={() => onVisitPassage(current.scene.id)}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-white/45 transition-colors hover:border-lumina-gold/40 hover:text-lumina-gold/80"
+            >
+              <MapPin size={12} />
+              Visit passage
+            </button>
           </div>
         </motion.div>
         )}

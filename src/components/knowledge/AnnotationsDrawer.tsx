@@ -45,6 +45,7 @@ import StudyGuide from "@/components/knowledge/StudyGuide";
 import VoiceStudio from "@/components/knowledge/VoiceStudio";
 import AudioOverview from "@/components/knowledge/AudioOverview";
 import PresentationStudio from "@/components/knowledge/PresentationStudio";
+import { showReaderAndNavigate } from "@/utils/readerNavigation";
 
 const LENS_EDGE: Record<string, string> = {
   yellow: "border-l-[#d8b24e]",
@@ -513,9 +514,8 @@ function GlossaryView({ onBack, onClose }: { onBack: () => void; onClose: () => 
   );
 
   const navigateTo = (h: Highlight) => {
-    const nav = (window as Window & { luminaNavigate?: (t: string) => void }).luminaNavigate;
     const target = h.locator || h.cfiRange; // structured locator first, else EPUB CFI
-    if (nav && target) nav(target);
+    if (target) showReaderAndNavigate(target);
     close(); // glossary entry tap closes the drawer and returns to the book
   };
 

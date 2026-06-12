@@ -14,13 +14,15 @@ import { toAssetUrl } from "@/utils/tauriBridge";
 import { LUMINA_CONFIG } from "@/config";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { useLongPress } from "@/hooks/useLongPress";
+import { useGalleryActions } from "@/hooks/useGalleryActions";
 import AmbientSceneLayer, { type AmbientPhase } from "@/components/visual/AmbientSceneLayer";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useUiStore } from "@/store/uiStore";
-import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { computeSceneWordPosition, getCurrentPlannedScene } from "@/utils/scenePosition";
 import { getImageForScene } from "@/utils/imagePosition";
 import { segmentScenesForSemanticMap, visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
+import { showReaderAndNavigate } from "@/utils/readerNavigation";
 import type { CachedImage, SemanticMap } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -79,17 +81,20 @@ export default function VisualPanel() {
     analysisProgressDetail,
     activeSemanticMap,
     activeStyleSeed,
+    activeStructure,
     setAnalysisRequested,
   } = useBookStore();
   const { imageGenerationEnabled, apiKeyConfigured } = useSettingsStore();
   const effectiveApiKeyConfigured = apiKeyConfigured || getProvider() === "odysseus";
   const currentCfi = useReaderStore((s) => s.currentCfi);
+  const wordPosition = useReaderStore((s) => s.wordPosition);
   const { isTablet } = useDeviceLayout();
   const [showRegenerate, setShowRegenerate] = useState(false);
   const { openGallery, showPlanStrip, setShowPlanStrip, togglePlanStrip, returnCfi, setReturnCfi } =
     useUiStore();
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
+  const { generateForScene } = useGalleryActions();
 
   // Brief done/failed confirmation after a (re-)analysis — the in-flight state is
   // already shown by the ambient layer / image overlay; this fills the missing
@@ -102,6 +107,13 @@ export default function VisualPanel() {
 
   const currentScene = currentImage
     ? activeSemanticMap?.scenes.find((scene) => scene.id === currentImage.sceneId)
+    : null;
+  const chapters = activeStructure?.chapters ?? EMPTY_CHAPTERS;
+  const plannedScenes = activeSemanticMap
+    ? segmentScenesForSemanticMap(activeSemanticMap.scenes, chapters, activeSemanticMap)
+    : [];
+  const currentPlannedScene = activeSemanticMap
+    ? getCurrentPlannedScene(plannedScenes, wordPosition, chapters)
     : null;
   const ambientGradient = activeSemanticMap
     ? ARC_AMBIENT_GRADIENTS[activeSemanticMap.arcShape] ?? ARC_AMBIENT_GRADIENTS.default
@@ -119,9 +131,9 @@ export default function VisualPanel() {
 
   const handleOpenGallery = useCallback(
     (sceneId?: string) => {
-      openGallery(sceneId ?? currentImage?.sceneId);
+      openGallery(sceneId ?? currentImage?.sceneId ?? currentPlannedScene?.id);
     },
-    [openGallery, currentImage?.sceneId]
+    [openGallery, currentImage?.sceneId, currentPlannedScene?.id]
   );
 
   useEffect(() => {
@@ -216,24 +228,25 @@ export default function VisualPanel() {
   }, [currentImage, activeBook, activeSemanticMap, activeStyleSeed, addToCache, setCurrentImage, setCurrentThemes]);
 
   const handleGoToScene = useCallback(() => {
-    if (!currentScene) return;
+    const targetScene = currentScene ?? currentPlannedScene;
+    if (!targetScene) return;
     rememberReadingSpot();
-    const win = window as Window & {
-      luminaNavigateToScene?: (target: string, wordOffset?: number) => void;
-      luminaNavigate?: (target: string) => void;
-    };
-    if (win.luminaNavigateToScene) {
-      win.luminaNavigateToScene(currentScene.chapterId, currentScene.anchor?.wordOffset ?? 0);
+    const chapterIndex = useBookStore.getState().activeStructure?.chapters.find(
+      (ch) => ch.id === targetScene.chapterId
+    )?.index;
+    if (chapterIndex !== undefined) {
+      showReaderAndNavigate(`lumina://chapter/${chapterIndex}/page/0`);
     } else {
-      const chapterIndex = useBookStore.getState().activeStructure?.chapters.find(
-        (ch) => ch.id === currentScene.chapterId
-      )?.index;
-      if (chapterIndex !== undefined) {
-        win.luminaNavigate?.(`lumina://chapter/${chapterIndex}/page/0`);
-      }
+      showReaderAndNavigate(targetScene.chapterId, targetScene.anchor?.wordOffset ?? 0);
     }
     setShowRegenerate(false);
-  }, [currentScene, rememberReadingSpot]);
+  }, [currentScene, currentPlannedScene, rememberReadingSpot]);
+
+  const handleGeneratePlannedScene = useCallback(async () => {
+    if (!currentPlannedScene) return;
+    await generateForScene(currentPlannedScene.id);
+    handleOpenGallery(currentPlannedScene.id);
+  }, [currentPlannedScene, generateForScene, handleOpenGallery]);
 
   return (
     <div className="flex flex-col h-full bg-surface-darker">
@@ -301,6 +314,13 @@ export default function VisualPanel() {
           />
         ) : hasFailed ? (
           <AmbientFailureState gradient={ambientGradient} onRetry={handleRegenerate} />
+        ) : currentPlannedScene ? (
+          <PlannedSceneState
+            onGenerate={handleGeneratePlannedScene}
+            onOpenGallery={() => handleOpenGallery(currentPlannedScene.id)}
+            onVisitPassage={handleGoToScene}
+            generating={isGenerating}
+          />
         ) : (() => {
           const queueGenerating = queue.some((q) => q.status === "generating");
           const waitingPhase = resolveWaitingPhase({
@@ -476,6 +496,62 @@ export default function VisualPanel() {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function PlannedSceneState({
+  onGenerate,
+  onOpenGallery,
+  onVisitPassage,
+  generating,
+}: {
+  onGenerate: () => void;
+  onOpenGallery: () => void;
+  onVisitPassage: () => void;
+  generating: boolean;
+}) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#070f19] px-6 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-full border border-lumina-gold/20 bg-lumina-gold/[0.06]">
+        {generating ? (
+          <Loader size={22} className="animate-spin text-lumina-gold/70" />
+        ) : (
+          <Sparkles size={22} className="text-lumina-gold/55" />
+        )}
+      </div>
+      <div className="max-w-xs space-y-1.5">
+        <p className="text-xs uppercase tracking-[0.2em] text-lumina-gold/65">
+          Planned visual moment
+        </p>
+        <p className="text-xs leading-relaxed text-ink-faint">
+          This passage has a place in the visual plan, but no image has been generated yet.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <button
+          onClick={onGenerate}
+          disabled={generating}
+          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-lumina-gold/35 bg-lumina-gold/10 px-4 text-[11px] uppercase tracking-[0.14em] text-lumina-gold/85 transition-colors hover:bg-lumina-gold/15 disabled:opacity-60"
+        >
+          {generating ? <Loader size={13} className="animate-spin" /> : <Sparkles size={13} />}
+          Generate image
+        </button>
+        <button
+          onClick={onOpenGallery}
+          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/12 px-4 text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:border-lumina-gold/35 hover:text-lumina-gold/80"
+        >
+          <LayoutGrid size={13} />
+          Gallery
+        </button>
+        <button
+          onClick={onVisitPassage}
+          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/12 px-4 text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:border-lumina-gold/35 hover:text-lumina-gold/80"
+        >
+          <MapPin size={13} />
+          Passage
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function ImageDisplay({
   src,

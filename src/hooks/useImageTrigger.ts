@@ -19,9 +19,11 @@ import { getStyleSeedById } from "@/data/styleSeeds";
 import { LUMINA_CONFIG } from "@/config";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { getCurrentPlannedScene } from "@/utils/scenePosition";
 import {
   getDisplayImage,
   getGoverningImage,
+  getImageForScene,
   hasPositionedImages,
   resolveImageWordPosition,
 } from "@/utils/imagePosition";
@@ -87,6 +89,7 @@ export function useImageTrigger() {
     const currentSceneIds = new Set(activeSemanticMap.scenes.map((scene) => scene.id));
     const allCached = Object.values(useImageStore.getState().imageCache);
     const cachedImages = allCached.filter((image) => currentSceneIds.has(image.sceneId));
+    const canonicalScenes = segmentScenesForSemanticMap(activeSemanticMap.scenes, chapters, activeSemanticMap);
 
     let current = useImageStore.getState().currentImage;
     const readerPos = useReaderStore.getState().wordPosition;
@@ -99,7 +102,14 @@ export function useImageTrigger() {
       current = null;
     }
 
-    const displayImage = getDisplayImage(cachedImages, readerPos, chapters);
+    const activePlannedScene = getCurrentPlannedScene(canonicalScenes, readerPos, chapters);
+    const activeSceneImage = activePlannedScene
+      ? getImageForScene(activePlannedScene, cachedImages, chapters, canonicalScenes)
+      : null;
+    const isNavigationJump = Date.now() < useImageStore.getState().navigationJumpUntil;
+    const displayImage = isNavigationJump
+      ? activeSceneImage ?? null
+      : getDisplayImage(cachedImages, readerPos, chapters);
     const governingImage = getGoverningImage(cachedImages, readerPos, chapters);
     const currentImagePosition =
       current && chapters.length > 0 ? resolveImageWordPosition(current, chapters) : -1;
@@ -135,7 +145,7 @@ export function useImageTrigger() {
           });
         }
       }
-    } else if (current && hasPositionedImages(cachedImages, chapters)) {
+    } else if (current && (isNavigationJump || hasPositionedImages(cachedImages, chapters))) {
       setCurrentImage(null);
       setCurrentThemes([]);
     }

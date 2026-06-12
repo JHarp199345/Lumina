@@ -43,3 +43,28 @@ export function computeSceneWordPosition(
     .slice(0, chapter.index)
     .reduce((sum, ch) => sum + ch.wordCount, 0);
 }
+
+export function sceneWordPositions(
+  scenes: IdentifiedScene[],
+  chapters: Chapter[]
+): Array<{ scene: IdentifiedScene; position: number }> {
+  return scenes
+    .map((scene) => ({ scene, position: computeSceneWordPosition(scene, chapters) }))
+    .sort((a, b) => a.position - b.position);
+}
+
+export function getCurrentPlannedScene(
+  scenes: IdentifiedScene[],
+  wordPosition: number,
+  chapters: Chapter[]
+): IdentifiedScene | null {
+  const positioned = sceneWordPositions(scenes, chapters);
+  if (positioned.length === 0) return null;
+
+  let current = positioned[0];
+  for (const item of positioned) {
+    if (item.position > wordPosition) break;
+    current = item;
+  }
+  return current.scene;
+}
