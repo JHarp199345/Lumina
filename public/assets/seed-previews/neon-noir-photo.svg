@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <filter id="nn-glow-c">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="nn-glow-p">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="nn-blur-heavy"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="nn-blur-soft"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+  <!-- Dark wet street -->
+  <rect width="320" height="180" fill="#030508"/>
+  <rect x="0" y="108" width="320" height="72" fill="#060a10"/>
+  <!-- Building facades (dark) -->
+  <rect x="0" y="0" width="80" height="115" fill="#0a0c14"/>
+  <rect x="240" y="0" width="80" height="108" fill="#090b12"/>
+  <!-- Neon signs -->
+  <rect x="15" y="22" width="48" height="7" rx="2" fill="#ff2d78" opacity="0.95" filter="url(#nn-glow-p)"/>
+  <rect x="15" y="34" width="32" height="5" rx="2" fill="#ff2d78" opacity="0.7" filter="url(#nn-glow-p)"/>
+  <rect x="252" y="18" width="55" height="7" rx="2" fill="#00e0ff" opacity="0.9" filter="url(#nn-glow-c)"/>
+  <rect x="262" y="30" width="35" height="5" rx="2" fill="#00e0ff" opacity="0.65" filter="url(#nn-glow-c)"/>
+  <rect x="130" y="26" width="60" height="6" rx="2" fill="#ffaa00" opacity="0.85" filter="url(#nn-blur-soft)"/>
+  <!-- Vertical neon strip -->
+  <rect x="78" y="8" width="4" height="100" rx="2" fill="#00e0ff" opacity="0.45" filter="url(#nn-blur-soft)"/>
+  <rect x="238" y="12" width="4" height="92" rx="2" fill="#ff2d78" opacity="0.4" filter="url(#nn-blur-soft)"/>
+  <!-- Wet street reflections -->
+  <ellipse cx="75" cy="148" rx="58" ry="9" fill="#ff2d78" opacity="0.28" filter="url(#nn-blur-heavy)"/>
+  <ellipse cx="252" cy="145" rx="48" ry="8" fill="#00e0ff" opacity="0.22" filter="url(#nn-blur-heavy)"/>
+  <ellipse cx="160" cy="152" rx="42" ry="7" fill="#ffaa00" opacity="0.2" filter="url(#nn-blur-heavy)"/>
+  <!-- Rain streaks -->
+  <line x1="28" y1="0" x2="23" y2="55" stroke="white" stroke-width="0.5" opacity="0.14"/>
+  <line x1="78" y1="5" x2="73" y2="62" stroke="white" stroke-width="0.5" opacity="0.11"/>
+  <line x1="138" y1="0" x2="133" y2="58" stroke="white" stroke-width="0.5" opacity="0.1"/>
+  <line x1="195" y1="8" x2="190" y2="65" stroke="white" stroke-width="0.5" opacity="0.12"/>
+  <line x1="252" y1="0" x2="247" y2="60" stroke="white" stroke-width="0.5" opacity="0.1"/>
+  <line x1="302" y1="4" x2="297" y2="52" stroke="white" stroke-width="0.5" opacity="0.13"/>
+  <!-- Figure silhouette -->
+  <rect x="150" y="62" width="9" height="48" fill="#030508"/>
+  <circle cx="154" cy="56" r="7" fill="#030508"/>
+  <!-- Cyan rim light on figure -->
+  <ellipse cx="150" cy="88" rx="4" ry="22" fill="#00e0ff" opacity="0.55" filter="url(#nn-blur-soft)"/>
+</svg>

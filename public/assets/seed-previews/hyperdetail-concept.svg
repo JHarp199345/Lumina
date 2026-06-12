@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <filter id="hc-blur-med"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="hc-blur-soft"><feGaussianBlur stdDeviation="2.5"/></filter>
+    <linearGradient id="hc-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#020810"/>
+      <stop offset="55%" stop-color="#081828"/>
+      <stop offset="100%" stop-color="#102030"/>
+    </linearGradient>
+    <radialGradient id="hc-focal" cx="50%" cy="46%">
+      <stop offset="0%" stop-color="#3070c8" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#3070c8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="320" height="180" fill="url(#hc-sky)"/>
+  <!-- Atmospheric focal glow -->
+  <ellipse cx="160" cy="82" rx="125" ry="85" fill="url(#hc-focal)" filter="url(#hc-blur-med)"/>
+  <!-- Background mountain range (epic scale) -->
+  <polygon points="0,138 35,78 68,118 105,66 145,92 185,58 228,88 268,72 320,98 320,180 0,180" fill="#081420"/>
+  <!-- Central mega-structure -->
+  <rect x="138" y="88" width="44" height="92" fill="#0c1a28"/>
+  <rect x="142" y="72" width="36" height="20" fill="#0c1a28"/>
+  <rect x="150" y="60" width="20" height="16" fill="#0c1a28"/>
+  <rect x="155" y="50" width="10" height="14" fill="#0c1a28"/>
+  <!-- Structure horizontal detail lines -->
+  <line x1="138" y1="94" x2="182" y2="94" stroke="#3070c8" stroke-width="0.5" opacity="0.45"/>
+  <line x1="138" y1="108" x2="182" y2="108" stroke="#3070c8" stroke-width="0.5" opacity="0.35"/>
+  <line x1="138" y1="122" x2="182" y2="122" stroke="#3070c8" stroke-width="0.4" opacity="0.28"/>
+  <line x1="138" y1="136" x2="182" y2="136" stroke="#3070c8" stroke-width="0.4" opacity="0.22"/>
+  <!-- Window lights -->
+  <rect x="145" y="96" width="4" height="3" fill="#5a9ae0" opacity="0.72"/>
+  <rect x="153" y="96" width="4" height="3" fill="#5a9ae0" opacity="0.65"/>
+  <rect x="161" y="96" width="4" height="3" fill="#5a9ae0" opacity="0.58"/>
+  <rect x="169" y="96" width="4" height="3" fill="#5a9ae0" opacity="0.5"/>
+  <rect x="147" y="110" width="4" height="3" fill="#5a9ae0" opacity="0.42"/>
+  <rect x="158" y="110" width="4" height="3" fill="#5a9ae0" opacity="0.5"/>
+  <rect x="168" y="110" width="4" height="3" fill="#5a9ae0" opacity="0.38"/>
+  <!-- Foreground grid lines -->
+  <line x1="0" y1="148" x2="320" y2="148" stroke="#3070c8" stroke-width="0.4" opacity="0.2"/>
+  <line x1="0" y1="162" x2="320" y2="162" stroke="#3070c8" stroke-width="0.35" opacity="0.14"/>
+  <!-- Foreground figure -->
+  <rect x="38" y="116" width="8" height="28" fill="#040c18"/>
+  <circle cx="42" cy="111" r="6" fill="#040c18"/>
+  <!-- Ambient particles -->
+  <circle cx="98" cy="108" r="1.5" fill="#3070c8" opacity="0.5"/>
+  <circle cx="225" cy="98" r="1.5" fill="#3070c8" opacity="0.45"/>
+  <circle cx="68" cy="122" r="1" fill="#3070c8" opacity="0.4"/>
+  <circle cx="252" cy="112" r="1" fill="#3070c8" opacity="0.38"/>
+</svg>

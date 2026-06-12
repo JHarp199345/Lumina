@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <filter id="vp-blur-med"><feGaussianBlur stdDeviation="8"/></filter>
+    <filter id="vp-blur-soft"><feGaussianBlur stdDeviation="3"/></filter>
+    <radialGradient id="vp-planet" cx="50%" cy="50%">
+      <stop offset="0%" stop-color="#204080"/>
+      <stop offset="100%" stop-color="#081428"/>
+    </radialGradient>
+    <linearGradient id="vp-space" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000510"/>
+      <stop offset="100%" stop-color="#001020"/>
+    </linearGradient>
+  </defs>
+  <!-- Deep space -->
+  <rect width="320" height="180" fill="url(#vp-space)"/>
+  <!-- Stars -->
+  <circle cx="18" cy="12" r="1.2" fill="white" opacity="0.85"/>
+  <circle cx="55" cy="28" r="1.5" fill="white" opacity="0.65"/>
+  <circle cx="98" cy="8" r="1" fill="white" opacity="0.9"/>
+  <circle cx="155" cy="18" r="1" fill="white" opacity="0.75"/>
+  <circle cx="205" cy="22" r="1.5" fill="white" opacity="0.7"/>
+  <circle cx="272" cy="10" r="1.2" fill="white" opacity="0.8"/>
+  <circle cx="308" cy="38" r="1" fill="white" opacity="0.65"/>
+  <circle cx="25" cy="62" r="1" fill="white" opacity="0.55"/>
+  <circle cx="12" cy="105" r="1" fill="white" opacity="0.7"/>
+  <circle cx="310" cy="82" r="1" fill="white" opacity="0.6"/>
+  <circle cx="290" cy="145" r="1.2" fill="white" opacity="0.5"/>
+  <!-- Large ringed planet (background) -->
+  <circle cx="248" cy="122" r="76" fill="url(#vp-planet)"/>
+  <ellipse cx="248" cy="122" rx="108" ry="18" fill="none" stroke="#5a78c0" stroke-width="10" opacity="0.38"/>
+  <ellipse cx="248" cy="122" rx="108" ry="18" fill="none" stroke="#8aaae0" stroke-width="3" opacity="0.22"/>
+  <!-- Rocket body (1950s classic, angled) -->
+  <g transform="rotate(-28 118 88)">
+    <!-- Main body -->
+    <ellipse cx="118" cy="88" rx="13" ry="42" fill="#c81818"/>
+    <!-- Nose cone highlight -->
+    <ellipse cx="115" cy="50" rx="6" ry="12" fill="#e03030" opacity="0.7"/>
+    <!-- Nose tip -->
+    <polygon points="118,44 110,64 126,64" fill="#dd2828"/>
+    <!-- Porthole -->
+    <circle cx="116" cy="86" r="7" fill="#a8d8f8" opacity="0.85"/>
+    <circle cx="116" cy="86" r="5" fill="#c8ecff" opacity="0.6"/>
+    <!-- Fins -->
+    <polygon points="105,108 88,140 116,126" fill="#a01010"/>
+    <polygon points="131,108 148,140 124,126" fill="#a01010"/>
+    <!-- Engine glow -->
+    <ellipse cx="118" cy="132" rx="9" ry="18" fill="#ff6800" opacity="0.75" filter="url(#vp-blur-soft)"/>
+    <ellipse cx="118" cy="138" rx="5" ry="12" fill="#ffb200" opacity="0.8" filter="url(#vp-blur-soft)"/>
+  </g>
+  <!-- Alien green atmosphere glow -->
+  <ellipse cx="58" cy="148" rx="52" ry="20" fill="#00cc44" opacity="0.28" filter="url(#vp-blur-med)"/>
+  <!-- Pulp title bar at bottom -->
+  <rect x="0" y="160" width="320" height="20" fill="#c81818" opacity="0.9"/>
+  <rect x="0" y="160" width="320" height="2" fill="#ffcc00"/>
+</svg>

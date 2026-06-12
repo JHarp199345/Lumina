@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <filter id="op-blur-heavy"><feGaussianBlur stdDeviation="18"/></filter>
+    <filter id="op-blur-med"><feGaussianBlur stdDeviation="7"/></filter>
+    <filter id="op-blur-soft"><feGaussianBlur stdDeviation="3"/></filter>
+    <radialGradient id="op-candle" cx="44%" cy="54%">
+      <stop offset="0%" stop-color="#d07828" stop-opacity="0.95"/>
+      <stop offset="28%" stop-color="#a04e10" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#140600" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="op-vignette" cx="50%" cy="50%">
+      <stop offset="38%" stop-color="#160800" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#060200" stop-opacity="0.9"/>
+    </radialGradient>
+  </defs>
+  <!-- Raw dark canvas -->
+  <rect width="320" height="180" fill="#120600"/>
+  <!-- Warm candlelight bloom -->
+  <ellipse cx="142" cy="96" rx="135" ry="105" fill="url(#op-candle)"/>
+  <!-- Deep amber mid-tone flesh -->
+  <ellipse cx="142" cy="90" rx="78" ry="68" fill="#904010" opacity="0.38" filter="url(#op-blur-med)"/>
+  <!-- Portrait highlight -->
+  <ellipse cx="140" cy="76" rx="40" ry="48" fill="#c0601a" opacity="0.48" filter="url(#op-blur-med)"/>
+  <!-- Forehead catch-light (brightest point) -->
+  <ellipse cx="130" cy="58" rx="20" ry="13" fill="#e09030" opacity="0.55" filter="url(#op-blur-soft)"/>
+  <!-- Rembrandt triangle cheek highlight -->
+  <polygon points="108,72 130,82 112,97" fill="#d07828" opacity="0.28"/>
+  <!-- Dark drapery masses -->
+  <ellipse cx="272" cy="88" rx="72" ry="82" fill="#0e0400" opacity="0.65"/>
+  <ellipse cx="28" cy="132" rx="52" ry="62" fill="#0e0400" opacity="0.55"/>
+  <!-- Vignette -->
+  <rect width="320" height="180" fill="url(#op-vignette)"/>
+  <!-- Subtle impasto texture lines -->
+  <rect x="58" y="82" width="145" height="1" fill="#c0601a" opacity="0.09" filter="url(#op-blur-soft)"/>
+  <rect x="68" y="90" width="125" height="1" fill="#c0601a" opacity="0.07" filter="url(#op-blur-soft)"/>
+  <rect x="78" y="98" width="110" height="1" fill="#c0601a" opacity="0.06" filter="url(#op-blur-soft)"/>
+</svg>

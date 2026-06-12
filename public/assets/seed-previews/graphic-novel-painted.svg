@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <filter id="gn-blur-med"><feGaussianBlur stdDeviation="8"/></filter>
+    <filter id="gn-blur-soft"><feGaussianBlur stdDeviation="3"/></filter>
+    <linearGradient id="gn-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#080e34"/>
+      <stop offset="100%" stop-color="#141a50"/>
+    </linearGradient>
+    <radialGradient id="gn-uplight" cx="50%" cy="90%">
+      <stop offset="0%" stop-color="#c89020" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#c89020" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="320" height="180" fill="url(#gn-sky)"/>
+  <!-- Dramatic painted cloud shapes -->
+  <ellipse cx="75" cy="48" rx="105" ry="32" fill="#10185a" opacity="0.85"/>
+  <ellipse cx="245" cy="38" rx="90" ry="26" fill="#0c1445" opacity="0.9"/>
+  <ellipse cx="160" cy="28" rx="85" ry="18" fill="#161e62" opacity="0.75"/>
+  <!-- Up-light (hero glow from below) -->
+  <ellipse cx="160" cy="168" rx="88" ry="52" fill="url(#gn-uplight)" filter="url(#gn-blur-med)"/>
+  <!-- Sweeping cape (dramatic red) -->
+  <polygon points="145,78 122,170 205,170 175,78" fill="#920a14" opacity="0.88"/>
+  <polygon points="145,78 118,158 168,152 175,78" fill="#b01020" opacity="0.72"/>
+  <!-- Hero body -->
+  <rect x="146" y="72" width="28" height="58" fill="#080c26" rx="2"/>
+  <!-- Hero head -->
+  <ellipse cx="160" cy="65" rx="14" ry="15" fill="#080c26"/>
+  <!-- Arms -->
+  <rect x="118" y="88" width="30" height="9" fill="#080c26" rx="3"/>
+  <rect x="172" y="88" width="30" height="9" fill="#080c26" rx="3"/>
+  <!-- Gold chest emblem -->
+  <polygon points="160,82 156,91 164,91" fill="#c89020" opacity="0.85"/>
+  <polygon points="160,82 156,91 160,87" fill="#e0a828" opacity="0.5"/>
+  <!-- Ground level dark -->
+  <rect x="0" y="162" width="320" height="18" fill="#04060e"/>
+  <!-- Red cape highlight -->
+  <ellipse cx="155" cy="132" rx="22" ry="32" fill="#cc2828" opacity="0.18" filter="url(#gn-blur-soft)"/>
+</svg>
