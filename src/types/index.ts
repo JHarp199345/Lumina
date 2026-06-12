@@ -492,7 +492,14 @@ export type StyleSeedId =
   | "golden-manuscript"
   | "cold-northern-light"
   | "smoke-ember"
-  | "pale-surrealism";
+  | "pale-surrealism"
+  | "cinematic-photorealism"
+  | "dark-fantasy-photo"
+  | "neon-noir-photo"
+  | "oil-painting-master"
+  | "hyperdetail-concept"
+  | "graphic-novel-painted"
+  | "vintage-pulp";
 
 export interface StyleSeed {
   id: StyleSeedId;
@@ -500,7 +507,15 @@ export interface StyleSeed {
   description: string;
   promptFragment: string;
   paletteKeywords: string[];
-  previewImage: string; // path to asset
+  previewImage: string;
+  /**
+   * "photorealistic" seeds need inverted negative prompts — "painting,
+   * illustration, cartoon" instead of "photorealistic, photograph".
+   * Painterly seeds get the default negative list.
+   */
+  renderMode?: "painterly" | "photorealistic";
+  /** Completely replaces the base negative prompt when set. */
+  negativePrompt?: string;
 }
 
 // ─── Archive (artifacts kept after a book leaves the library) ─────────────────

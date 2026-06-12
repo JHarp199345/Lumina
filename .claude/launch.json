@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "agents-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "7870", "--directory", "/Users/jesseharper/Documents/Workshop/odysseus"],
+      "port": 7870
+    },
+    {
       "name": "lumina-web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "web:dev"],

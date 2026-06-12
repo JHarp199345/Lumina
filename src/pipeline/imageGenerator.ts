@@ -11,7 +11,7 @@
 import type { IdentifiedScene, StyleSeed, CachedImage } from "@/types";
 import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
-import { buildFinalImagePrompt, buildComfyUIPrompt } from "./visualDirector";
+import { buildFinalImagePrompt, buildComfyUIPrompt, buildIterativePassPlan, buildNegativePrompt } from "./visualDirector";
 import { getProvider, getOdysseusUrl, getOdysseusToken } from "@/api/llmClient";
 
 const IMAGEN_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -59,8 +59,9 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
   let apiUsed: CachedImage["generationApi"] = "imagen3";
 
   if (getProvider() === "odysseus") {
-    // Local path: ComfyUI via Odysseus proxy
-    imageData = await generateWithComfyUI(prompt, negativePrompt);
+    // Local path: iterative multi-pass refinement via Odysseus → ComfyUI.
+    // Falls back to single-pass if the iterative endpoint isn't available.
+    imageData = await generateWithComfyUIIterative(options.scene, options.styleSeed, prompt, negativePrompt);
     apiUsed = "comfyui";
   } else {
     // Cloud path: Imagen 3 → Gemini image → fal.ai Flux
@@ -344,7 +345,94 @@ async function generateWithFlux(prompt: string, falApiKey: string): Promise<Uint
   throw new Error("Flux generation timed out");
 }
 
-// ─── ComfyUI via Odysseus ─────────────────────────────────────────────────────
+// ─── ComfyUI via Odysseus — iterative multi-pass ─────────────────────────────
+
+async function generateWithComfyUIIterative(
+  scene: IdentifiedScene,
+  styleSeed: StyleSeed,
+  fallbackPrompt: string,
+  negativePrompt: string
+): Promise<Uint8Array> {
+  const base = getOdysseusUrl();
+  const token = getOdysseusToken();
+  const authHeaders: Record<string, string> = token ? { "Authorization": `Bearer ${token}` } : {};
+
+  // Build the three-pass plan when we have a director brief; fall back to
+  // single-pass with the already-built prompt otherwise.
+  const passPlan = scene.directorBrief
+    ? buildIterativePassPlan(scene.directorBrief, styleSeed)
+    : null;
+
+  // Build the evaluation spec so the vision evaluator knows what to look for.
+  const evalSpec = {
+    required_elements: scene.directorBrief?.concreteAnchors ?? [],
+    lore_entities: scene.directorBrief?.loreEntityNames ?? [],
+    dominant_emotion: scene.directorBrief?.dominantEmotion ?? scene.emotionalVector[0] ?? "",
+    focal_point: scene.directorBrief?.blocking.focalPoint ?? "",
+    palette: scene.directorBrief?.palette ?? styleSeed.paletteKeywords,
+  };
+
+  const body = {
+    pass1_prompt: passPlan?.pass1 ?? fallbackPrompt,
+    pass2_prompt: passPlan?.pass2 ?? null,
+    pass3_prompt: passPlan?.pass3 ?? null,
+    negative_prompt: negativePrompt,
+    width: 1024,
+    height: 576,
+    eval_spec: evalSpec,
+    max_correction_passes: 2,
+  };
+
+  try {
+    // Try the iterative endpoint first.
+    const startRes = await fetch(`${base}/api/images/generate/iterative`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify(body),
+    });
+
+    if (startRes.ok) {
+      const { job_id } = await startRes.json() as { job_id: string };
+      return await pollComfyUIJob(job_id, base, authHeaders, 180);
+    }
+
+    // If 404, iterative endpoint not yet deployed — fall through to single-pass.
+    if (startRes.status !== 404) {
+      const msg = await startRes.text().catch(() => "");
+      throw new Error(`ComfyUI iterative queue error ${startRes.status}: ${msg}`);
+    }
+  } catch (err) {
+    if (err instanceof Error && !err.message.includes("iterative queue error")) {
+      throw err; // real error, not a 404 fallthrough
+    }
+  }
+
+  // Fallback: single-pass
+  return generateWithComfyUI(fallbackPrompt, negativePrompt);
+}
+
+async function pollComfyUIJob(
+  jobId: string,
+  base: string,
+  authHeaders: Record<string, string>,
+  maxAttempts: number
+): Promise<Uint8Array> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise<void>((r) => setTimeout(r, 3000));
+    const pollRes = await fetch(`${base}/api/images/jobs/${jobId}`, { headers: authHeaders });
+    if (!pollRes.ok) continue;
+    const job = await pollRes.json() as { status: string; image_url?: string; error?: string };
+    if (job.status === "done" && job.image_url) {
+      const imgRes = await fetch(`${base}${job.image_url}`, { headers: authHeaders });
+      if (!imgRes.ok) throw new Error(`Image fetch error ${imgRes.status}`);
+      return new Uint8Array(await imgRes.arrayBuffer());
+    }
+    if (job.status === "error") throw new Error(`Generation failed: ${job.error ?? "unknown"}`);
+  }
+  throw new Error("ComfyUI generation timed out");
+}
+
+// ─── ComfyUI via Odysseus — single pass ──────────────────────────────────────
 
 async function generateWithComfyUI(prompt: string, negativePrompt: string): Promise<Uint8Array> {
   const base = getOdysseusUrl();
@@ -367,45 +455,7 @@ async function generateWithComfyUI(prompt: string, negativePrompt: string): Prom
     throw new Error(`ComfyUI queue error ${startRes.status}: ${msg}`);
   }
   const { job_id } = await startRes.json() as { job_id: string };
-
-  // Poll every 3s for up to 6 minutes. Each request is short — avoids the
-  // Cloudflare 100-second tunnel timeout that would kill a blocking generate call.
-  let authFailures = 0;
-  for (let attempt = 0; attempt < 120; attempt++) {
-    await new Promise<void>((r) => setTimeout(r, 3000));
-
-    const pollRes = await fetch(`${base}/api/images/jobs/${job_id}`, { headers: authHeaders });
-    if (!pollRes.ok) {
-      if (pollRes.status === 401 || pollRes.status === 403) {
-        authFailures += 1;
-        if (authFailures >= 2) {
-          throw new Error(
-            `Odysseus image poll auth failed (${pollRes.status}). Check your API token in Settings.`
-          );
-        }
-      }
-      continue;
-    }
-    authFailures = 0;
-    const job = await pollRes.json() as { status: string; image_url?: string; error?: string };
-
-    if (job.status === "done" && job.image_url) {
-      const imgRes = await fetch(`${base}${job.image_url}`, { headers: authHeaders });
-      if (!imgRes.ok) {
-        if (imgRes.status === 401 || imgRes.status === 403) {
-          throw new Error(
-            `Odysseus image fetch auth failed (${imgRes.status}). Check your API token in Settings.`
-          );
-        }
-        throw new Error(`ComfyUI image fetch error ${imgRes.status}`);
-      }
-      return new Uint8Array(await imgRes.arrayBuffer());
-    }
-    if (job.status === "error") {
-      throw new Error(`ComfyUI generation failed: ${job.error ?? "unknown error"}`);
-    }
-  }
-  throw new Error("ComfyUI generation timed out (6 min)");
+  return pollComfyUIJob(job_id, base, authHeaders, 120);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

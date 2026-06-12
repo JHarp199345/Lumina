@@ -511,7 +511,7 @@ function normalizeBrief(
   };
 
   brief.finalPrompt = buildFinalImagePrompt(brief, params.styleSeed);
-  brief.negativePrompt = buildNegativePrompt(brief, params.interpretationLevel);
+  brief.negativePrompt = buildNegativePrompt(brief, params.interpretationLevel, params.styleSeed);
   return brief;
 }
 
@@ -573,7 +573,7 @@ function buildFallbackBrief(
   };
 
   brief.finalPrompt = buildFinalImagePrompt(brief, params.styleSeed);
-  brief.negativePrompt = buildNegativePrompt(brief, params.interpretationLevel);
+  brief.negativePrompt = buildNegativePrompt(brief, params.interpretationLevel, params.styleSeed);
   return brief;
 }
 
@@ -674,25 +674,109 @@ export function buildFinalImagePrompt(brief: VisualDirectorBrief, styleSeed: Sty
     .join(" ");
 }
 
-export function buildNegativePrompt(brief: VisualDirectorBrief, level: number): string {
-  const base = [
-    "photorealistic",
-    "photograph",
-    "celebrity likeness",
-    "portrait photography",
-    "readable text",
-    "letters",
-    "watermark",
-    "logo",
-    "graphic gore",
-    "mutilation",
-    "modern objects",
-    "3d render",
-    "CGI",
-    "low quality",
-  ];
-  if (level < 60) base.push("clear faces", "literal portrait");
+export function buildNegativePrompt(
+  brief: VisualDirectorBrief,
+  level: number,
+  styleSeed?: StyleSeed
+): string {
+  // Photorealistic seeds explicitly want photographs — their negatives are
+  // paintings/cartoons, not "photorealistic". Use the seed's override if set.
+  if (styleSeed?.negativePrompt) {
+    return [...styleSeed.negativePrompt.split(",").map((s) => s.trim()), ...brief.avoidExplicitly].join(", ");
+  }
+
+  const base =
+    styleSeed?.renderMode === "photorealistic"
+      ? [
+          "painting",
+          "illustration",
+          "cartoon",
+          "anime",
+          "manga",
+          "watercolor",
+          "sketch",
+          "drawing",
+          "3d render",
+          "CGI",
+          "low quality",
+          "blurry",
+          "plastic",
+          "unrealistic",
+        ]
+      : [
+          "photorealistic",
+          "photograph",
+          "celebrity likeness",
+          "portrait photography",
+          "readable text",
+          "letters",
+          "watermark",
+          "logo",
+          "graphic gore",
+          "mutilation",
+          "modern objects",
+          "3d render",
+          "CGI",
+          "low quality",
+        ];
+
+  if (level < 60 && styleSeed?.renderMode !== "photorealistic") {
+    base.push("clear faces", "literal portrait");
+  }
   return [...base, ...brief.avoidExplicitly].join(", ");
+}
+
+/**
+ * Three-pass prompt plan for iterative Flux refinement:
+ *   Pass 1 — composition and mood (full denoise)
+ *   Pass 2 — subject and material detail (img2img, moderate denoise)
+ *   Pass 3 — lighting and atmosphere (img2img, light touch)
+ *
+ * Each pass focuses on one layer so the sampler isn't fighting to do
+ * everything at once. Pass 2 and 3 preserve what came before and only
+ * add what they specialize in.
+ */
+export function buildIterativePassPlan(
+  brief: VisualDirectorBrief,
+  styleSeed: StyleSeed
+): { pass1: string; pass2: string; pass3: string } {
+  // Pass 1: full scene — the same compact tag prompt we send to ComfyUI normally
+  const pass1 = buildComfyUIPrompt(brief, styleSeed);
+
+  // Pass 2: zoom in on the primary subject's material and surface detail.
+  // The highest-priority element's depiction field is the richest per-element
+  // visual text the director produced — exactly what we want to reinforce.
+  const topElements = [...brief.blocking.elements]
+    .sort((a, b) => b.visualPriority - a.visualPriority)
+    .slice(0, 2);
+
+  const pass2 = [
+    ...topElements.map((el) => el.depiction).filter(Boolean),
+    brief.blocking.focalPoint,
+    ...brief.loreDescriptorsUsed.slice(0, 5),
+    ...brief.concreteAnchors.slice(0, 4),
+    ...brief.palette.slice(0, 3),
+    "fine detail, sharp material texture, intricate surface",
+    styleSeed.promptFragment,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  // Pass 3: atmosphere and light polish — do not change composition, only add depth.
+  const pass3 = [
+    brief.dominantEmotion,
+    brief.lighting,
+    brief.texture,
+    ...brief.emotionalTone.slice(0, 2),
+    ...brief.palette,
+    ...brief.symbolicAnchors.slice(0, 3),
+    "atmospheric depth, ambient occlusion, volumetric light, color coherence",
+    styleSeed.promptFragment,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return { pass1, pass2, pass3 };
 }
 
 function inferMomentFunction(scene: IdentifiedScene): MomentFunction {
