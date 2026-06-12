@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { STYLE_SEEDS } from "@/data/styleSeeds";
-import { getDisplayThumb } from "@/pipeline/imageGenerator";
+import { getDisplayThumb } from "@/utils/styleThumbs";
 import type { StyleSeedId } from "@/types";
 
 interface SeedPickerProps {

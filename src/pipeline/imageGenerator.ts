@@ -28,49 +28,11 @@ const EXPOSITORY_NEGATIVE_PROMPT =
   "boss battle, photorealistic photograph, celebrity likeness, readable text, words, letters, watermarks, " +
   "low quality, blurry, decorative flourish without information";
 
-// ─── Style Thumbnail Store ────────────────────────────────────────────────────
-
-const THUMBS_MAX = 5;
-
-export interface StyleThumbStore {
-  thumbs: string[];       // JPEG data URLs, newest first (max THUMBS_MAX)
-  pinned: string | null;  // if set, always shown in the picker
-}
-
-export const STYLE_THUMBS_KEY = (id: string) => `lumina:style_thumbs:${id}`;
-
-export function loadStyleThumbs(id: string): StyleThumbStore {
-  try {
-    const raw = localStorage.getItem(STYLE_THUMBS_KEY(id));
-    if (raw) return JSON.parse(raw) as StyleThumbStore;
-  } catch { /* ignore */ }
-  return { thumbs: [], pinned: null };
-}
-
-function _saveStyleThumbStore(id: string, store: StyleThumbStore): void {
-  try {
-    localStorage.setItem(STYLE_THUMBS_KEY(id), JSON.stringify(store));
-  } catch { /* ignore quota errors */ }
-}
-
-export function pinStyleThumb(id: string, thumb: string): void {
-  const store = loadStyleThumbs(id);
-  store.pinned = store.pinned === thumb ? null : thumb; // toggle
-  _saveStyleThumbStore(id, store);
-  window.dispatchEvent(new CustomEvent("lumina:thumbs_updated"));
-}
-
-export function getDisplayThumb(id: string): string | null {
-  const { thumbs, pinned } = loadStyleThumbs(id);
-  if (pinned && thumbs.includes(pinned)) return pinned;
-  if (thumbs.length === 0) return null;
-  return thumbs[Math.floor(Math.random() * thumbs.length)];
-}
+import { appendStyleThumb } from "@/utils/styleThumbs";
 
 /**
  * After a successful generation, downscale to a 320×180 JPEG thumbnail
- * and prepend it to this style's stored array (capped at THUMBS_MAX).
- * Fires a custom event so same-tab UI can refresh without polling.
+ * and store it so the SeedPicker can show real examples per style.
  */
 async function saveStyleThumbnail(styleSeedId: string, dataUrl: string): Promise<void> {
   if (typeof document === "undefined") return;
@@ -89,7 +51,6 @@ async function saveStyleThumbnail(styleSeedId: string, dataUrl: string): Promise
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  // Center-crop to 16:9
   const srcRatio = img.naturalWidth / img.naturalHeight;
   const tgtRatio = 320 / 180;
   let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
@@ -102,14 +63,7 @@ async function saveStyleThumbnail(styleSeedId: string, dataUrl: string): Promise
   }
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 320, 180);
 
-  const thumb = canvas.toDataURL("image/jpeg", 0.55);
-  const store = loadStyleThumbs(styleSeedId);
-  // Prepend; deduplicate exact match; cap length
-  store.thumbs = [thumb, ...store.thumbs.filter((t) => t !== thumb)].slice(0, THUMBS_MAX);
-  // If pinned thumb was evicted, clear pin
-  if (store.pinned && !store.thumbs.includes(store.pinned)) store.pinned = null;
-  _saveStyleThumbStore(styleSeedId, store);
-  window.dispatchEvent(new CustomEvent("lumina:thumbs_updated"));
+  appendStyleThumb(styleSeedId, canvas.toDataURL("image/jpeg", 0.55));
 }
 
 // ─── Main Generator ───────────────────────────────────────────────────────────

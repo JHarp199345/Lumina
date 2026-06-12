@@ -23,7 +23,7 @@ import {
   testOdysseus,
   type LLMProvider,
 } from "@/api/llmClient";
-import { loadStyleThumbs, pinStyleThumb } from "@/pipeline/imageGenerator";
+import { loadStyleThumbs, pinStyleThumb } from "@/utils/styleThumbs";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -319,6 +319,7 @@ function StyleThumbnailsSection() {
 function ReIngestSlider({ onConfirm, busy }: { onConfirm: () => void; busy: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+  const pctRef = useRef(0);
   const [pct, setPct] = useState(0);
   const CONFIRM_AT = 90;
 
@@ -326,11 +327,14 @@ function ReIngestSlider({ onConfirm, busy }: { onConfirm: () => void; busy: bool
     const rect = trackRef.current?.getBoundingClientRect();
     if (!rect) return;
     const p = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+    pctRef.current = p;
     setPct(p);
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (busy) return;
+    e.preventDefault();
+    e.stopPropagation();
     draggingRef.current = true;
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     setFromPointer(e.clientX);
@@ -339,11 +343,23 @@ function ReIngestSlider({ onConfirm, busy }: { onConfirm: () => void; busy: bool
     if (!draggingRef.current) return;
     setFromPointer(e.clientX);
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!draggingRef.current) return;
+    setFromPointer(e.clientX);
     draggingRef.current = false;
-    if (pct >= CONFIRM_AT) onConfirm();
+    if (pctRef.current >= CONFIRM_AT) onConfirm();
+    pctRef.current = 0;
     setPct(0);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (busy) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onConfirm();
+    }
   };
 
   const fill = busy ? 100 : pct;
@@ -362,9 +378,12 @@ function ReIngestSlider({ onConfirm, busy }: { onConfirm: () => void; busy: bool
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onKeyDown={onKeyDown}
+      tabIndex={0}
       className="relative h-11 w-full select-none overflow-hidden rounded-lg border border-lumina-gold/30 bg-ink/[0.05] touch-none"
       role="button"
       aria-label="Slide to re-ingest this book"
+      aria-disabled={busy}
     >
       {/* fill */}
       <div
