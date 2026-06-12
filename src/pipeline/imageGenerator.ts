@@ -28,6 +28,51 @@ const EXPOSITORY_NEGATIVE_PROMPT =
   "boss battle, photorealistic photograph, celebrity likeness, readable text, words, letters, watermarks, " +
   "low quality, blurry, decorative flourish without information";
 
+export const STYLE_THUMB_KEY = (id: string) => `lumina:style_thumb:${id}`;
+
+/**
+ * After a successful generation, downscale the image to a 320×180 JPEG
+ * thumbnail and persist it in localStorage keyed by style seed ID.
+ * The SeedPicker reads these to show real examples instead of SVG placeholders.
+ * Only runs in browser environments where canvas + data URLs are available.
+ */
+async function saveStyleThumbnail(styleSeedId: string, dataUrl: string): Promise<void> {
+  if (typeof document === "undefined") return;
+  if (!dataUrl.startsWith("data:")) return;
+
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 320;
+  canvas.height = 180;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  // Center-crop to 16:9
+  const srcRatio = img.naturalWidth / img.naturalHeight;
+  const tgtRatio = 320 / 180;
+  let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
+  if (srcRatio > tgtRatio) {
+    sw = Math.round(sh * tgtRatio);
+    sx = Math.round((img.naturalWidth - sw) / 2);
+  } else {
+    sh = Math.round(sw / tgtRatio);
+    sy = Math.round((img.naturalHeight - sh) / 2);
+  }
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 320, 180);
+
+  try {
+    localStorage.setItem(STYLE_THUMB_KEY(styleSeedId), canvas.toDataURL("image/jpeg", 0.55));
+  } catch {
+    // Ignore quota errors — thumbnails are cosmetic, not critical.
+  }
+}
+
 // ─── Main Generator ───────────────────────────────────────────────────────────
 
 export interface GenerateImageOptions {
@@ -111,6 +156,10 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
 
   // Persist via the storage adapter (Tauri → disk + asset URL; Web → IndexedDB + blob URL)
   const filePath = await storage.saveImage(meta, imageData);
+
+  // Tag this style with a real thumbnail so the SeedPicker can show
+  // actual generated examples instead of SVG placeholders.
+  saveStyleThumbnail(styleSeed.id, filePath).catch(() => {});
 
   const cachedImage: CachedImage = { ...meta, filePath };
 
