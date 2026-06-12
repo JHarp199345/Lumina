@@ -339,7 +339,7 @@ export function useBookOrchestration() {
         percent: 2,
       });
 
-      const { startWorkflow, trackStep, completeWorkflow, setWorkflowContext } =
+      const { startWorkflow, trackStep, completeWorkflow, setWorkflowContext, setActivePhase } =
         await import("@/services/workflowTracker");
 
       let wfId: string | null = null;
@@ -384,6 +384,25 @@ export function useBookOrchestration() {
         );
 
         // Step 1 — semantic analysis
+        // Phase names update _active.stepName so every server-side queue call
+        // is recorded with the right name instead of all showing "semantic-analysis".
+        const _phaseMap: Record<string, { name: string; goal: string; skill: string }> = {
+          scoring:   { name: "chapter-scoring",      goal: "Score each chapter for emotional valence", skill: "book-chapter-scoring" },
+          mapping:   { name: "arc-fitting",           goal: "Fit emotional arc and locate inflection points", skill: "book-arc-fitting" },
+          scenes:    { name: "scene-identification",  goal: "Identify symbolic scenes at emotional inflections", skill: "book-scene-identification" },
+          prompts:   { name: "image-descriptions",   goal: "Generate visual image prompts for each scene", skill: "book-image-descriptions" },
+          blueprint: { name: "narrative-blueprint",  goal: "Build setup→payoff narrative thread structure", skill: "book-narrative-blueprint" },
+          preparing: { name: "analysis-prep",        goal: "Determine analysis protocol and prepare structure", skill: "book-semantic-analysis" },
+          complete:  { name: "semantic-analysis",    goal: "Semantic analysis complete", skill: "book-semantic-analysis" },
+        };
+        const phaseReporter: typeof reportProgress = (progress) => {
+          if (typeof progress === "object" && progress.phase) {
+            const mapped = _phaseMap[progress.phase as string];
+            if (mapped) setActivePhase(mapped.name, mapped.goal, mapped.skill);
+          }
+          reportProgress(progress);
+        };
+
         const baseSemanticMap = await trackStep(
           wfId,
           {
@@ -392,7 +411,7 @@ export function useBookOrchestration() {
             agent: "reading",
             skill: "book-semantic-analysis",
           },
-          () => analyzeBook(structure, googleKey ?? "", reportProgress),
+          () => analyzeBook(structure, googleKey ?? "", phaseReporter),
           (map) => ({
             metrics: {
               scenes: map.scenes.length,

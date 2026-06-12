@@ -13,7 +13,12 @@
  */
 
 import type { AnalysisProgressReporter, ArcShape, InflectionPoint } from "@/types";
-import { llmGenerateJSON } from "@/api/llmClient";
+import {
+  llmGenerateJSON,
+  getProvider,
+  runOdysseusParallel,
+  type OdysseusParallelTask,
+} from "@/api/llmClient";
 
 // ─── Six Canonical Arc Shapes ─────────────────────────────────────────────────
 
@@ -79,10 +84,17 @@ async function scoreChapters(
   apiKey: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<number[]> {
-  // Batch chapters into groups to minimize API calls
   const BATCH_SIZE = 8;
-  const scores: number[] = new Array(chapters.length).fill(0);
 
+  if (getProvider() === "odysseus") {
+    try {
+      return await scoreChaptersParallel(chapters, bookTitle, onProgress);
+    } catch (err) {
+      console.warn("[StoryShape] Parallel scoring failed, falling back to sequential:", err);
+    }
+  }
+
+  const scores: number[] = new Array(chapters.length).fill(0);
   for (let i = 0; i < chapters.length; i += BATCH_SIZE) {
     const batch = chapters.slice(i, i + BATCH_SIZE);
     const end = Math.min(i + BATCH_SIZE, chapters.length);
@@ -92,11 +104,108 @@ async function scoreChapters(
       percent: 8 + Math.round((end / Math.max(1, chapters.length)) * 30),
       current: end,
       total: chapters.length,
-      itemLabel: batch.map((chapter) => chapter.title).join(", "),
+      itemLabel: batch.map((ch) => ch.title).join(", "),
     });
     const batchScores = await scoreBatch(batch, bookTitle, apiKey);
-    batchScores.forEach((score, j) => {
-      scores[i + j] = score;
+    batchScores.forEach((score, j) => { scores[i + j] = score; });
+  }
+  return scores;
+}
+
+function _buildScoringPrompt(
+  chapters: { title: string; index: number; rawText?: string }[],
+  bookTitle: string
+): string {
+  const summaries = chapters
+    .map((ch) => {
+      const excerpt = ch.rawText ? ch.rawText.split(/\s+/).slice(0, 60).join(" ") : "";
+      return `Chapter ${ch.index + 1} "${ch.title}": ${excerpt}`;
+    })
+    .join("\n\n");
+  return `You are scoring the emotional valence of chapters in "${bookTitle}".
+
+For each chapter below, provide a sentiment score from -1.0 (pure despair/tragedy) to +1.0 (pure joy/triumph).
+Consider: emotional tone, what happens to characters, tension level, hope vs. hopelessness.
+0.0 = neutral or balanced. Negative = darker. Positive = brighter.
+
+Chapters:
+${summaries}
+
+Respond with ONLY a JSON array of numbers in order, one per chapter. Example: [-0.3, 0.1, -0.8, 0.5]
+Numbers must be between -1.0 and 1.0.`;
+}
+
+async function scoreChaptersParallel(
+  chapters: { id: string; title: string; index: number; rawText?: string }[],
+  bookTitle: string,
+  onProgress?: AnalysisProgressReporter
+): Promise<number[]> {
+  const BATCH_SIZE = 8;
+  const batches: Array<{ start: number; chapters: typeof chapters }> = [];
+  for (let i = 0; i < chapters.length; i += BATCH_SIZE) {
+    batches.push({ start: i, chapters: chapters.slice(i, i + BATCH_SIZE) });
+  }
+
+  const tasks: OdysseusParallelTask[] = batches.map((b, i) => ({
+    id: `score-batch-${i}`,
+    agent: "reading",
+    prompt: _buildScoringPrompt(b.chapters, bookTitle),
+    temperature: 0.3,
+    max_tokens: 256,
+  }));
+
+  onProgress?.({
+    phase: "scoring",
+    message: `Scoring all ${chapters.length} chapters in parallel (${batches.length} batches)…`,
+    percent: 8,
+    current: 0,
+    total: chapters.length,
+  });
+
+  const result = await runOdysseusParallel({
+    workflow: {
+      type: "chapter-scoring",
+      label: `Emotional arc scoring — ${bookTitle}`,
+      task_goal: `Score ${chapters.length} chapters for sentiment across ${batches.length} parallel batches`,
+      context: { book_title: bookTitle, chapter_count: chapters.length, batch_count: batches.length },
+    },
+    tasks,
+    max_concurrency: 8,
+  });
+
+  onProgress?.({
+    phase: "scoring",
+    message: `Scored all ${chapters.length} chapters — fitting arc shape…`,
+    percent: 38,
+    current: chapters.length,
+    total: chapters.length,
+  });
+
+  const scores: number[] = new Array(chapters.length).fill(0);
+  for (let i = 0; i < batches.length; i++) {
+    const taskResult = result.results.find((r) => r.id === `score-batch-${i}`);
+    const batch = batches[i];
+    if (taskResult?.status === "done" && taskResult.content) {
+      try {
+        const cleaned = taskResult.content.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
+        const match = cleaned.match(/\[[\s\S]*\]/);
+        if (match) {
+          const parsed = JSON.parse(match[0]) as unknown[];
+          if (Array.isArray(parsed)) {
+            batch.chapters.forEach((_, j) => {
+              const val = parsed[j];
+              scores[batch.start + j] = typeof val === "number" ? Math.max(-1, Math.min(1, val)) : 0;
+            });
+            continue;
+          }
+        }
+      } catch {
+        // fall through to heuristic
+      }
+    }
+    // Heuristic fallback for failed batch
+    batch.chapters.forEach((ch, j) => {
+      scores[batch.start + j] = heuristicSentiment(ch.rawText || "");
     });
   }
 

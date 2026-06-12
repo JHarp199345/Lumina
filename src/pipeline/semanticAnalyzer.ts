@@ -27,7 +27,13 @@ import type {
   AnalysisProgressReporter,
 } from "@/types";
 import { LUMINA_CONFIG } from "@/config";
-import { llmGenerate, llmGenerateJSON } from "@/api/llmClient";
+import {
+  llmGenerate,
+  llmGenerateJSON,
+  getProvider,
+  runOdysseusParallel,
+  type OdysseusParallelTask,
+} from "@/api/llmClient";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
 import { buildVisualSlotPlan } from "@/utils/sceneDedup";
@@ -127,6 +133,7 @@ async function analyzeNarrativeBook(
   // Pass 2.0: Narrative blueprint — the setup→payoff spine the rest of the
   // pipeline reads from. One book-wide call; on failure selection degrades
   // gracefully to emotional-weight ordering.
+  report({ phase: "blueprint" as unknown as "mapping", message: "Building narrative thread blueprint…", percent: 42 });
   const narrativeBlueprint = await buildNarrativeBlueprint({
     structure: analysisStructure,
     macroArc,
@@ -317,6 +324,14 @@ async function identifyScenes(
   apiKey: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<IdentifiedScene[]> {
+  if (getProvider() === "odysseus") {
+    try {
+      return await identifyScenesParallel(structure, macroArc, shapeResult, onProgress);
+    } catch (err) {
+      console.warn("[Semantic] Parallel scene identification failed, falling back to sequential:", err);
+    }
+  }
+
   const scenes: IdentifiedScene[] = [];
   const usedSlotKeys = new Set<string>();
   const totalScenes = macroArc.inflectionPoints.length + (structure.chapters[0] ? 1 : 0);
@@ -360,6 +375,195 @@ async function identifyScenes(
     });
     scenes.push(scene);
     usedSlotKeys.add(chapter.id);
+  }
+
+  return scenes;
+}
+
+async function identifyScenesParallel(
+  structure: BookStructure,
+  macroArc: MacroArc,
+  shapeResult: StoryShapeResult,
+  onProgress?: AnalysisProgressReporter
+): Promise<IdentifiedScene[]> {
+  type SceneMeta = {
+    chapter: BookStructure["chapters"][0];
+    inflectionPoint?: InflectionPoint;
+    isOpening: boolean;
+  };
+
+  const tasks: OdysseusParallelTask[] = [];
+  const taskMeta = new Map<string, SceneMeta>();
+  const usedChapterIds = new Set<string>();
+
+  const openingChapter = structure.chapters[0];
+  if (openingChapter) {
+    const taskId = "scene-opening";
+    tasks.push({
+      id: taskId,
+      agent: "reading",
+      prompt: `Analyze the symbolic and atmospheric opening of "${structure.title}".
+
+Opening text:
+${truncateText(openingChapter.rawText || "", 500)}
+
+Extract the emotional and symbolic essence — NOT a plot summary.
+Think like a symbolist painter. What is the emotional atmosphere? What symbols are present or implied?
+
+JSON response:
+{
+  "emotionalVector": ["emotion1", "emotion2"],
+  "symbolicMotifs": ["motif1", "motif2", "motif3"],
+  "atmosphericQualities": ["quality1", "quality2"],
+  "narrativeWeight": 0.7
+}`,
+      temperature: 0.7,
+      max_tokens: 512,
+    });
+    taskMeta.set(taskId, { chapter: openingChapter, isOpening: true });
+    usedChapterIds.add(openingChapter.id);
+  }
+
+  for (let i = 0; i < macroArc.inflectionPoints.length; i++) {
+    const point = macroArc.inflectionPoints[i];
+    const chapter = structure.chapters[point.approximateChapterIndex];
+    if (!chapter || usedChapterIds.has(chapter.id)) continue;
+    usedChapterIds.add(chapter.id);
+
+    const taskId = `scene-inflection-${i}`;
+    tasks.push({
+      id: taskId,
+      agent: "reading",
+      prompt: `You are identifying the symbolic visual essence of a key emotional moment in "${structure.title}".
+
+Chapter: "${chapter.title}" (Chapter ${chapter.index + 1})
+Emotional transition: "${point.emotionalShift}"
+Narrative role: "${point.narrativeLabel}"
+
+Chapter text:
+${truncateText(chapter.rawText || "", 700)}
+
+Extract the symbolic and emotional essence. Do NOT describe the scene literally.
+Think like a symbolist painter — what would this moment look like as a painting?
+
+Examples of good symbolic motifs: "fractured crown", "still water before a storm", "a door left ajar"
+Examples to avoid (too literal): "the king's crown", "the lake at sunrise"
+
+JSON response:
+{
+  "emotionalVector": ["emotion1", "emotion2"],
+  "symbolicMotifs": ["motif1", "motif2", "motif3"],
+  "atmosphericQualities": ["quality1", "quality2"],
+  "narrativeWeight": 0.8
+}`,
+      temperature: 0.7,
+      max_tokens: 512,
+    });
+    taskMeta.set(taskId, { chapter, inflectionPoint: point, isOpening: false });
+  }
+
+  if (tasks.length === 0) return [];
+
+  onProgress?.({
+    phase: "scenes",
+    message: `Dispatching ${tasks.length} scene analyses in parallel…`,
+    percent: 45,
+    current: 0,
+    total: tasks.length,
+  });
+
+  const parallelResult = await runOdysseusParallel({
+    workflow: {
+      type: "scene-analysis",
+      label: `Scene identification — ${structure.title}`,
+      task_goal: `Identify symbolic scenes for ${tasks.length} key emotional moments`,
+      context: {
+        book_title: structure.title,
+        inflection_count: macroArc.inflectionPoints.length,
+        task_count: tasks.length,
+      },
+    },
+    tasks,
+    max_concurrency: 6,
+  });
+
+  onProgress?.({
+    phase: "scenes",
+    message: `Scene analysis complete — building ${tasks.length} scenes…`,
+    percent: 65,
+    current: tasks.length,
+    total: tasks.length,
+  });
+
+  const scenes: IdentifiedScene[] = [];
+
+  for (const result of parallelResult.results) {
+    const meta = taskMeta.get(result.id);
+    if (!meta) continue;
+    const { chapter, inflectionPoint, isOpening } = meta;
+
+    let parsed: Partial<IdentifiedScene> = {};
+    if (result.status === "done" && result.content) {
+      try {
+        const cleaned = result.content.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
+        const match = cleaned.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]) as Partial<IdentifiedScene>;
+      } catch {
+        // will use fallback fields below
+      }
+    }
+
+    if (isOpening) {
+      const anchor = pickSceneAnchor(chapter, structure.editionPipeline, {
+        atOpening: true,
+        chapterSentiment: shapeResult.sentimentScores[chapter.index],
+        nextSentiment: shapeResult.sentimentScores[chapter.index + 1],
+      });
+      scenes.push({
+        id: `scene_opening_${structure.bookId}_${chapter.id}`,
+        inflectionPointId: "opening",
+        chapterId: chapter.id,
+        sectionId: anchor.sectionId,
+        anchorCfi: "",
+        anchor: { href: chapter.href, fragment: chapter.fragment, spineIndex: chapter.spineIndex, wordOffset: anchor.wordOffset },
+        emotionalVector: (parsed.emotionalVector as string[]) || [],
+        symbolicMotifs: (parsed.symbolicMotifs as string[]) || [],
+        atmosphericQualities: (parsed.atmosphericQualities as string[]) || [],
+        narrativeWeight: (parsed.narrativeWeight as number) || 0.7,
+      });
+    } else if (inflectionPoint) {
+      const anchor = pickSceneAnchor(chapter, structure.editionPipeline, {
+        inflectionPoint,
+        chapterSentiment: shapeResult.sentimentScores[chapter.index],
+        prevSentiment: shapeResult.sentimentScores[chapter.index - 1],
+        nextSentiment: shapeResult.sentimentScores[chapter.index + 1],
+        standardRatio: 0.35,
+      });
+      scenes.push({
+        id: `scene_${inflectionPoint.id}_${chapter.id}`,
+        inflectionPointId: inflectionPoint.id,
+        chapterId: chapter.id,
+        sectionId: anchor.sectionId,
+        anchorCfi: "",
+        anchor: { href: chapter.href, fragment: chapter.fragment, spineIndex: chapter.spineIndex, wordOffset: anchor.wordOffset },
+        emotionalVector: (parsed.emotionalVector as string[]) || [],
+        symbolicMotifs: (parsed.symbolicMotifs as string[]) || [],
+        atmosphericQualities: (parsed.atmosphericQualities as string[]) || [],
+        narrativeWeight: (parsed.narrativeWeight as number) || 0.5,
+      });
+    }
+  }
+
+  // Fallback for any failed tasks
+  for (const result of parallelResult.results.filter((r) => r.status !== "done")) {
+    const meta = taskMeta.get(result.id);
+    if (!meta) continue;
+    const { chapter, inflectionPoint, isOpening } = meta;
+    scenes.push(
+      isOpening
+        ? buildFallbackScene(chapter, structure, "opening", undefined, shapeResult)
+        : buildFallbackScene(chapter, structure, inflectionPoint!.id, inflectionPoint, shapeResult)
+    );
   }
 
   return scenes;
@@ -538,7 +742,7 @@ JSON response:
   };
 }
 
-// ─── Pass 3: Image Description (real Gemini call) ─────────────────────────────
+// ─── Pass 3: Image Description ────────────────────────────────────────────────
 
 async function generateImageDescriptions(
   scenes: IdentifiedScene[],
@@ -547,6 +751,14 @@ async function generateImageDescriptions(
   apiKey: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<IdentifiedScene[]> {
+  if (getProvider() === "odysseus") {
+    try {
+      return await generateImageDescriptionsParallel(scenes, macroArc, bookTitle, onProgress);
+    } catch (err) {
+      console.warn("[Semantic] Parallel image descriptions failed, falling back to sequential:", err);
+    }
+  }
+
   const result: IdentifiedScene[] = [];
 
   for (let i = 0; i < scenes.length; i++) {
@@ -564,12 +776,77 @@ async function generateImageDescriptions(
       const description = await generateSingleDescription(scene, macroArc, bookTitle, apiKey);
       result.push({ ...scene, imageDescription: description });
     } catch {
-      // Fall back to template if Gemini fails
       result.push({ ...scene, imageDescription: buildFallbackDescription(scene, macroArc) });
     }
   }
 
   return result;
+}
+
+async function generateImageDescriptionsParallel(
+  scenes: IdentifiedScene[],
+  macroArc: MacroArc,
+  bookTitle: string,
+  onProgress?: AnalysisProgressReporter
+): Promise<IdentifiedScene[]> {
+  const tasks: OdysseusParallelTask[] = scenes.map((scene, i) => ({
+    id: `desc-${i}`,
+    agent: "visual_analyst",
+    prompt: `You are writing a 2-4 sentence image generation prompt for a symbolic, atmospheric painting.
+This image will accompany a reader at a key emotional moment in "${bookTitle}".
+
+The moment's emotional qualities: ${scene.emotionalVector.join(", ")}
+Symbolic visual motifs: ${scene.symbolicMotifs.join(", ")}
+Atmospheric qualities: ${scene.atmosphericQualities.join(", ")}
+Central book themes: ${macroArc.centralThemes.join(", ")}
+
+Write a 2-4 sentence image generation prompt that:
+- Is entirely symbolic and atmospheric — NOT literal
+- Evokes emotion through composition, light, and symbol rather than narrative
+- Suggests no specific named characters or exact literary scenes
+- Reads like a brief for a symbolist watercolor painting or illuminated manuscript
+- Avoids: text, faces, crowds, photorealistic directives
+
+Respond with ONLY the prompt text, no JSON, no quotes, no explanation.`,
+    temperature: 0.85,
+    max_tokens: 300,
+  }));
+
+  onProgress?.({
+    phase: "prompts",
+    message: `Writing ${scenes.length} visual briefs in parallel…`,
+    percent: 68,
+    current: 0,
+    total: scenes.length,
+  });
+
+  const parallelResult = await runOdysseusParallel({
+    workflow: {
+      type: "visual-briefs",
+      label: `Visual briefs — ${bookTitle}`,
+      task_goal: `Generate ${scenes.length} symbolic image prompts`,
+      context: { book_title: bookTitle, scene_count: scenes.length },
+    },
+    tasks,
+    max_concurrency: 6,
+  });
+
+  onProgress?.({
+    phase: "prompts",
+    message: `Visual briefs complete.`,
+    percent: 85,
+    current: scenes.length,
+    total: scenes.length,
+  });
+
+  return scenes.map((scene, i) => {
+    const result = parallelResult.results.find((r) => r.id === `desc-${i}`);
+    const description =
+      result?.status === "done" && result.content?.trim()
+        ? result.content.trim()
+        : buildFallbackDescription(scene, macroArc);
+    return { ...scene, imageDescription: description };
+  });
 }
 
 async function generateSingleDescription(

@@ -1,5 +1,5 @@
 import { LUMINA_CONFIG } from "@/config";
-import { llmGenerate, getProvider } from "@/api/llmClient";
+import { getProvider, runOdysseusParallel, type OdysseusParallelTask } from "@/api/llmClient";
 import type {
   AnalysisProgressReporter,
   BookStructure,
@@ -9,7 +9,46 @@ import type {
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const MAX_LORE_TERMS = 10;
+const MAX_LORE_TERMS = 25;
+
+// Words that get capitalized at sentence starts but are NOT proper nouns.
+// Pronouns are the primary offender: "She", "He", "His" etc. repeat the most.
+const STOP_WORDS = new Set([
+  // Articles / determiners
+  "A", "An", "The",
+  // Personal pronouns — all forms
+  "I", "Me", "My", "Mine",
+  "You", "Your", "Yours",
+  "He", "Him", "His",
+  "She", "Her", "Hers",
+  "It", "Its",
+  "We", "Us", "Our", "Ours",
+  "They", "Them", "Their", "Theirs",
+  // Reflexive
+  "Himself", "Herself", "Itself", "Themselves", "Ourselves", "Yourself",
+  // Demonstratives
+  "This", "That", "These", "Those",
+  // Coordinating conjunctions
+  "And", "But", "Or", "Nor", "For", "Yet", "So",
+  // Prepositions that never begin proper noun phrases
+  "In", "On", "At", "By", "To", "Up", "Of", "As", "Out", "From", "With", "Into", "Upon",
+  // Temporal / spatial adverbs
+  "Now", "Then", "Here", "There", "When", "Where", "While",
+  "Before", "After", "Since", "Until", "Though", "Although", "Because", "Unless",
+  // Question words
+  "Why", "How", "What", "Who", "Which", "Whose", "Whom",
+  // Common expletives / discourse markers
+  "Not", "No", "Yes", "Oh", "Ah", "Well",
+  "Still", "Even", "Just", "Also", "Again",
+  "If", "Like", "Than", "Whether", "Once",
+  // Auxiliaries — never appear as proper nouns
+  "Was", "Were", "Had", "Has", "Have", "Will", "Would", "Could", "Should",
+  "May", "Might", "Must", "Shall", "Can",
+  "Is", "Are", "Am", "Be", "Been", "Being",
+  "Do", "Did", "Does", "Done",
+  // Structural markers
+  "Chapter", "Book", "Part",
+]);
 
 export async function buildVisualLoreDossier(params: {
   structure: BookStructure;
@@ -33,6 +72,25 @@ export async function buildVisualLoreDossier(params: {
     itemLabel: terms.slice(0, 3).join(", "),
   });
 
+  // Odysseus: one dedicated agent per entity, run in parallel for richer descriptions
+  if (getProvider() === "odysseus") {
+    try {
+      const dossier = await buildLoreOdysseus(params.structure, terms, params.onProgress);
+      diagnosticInfo("visual_lore.complete", "Visual lore dossier created (parallel)", {
+        bookId: params.structure.bookId,
+        entities: dossier.entities.length,
+      });
+      return dossier;
+    } catch (err) {
+      diagnosticWarn("visual_lore.parallel_failed", "Parallel lore build failed, falling back", {
+        bookId: params.structure.bookId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return buildFallbackDossier(params.structure.bookId, terms);
+    }
+  }
+
+  // Gemini: single call with Google Search grounding
   try {
     const prompt = buildLorePrompt(params.structure, terms);
     const response = await callGeminiWithSearch(prompt, params.apiKey);
@@ -60,31 +118,16 @@ function extractLoreTerms(structure: BookStructure): string[] {
     .slice(0, 180000);
 
   const counts = new Map<string, number>();
-  const stop = new Set([
-    "Chapter",
-    "Book",
-    "Part",
-    "The",
-    "Before",
-    "After",
-    "Then",
-    "And",
-    "For",
-    "But",
-    "They",
-    "This",
-    "That",
-    "In",
-    "Of",
-    "A",
-  ]);
-  const matches = text.matchAll(/\b(?:[A-Z][a-zA-Z'’.-]{2,})(?:\s+(?:the|of|and|[A-Z][a-zA-Z'’.-]{2,})){0,3}\b/g);
+  const matches = text.matchAll(/\b(?:[A-Z][a-zA-Z’’.-]{2,})(?:\s+(?:the|of|and|[A-Z][a-zA-Z’’.-]{2,})){0,3}\b/g);
 
   for (const match of matches) {
     const term = match[0].replace(/\s+/g, " ").trim();
-    if (!term || stop.has(term) || /^\d+$/.test(term)) continue;
+    if (!term || /^\d+$/.test(term)) continue;
     if (/^Chapter\s+/i.test(term)) continue;
-    if (term.split(/\s+/).some((part) => stop.has(part) && term.split(/\s+/).length === 1)) continue;
+    // Drop exact stop-word matches and any term whose first word is a stop word
+    // (catches pronouns like "She", "His" and phrases like "He Will", "Their Order")
+    const firstWord = term.split(/\s+/)[0];
+    if (STOP_WORDS.has(firstWord)) continue;
     counts.set(term, (counts.get(term) ?? 0) + 1);
   }
 
@@ -94,6 +137,128 @@ function extractLoreTerms(structure: BookStructure): string[] {
     .map(([term]) => term)
     .filter((term, index, arr) => !arr.slice(0, index).some((prior) => prior.includes(term) || term.includes(prior)))
     .slice(0, MAX_LORE_TERMS);
+}
+
+/** Pull a short passage from the book that mentions this entity, for in-prompt grounding. */
+function findEntitySnippet(structure: BookStructure, entityName: string): string {
+  const needle = entityName.toLowerCase();
+  for (const chapter of structure.chapters) {
+    const text = chapter.rawText ?? "";
+    const idx = text.toLowerCase().indexOf(needle);
+    if (idx >= 0) {
+      const start = Math.max(0, idx - 150);
+      const end = Math.min(text.length, idx + 400);
+      return text.slice(start, end).replace(/\s+/g, " ").trim();
+    }
+  }
+  return "";
+}
+
+/** Per-entity prompt for one parallel visual_analyst task. */
+function buildEntityPrompt(structure: BookStructure, entityName: string, snippet: string): string {
+  const bookInfo = `"${structure.title}"${structure.author ? ` by ${structure.author}` : ""}`;
+  const snippetBlock = snippet
+    ? `\nBook passage mentioning this entity:\n---\n${snippet.slice(0, 600)}\n---\n`
+    : "";
+  return `You are a visual lore researcher for the EPUB reader Lumina.
+
+Book: ${bookInfo}
+Entity: "${entityName}"
+${snippetBlock}
+Your task: produce a comprehensive visual dossier entry for a LOCAL image-generation AI model. Draw on your full training knowledge. If this entity exists in a published fictional universe (Warhammer 40K, Star Wars, a novel series, game franchise, etc.), describe it with maximum visual specificity — the local AI has no internet access and needs every detail spelled out.
+
+Cover all of the following:
+- Physical form (height category, build, surface texture, skin/hide/metal, distinguishing features)
+- Clothing / armor / equipment (construction, layering, ornamentation, wear and damage)
+- Color palette (dominant colors, secondary accents, how colors shift in shadow vs. light)
+- Silhouette (what unique shape does this entity cut against sky or background)
+- Materials (be specific: bone, obsidian, ceramite, worn leather, silk, corroded iron, etc.)
+- Visual motifs (symbols, geometric patterns, iconography associated with this entity)
+- Scene use (how to place in foreground vs. background, lighting interactions)
+
+Return ONLY valid JSON, no markdown fences:
+{
+  "name": "${entityName}",
+  "category": "character|species|faction|place|object|concept|unknown",
+  "confidence": 0.0-1.0,
+  "aliases": ["other names if any"],
+  "canonicalTraits": ["specific trait 1", "specific trait 2", "up to 8 traits"],
+  "silhouette": "one sentence describing the distinctive silhouette",
+  "materials": ["material1", "material2"],
+  "colors": ["primary color", "secondary/accent color"],
+  "motifs": ["motif1", "motif2"],
+  "sceneUse": "how to compose this entity in a visual scene",
+  "avoidCopying": ["specific official art or designs to avoid recreating exactly"],
+  "sourceTitles": ["published source titles if applicable"],
+  "sourceUrls": []
+}`;
+}
+
+/** Odysseus path: one dedicated visual_analyst task per entity, run in parallel. */
+async function buildLoreOdysseus(
+  structure: BookStructure,
+  terms: string[],
+  onProgress?: AnalysisProgressReporter
+): Promise<VisualLoreDossier> {
+  const tasks: OdysseusParallelTask[] = terms.map((term, i) => ({
+    id: `lore-${i}`,
+    agent: "visual_analyst",
+    prompt: buildEntityPrompt(structure, term, findEntitySnippet(structure, term)),
+    temperature: 0.3,
+    max_tokens: 1500,
+  }));
+
+  onProgress?.({
+    phase: "prompts",
+    message: `Researching ${terms.length} lore entities in parallel…`,
+    percent: 85,
+    current: 0,
+    total: terms.length,
+  });
+
+  const result = await runOdysseusParallel({
+    workflow: {
+      type: "visual-lore",
+      label: `Visual lore research — ${structure.title}`,
+      task_goal: `Build detailed visual dossier for ${terms.length} lore entities`,
+      context: { book_title: structure.title, entity_count: terms.length },
+    },
+    tasks,
+    max_concurrency: 8,
+  });
+
+  const entities: VisualLoreEntity[] = [];
+  for (let i = 0; i < terms.length; i++) {
+    const task = result.results.find((r) => r.id === `lore-${i}`);
+    if (task?.status === "done" && task.content) {
+      try {
+        const cleaned = task.content.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
+        const raw = JSON.parse(cleaned) as Partial<VisualLoreEntity>;
+        const entity = normalizeEntity(raw);
+        if (entity.name) {
+          entities.push(entity);
+          continue;
+        }
+      } catch {
+        // fall through to fallback
+      }
+    }
+    entities.push(fallbackEntity(terms[i]));
+  }
+
+  return {
+    bookId: structure.bookId,
+    generatedAt: new Date().toISOString(),
+    universeHint: "unknown",
+    searchQueries: [],
+    entities,
+    globalStyleNotes: [],
+    safetyRules: [
+      "Use public references only to infer broad visual traits.",
+      "Do not recreate any specific official or fan artwork.",
+      "Avoid named artist styles, exact compositions, logos, and watermarks.",
+    ],
+  };
 }
 
 function buildLorePrompt(structure: BookStructure, terms: string[]): string {
@@ -147,15 +312,6 @@ async function callGeminiWithSearch(
   prompt: string,
   apiKey: string
 ): Promise<{ text: string; metadata?: Record<string, unknown> }> {
-  if (getProvider() === "odysseus") {
-    const text = await llmGenerate("visual_analyst", prompt, {
-      temperature: 0.25,
-      maxTokens: 2400,
-      jsonMode: true,
-    });
-    return { text };
-  }
-
   const url = `${GEMINI_BASE}/models/${LUMINA_CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
   const response = await fetch(url, {
     method: "POST",
@@ -166,7 +322,7 @@ async function callGeminiWithSearch(
       generationConfig: {
         temperature: 0.25,
         topP: 0.85,
-        maxOutputTokens: 2400,
+        maxOutputTokens: 4096,
         responseMimeType: "application/json",
       },
     }),

@@ -35,6 +35,18 @@ export function getWorkflowContext(): ActiveWorkflowContext | null {
   return _active;
 }
 
+/**
+ * Update the current step name/goal/skill without touching the rest of the
+ * active context. Call this when a pipeline moves between internal phases so
+ * that server-side auto-recorded queue steps get the right name.
+ */
+export function setActivePhase(name: string, goal?: string, skill?: string): void {
+  if (!_active) return;
+  _active.stepName = name;
+  if (goal !== undefined) _active.stepGoal = goal;
+  if (skill !== undefined) _active.skill = skill;
+}
+
 /** Headers for Odysseus agent /queue calls — enables server-side step logging. */
 export function getWorkflowAgentHeaders(
   agent: string,
