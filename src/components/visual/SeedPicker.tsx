@@ -98,7 +98,7 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
           className="absolute inset-0 overflow-y-auto"
           style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}
         >
-          <div className="max-w-2xl mx-auto px-6 pb-4 space-y-6">
+          <div className="relative left-1/2 w-[min(42rem,calc(100vw-3rem))] -translate-x-1/2 px-0 pb-4 space-y-6">
             {STYLE_GROUPS.map((group) => {
               const seeds = STYLE_SEEDS.filter((s) => group.ids.has(s.id));
               const orphan = seeds.length % 3 === 1;
