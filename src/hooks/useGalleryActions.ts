@@ -1,8 +1,12 @@
 import { useCallback } from "react";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import { useUiStore } from "@/store/uiStore";
 import { generateForVisualSlot } from "@/services/slotImageGeneration";
+import { ensureVisualPlanBatch } from "@/services/visualPlanBatching";
+import { storage } from "@/storage";
+import { getStyleSeedById } from "@/data/styleSeeds";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
@@ -37,21 +41,41 @@ export function useGalleryActions() {
   }, []);
 
   const generateForScene = useCallback(async (sceneId: string) => {
-    const { activeBook, activeSemanticMap, activeStructure } = useBookStore.getState();
-    if (!activeBook || !activeSemanticMap) return;
+    const { activeBook, activeSemanticMap, activeStructure, activeStyleSeed, setActiveSemanticMap } =
+      useBookStore.getState();
+    if (!activeBook || !activeSemanticMap || !activeStructure) return;
 
-    const scene = activeSemanticMap.scenes.find((s) => s.id === sceneId);
+    let mapForGeneration = activeSemanticMap;
+    let scene = mapForGeneration.scenes.find((s) => s.id === sceneId);
     if (!scene) return;
 
     const chapters = activeStructure?.chapters ?? EMPTY_CHAPTERS;
     const wordPosition = computeSceneWordPosition(scene, chapters);
     const visualSlotKey = visualSlotKeyForScene(scene, chapters);
+    const styleSeed = activeStyleSeed ? getStyleSeedById(activeStyleSeed) : null;
+
+    if (styleSeed) {
+      const apiKey = await storage.loadApiKey("lumina_google_ai_key").catch(() => "");
+      mapForGeneration = await ensureVisualPlanBatch({
+        semanticMap: mapForGeneration,
+        structure: activeStructure,
+        styleSeed,
+        interpretationLevel: useSettingsStore.getState().visualInterpretationLevel,
+        apiKey: apiKey ?? "",
+        wordPosition,
+        reason: "gallery_request",
+      });
+      setActiveSemanticMap(mapForGeneration);
+      scene = mapForGeneration.scenes.find((s) => s.id === sceneId) ?? scene;
+    }
+
     const { startWorkflow, trackStep, completeWorkflow } = await import("@/services/workflowTracker");
     const workflowId = await startWorkflow(
       "manual-image-generation",
       `${activeBook.title} — manual scene image`,
       {
-        book_id: activeBook.id,
+        book_id: mapForGeneration.bookId,
+        library_book_id: activeBook.id,
         book_title: activeBook.title,
         scene_id: scene.id,
         visual_slot_key: visualSlotKey,
@@ -71,7 +95,7 @@ export function useGalleryActions() {
       () =>
         generateForVisualSlot({
           scene,
-          bookId: activeBook.id,
+          bookId: mapForGeneration.bookId,
           force: true,
         }),
       (outcome) => ({

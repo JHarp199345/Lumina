@@ -13,6 +13,8 @@ import { useImageStore } from "@/store/imageStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { extractPaletteContext } from "@/pipeline/imageGenerator";
 import { generateForVisualSlot, reconcileStaleGeneration } from "@/services/slotImageGeneration";
+import { ensureVisualPlanBatch } from "@/services/visualPlanBatching";
+import { storage } from "@/storage";
 import { getStyleSeedById } from "@/data/styleSeeds";
 import { LUMINA_CONFIG } from "@/config";
 
@@ -53,6 +55,7 @@ export function useImageTrigger() {
   const imageGenerationEnabled = useSettingsStore((s) => s.imageGenerationEnabled);
 
   const isGeneratingRef = useRef(false);
+  const isPlanningRef = useRef(false);
   const priorPromptRef = useRef<string>("");
   const lastDisplayDecisionRef = useRef<string>("");
   const lastWordPositionRef = useRef(0);
@@ -147,21 +150,49 @@ export function useImageTrigger() {
     lastQueuePositionRef.current = readerPos;
 
     const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
+    const activeStructure = useBookStore.getState().activeStructure;
     const canonicalScenes = segmentScenesForSemanticMap(activeSemanticMap.scenes, chapters, activeSemanticMap);
     const scenes = scenePositions(canonicalScenes, getSceneWordPosition);
     const store = useImageStore.getState();
     const cachedImages = Object.values(store.imageCache);
     const queue = store.queue;
 
+    const positionDelta = readerPos - lastWordPositionRef.current;
+    const isNavigationJump =
+      Date.now() < store.navigationJumpUntil ||
+      Math.abs(positionDelta) >= LUMINA_CONFIG.VISUAL_JUMP_THRESHOLD_WORDS;
+
+    if (!isPlanningRef.current && activeStyleSeed && activeStructure) {
+      const styleSeed = getStyleSeedById(activeStyleSeed);
+      if (styleSeed) {
+        isPlanningRef.current = true;
+        void (async () => {
+          try {
+            const apiKey = await storage.loadApiKey("lumina_google_ai_key").catch(() => "");
+            const nextMap = await ensureVisualPlanBatch({
+              semanticMap: activeSemanticMap,
+              structure: activeStructure,
+              styleSeed,
+              interpretationLevel: useSettingsStore.getState().visualInterpretationLevel,
+              apiKey: apiKey ?? "",
+              wordPosition: readerPos,
+              reason: isNavigationJump ? "jump" : "read_ahead",
+            });
+            if (nextMap !== activeSemanticMap) {
+              useBookStore.getState().setActiveSemanticMap(nextMap);
+            }
+          } finally {
+            isPlanningRef.current = false;
+          }
+        })();
+      }
+    }
+
     const generatableScenes = scenes.filter(({ scene }) => {
       const beat = activeSemanticMap.storyboard?.beats.find((item) => item.sceneId === scene.id);
       return beat?.generationIntent !== "planned_only";
     });
 
-    const positionDelta = readerPos - lastWordPositionRef.current;
-    const isNavigationJump =
-      Date.now() < store.navigationJumpUntil ||
-      Math.abs(positionDelta) >= LUMINA_CONFIG.VISUAL_JUMP_THRESHOLD_WORDS;
     const hasAdvancedForward = positionDelta >= LUMINA_CONFIG.VISUAL_FORWARD_ADVANCE_WORDS;
 
     if (hasAdvancedForward && Date.now() < store.regenerateCooldownUntil) {

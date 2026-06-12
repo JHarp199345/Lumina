@@ -16,6 +16,12 @@ export const LUMINA_CONFIG = {
   VISUAL_FORWARD_ADVANCE_WORDS: 80,
   /** Minimum word gap between distinct visual anchor positions in the storyboard. */
   VISUAL_MIN_SCENE_SEPARATION_WORDS: 350,
+  /** Number of narrative visual moments to keep active ahead of the reader. */
+  VISUAL_ACTIVE_BATCH_SIZE: 8,
+  /** Promote the next batch when fewer than this many active moments remain ahead. */
+  VISUAL_ACTIVE_BATCH_REFILL_THRESHOLD: 3,
+  /** Safety cap for how many planned moments can be activated in one background pass. */
+  VISUAL_MAX_BATCH_PROMOTIONS: 8,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words
