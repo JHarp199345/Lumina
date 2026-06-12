@@ -23,6 +23,7 @@ import {
   testOdysseus,
   type LLMProvider,
 } from "@/api/llmClient";
+import { loadStyleThumbs, pinStyleThumb } from "@/pipeline/imageGenerator";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -235,6 +236,9 @@ function VisualSection() {
           </p>
         </div>
 
+        {/* Style Thumbnails */}
+        <StyleThumbnailsSection />
+
         {/* Re-Ingest — one explicit action. Archives the current generation and re-lays
             fresh groundwork; new images fill in as you read. */}
         {activeBook && imageGenerationEnabled && (
@@ -247,6 +251,66 @@ function VisualSection() {
             </p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function StyleThumbnailsSection() {
+  const [stores, setStores] = useState(() =>
+    Object.fromEntries(
+      STYLE_SEEDS.map((s) => [s.id, loadStyleThumbs(s.id)])
+    )
+  );
+
+  const refresh = () =>
+    setStores(Object.fromEntries(STYLE_SEEDS.map((s) => [s.id, loadStyleThumbs(s.id)])));
+
+  useEffect(() => {
+    window.addEventListener("lumina:thumbs_updated", refresh);
+    return () => window.removeEventListener("lumina:thumbs_updated", refresh);
+  }, []);
+
+  const populated = STYLE_SEEDS.filter((s) => stores[s.id]?.thumbs.length > 0);
+  if (populated.length === 0) return null;
+
+  return (
+    <div>
+      <label className="text-xs text-ink-faint mb-1 block">Style Thumbnails</label>
+      <p className="text-xs text-ink/30 mb-3 leading-relaxed">
+        Tap to pin a thumbnail in the picker. Unpinned styles cycle randomly.
+      </p>
+      <div className="space-y-3">
+        {populated.map((seed) => {
+          const { thumbs, pinned } = stores[seed.id];
+          return (
+            <div key={seed.id}>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] text-ink-faint/60 uppercase tracking-wide">
+                  {seed.name}
+                </p>
+                <span className="text-[10px] text-ink/30">
+                  {pinned ? "Pinned" : thumbs.length > 1 ? "Random" : ""}
+                </span>
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {thumbs.map((thumb, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { pinStyleThumb(seed.id, thumb); refresh(); }}
+                    className={`flex-shrink-0 w-[72px] h-10 rounded-md overflow-hidden border-2 transition-all ${
+                      pinned === thumb
+                        ? "border-lumina-gold"
+                        : "border-transparent opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <img src={thumb} alt="" className="w-full h-full object-cover" draggable={false} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

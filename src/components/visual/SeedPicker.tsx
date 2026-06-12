@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { STYLE_SEEDS } from "@/data/styleSeeds";
-import { STYLE_THUMB_KEY } from "@/pipeline/imageGenerator";
+import { getDisplayThumb } from "@/pipeline/imageGenerator";
 import type { StyleSeedId } from "@/types";
 
 interface SeedPickerProps {
@@ -43,10 +43,10 @@ function assetUrl(path: string) {
   return `${BASE}${path.startsWith("/") ? path : "/" + path}`;
 }
 
-function loadRealThumbs(): Record<string, string> {
+function pickThumbs(): Record<string, string> {
   const map: Record<string, string> = {};
   for (const seed of STYLE_SEEDS) {
-    const v = localStorage.getItem(STYLE_THUMB_KEY(seed.id));
+    const v = getDisplayThumb(seed.id);
     if (v) map[seed.id] = v;
   }
   return map;
@@ -54,15 +54,13 @@ function loadRealThumbs(): Record<string, string> {
 
 export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
   const [selected, setSelected] = useState<StyleSeedId | null>(null);
-  const [realThumbs, setRealThumbs] = useState<Record<string, string>>(loadRealThumbs);
+  // Pick randomly (or pinned) once per mount — re-pick if a new image is generated
+  const [realThumbs, setRealThumbs] = useState<Record<string, string>>(pickThumbs);
 
-  // Refresh thumbnails if a generation completes while the picker is open
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key?.startsWith("lumina:style_thumb:")) setRealThumbs(loadRealThumbs());
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    const refresh = () => setRealThumbs(pickThumbs());
+    window.addEventListener("lumina:thumbs_updated", refresh);
+    return () => window.removeEventListener("lumina:thumbs_updated", refresh);
   }, []);
 
   return (
