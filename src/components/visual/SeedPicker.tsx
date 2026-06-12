@@ -36,9 +36,14 @@ const STYLE_GROUPS: { label: string; ids: Set<string> }[] = [
   },
 ];
 
+// Resolve asset paths relative to Vite's base (handles /Lumina/ on GitHub Pages)
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+function assetUrl(path: string) {
+  return `${BASE}${path.startsWith("/") ? path : "/" + path}`;
+}
+
 export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
   const [selected, setSelected] = useState<StyleSeedId | null>(null);
-  const [hoveredId, setHoveredId] = useState<StyleSeedId | null>(null);
 
   return (
     <motion.div
@@ -47,7 +52,7 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col"
     >
-      {/* Header — pinned, properly centered */}
+      {/* ── Header ── pinned, centered */}
       <motion.div
         initial={{ opacity: 0, y: -12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -59,31 +64,29 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
           <span className="text-xs tracking-widest text-ink-faint uppercase">Lumina</span>
         </div>
         <h1 className="text-2xl font-serif text-ink/85 mb-2">Choose Your Visual Style</h1>
-        <p className="text-sm text-ink-faint max-w-md text-center">
+        <p className="text-sm text-ink-faint max-w-md">
           This shapes the imagery generated throughout{" "}
           <span className="text-ink-soft italic">{bookTitle}</span>. You can change it later
           in settings.
         </p>
       </motion.div>
 
-      {/* Scrollable grid */}
+      {/* ── Scrollable grid — absolute fill so mx-auto works reliably ── */}
       <div className="relative flex-1 min-h-0">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="h-full overflow-y-auto"
+          className="absolute inset-0 overflow-y-auto"
           style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.1) transparent" }}
         >
           <div className="max-w-2xl mx-auto px-6 pb-4 space-y-6">
             {STYLE_GROUPS.map((group) => {
               const seeds = STYLE_SEEDS.filter((s) => group.ids.has(s.id));
-              // If only 1 item would sit alone in the last row, center it
               const orphan = seeds.length % 3 === 1;
 
               return (
                 <div key={group.label}>
-                  {/* Section label */}
                   <div className="flex items-center gap-3 mb-3">
                     <span className="text-[10px] tracking-widest text-ink-faint/50 uppercase">
                       {group.label}
@@ -100,8 +103,6 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
                         <motion.button
                           key={seed.id}
                           onClick={() => setSelected(seed.id as StyleSeedId)}
-                          onMouseEnter={() => setHoveredId(seed.id as StyleSeedId)}
-                          onMouseLeave={() => setHoveredId(null)}
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
                           style={isOrphan ? { gridColumnStart: 2 } : undefined}
@@ -113,7 +114,7 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
                         >
                           <div className="w-full aspect-video relative overflow-hidden bg-black/60">
                             <img
-                              src={seed.previewImage}
+                              src={assetUrl(seed.previewImage)}
                               alt={seed.name}
                               className="w-full h-full object-cover"
                               draggable={false}
@@ -151,14 +152,13 @@ export default function SeedPicker({ onSelect, bookTitle }: SeedPickerProps) {
           </div>
         </motion.div>
 
-        {/* Fade signals more content below */}
+        {/* Fade — more content below */}
         <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-black/75 to-transparent" />
       </div>
 
-      {/* Footer — pinned */}
+      {/* ── Footer ── pinned */}
       <div className="flex-none flex flex-col items-center py-5 px-8">
         <motion.button
-          initial={{ opacity: 0 }}
           animate={{ opacity: selected ? 1 : 0.4 }}
           onClick={() => selected && onSelect(selected)}
           disabled={!selected}
