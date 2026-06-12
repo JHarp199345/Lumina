@@ -11,7 +11,7 @@
 import type { IdentifiedScene, StyleSeed, CachedImage } from "@/types";
 import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
-import { buildFinalImagePrompt } from "./visualDirector";
+import { buildFinalImagePrompt, buildComfyUIPrompt } from "./visualDirector";
 import { getProvider, getOdysseusUrl, getOdysseusToken } from "@/api/llmClient";
 
 const IMAGEN_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -169,33 +169,44 @@ export function buildImagePrompt(
   }
 
   if (scene.directorBrief) {
-    const directorPrompt = buildFinalImagePrompt(scene.directorBrief, styleSeed);
+    // Local diffusion models (ComfyUI/Flux) need dense tag-format prompts, not
+    // the structured scene-direction prose that Imagen3/Gemini understand.
+    const directorPrompt = getProvider() === "odysseus"
+      ? buildComfyUIPrompt(scene.directorBrief, styleSeed)
+      : buildFinalImagePrompt(scene.directorBrief, styleSeed);
     return priorPaletteContext
-      ? `${directorPrompt} Maintain visual continuity with established style: ${priorPaletteContext}.`
+      ? `${directorPrompt}, established palette: ${priorPaletteContext}`
       : directorPrompt;
   }
 
+  const description = scene.imageDescription || buildFallbackDescription(scene);
+
+  if (getProvider() === "odysseus") {
+    // Tag-format for local diffusion models: description first, then compact tags.
+    const tags = [
+      ...scene.emotionalVector.slice(0, 3),
+      ...scene.atmosphericQualities.slice(0, 2),
+      ...scene.symbolicMotifs.slice(0, 3),
+      ...styleSeed.paletteKeywords.slice(0, 3),
+      styleSeed.promptFragment,
+      "fine art quality",
+      "no text",
+      "no watermark",
+      priorPaletteContext ? `palette: ${priorPaletteContext}` : "",
+    ].filter(Boolean);
+    return `${description}, ${tags.join(", ")}`;
+  }
+
   const parts: string[] = [];
-
-  // Core symbolic description
-  parts.push(scene.imageDescription || buildFallbackDescription(scene));
-
-  // Style seed injection
+  parts.push(description);
   parts.push(styleSeed.promptFragment);
-
-  // Palette from seed
   parts.push(`Palette: ${styleSeed.paletteKeywords.join(", ")}`);
-
-  // Style continuity (if not the first image)
   if (priorPaletteContext) {
     parts.push(`Maintain visual continuity with established style: ${priorPaletteContext}`);
   }
-
-  // Universal quality directives
   parts.push(
     "Fine art quality. Depictive cinematic illustration. Show the actual scene clearly through the chosen art style. No readable text or writing. Faces gestural rather than portrait-like. Atmospheric and evocative."
   );
-
   return parts.join(". ");
 }
 

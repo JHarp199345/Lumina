@@ -589,6 +589,52 @@ function briefUsesLoreEntity(raw: Partial<VisualDirectorBrief>, entityName: stri
     .some((item) => item.toLowerCase().includes(lower));
 }
 
+/**
+ * Prompt format optimized for local SDXL/Flux models via ComfyUI.
+ *
+ * Cloud models (Imagen3, Gemini) understand structured prose — "camera logic:
+ * medium human scale so the physical relationship is clear." Local diffusion
+ * models attend to early tokens and work best with dense comma-separated
+ * descriptors. Feeding them 400-word scene-direction prose produces generic output.
+ *
+ * This keeps the director's scene description as the lead, then appends a
+ * tight tag list: subject, setting, mood, palette, light, style. Stays under
+ * ~150 words so the local tokenizer doesn't dilute early content.
+ */
+export function buildComfyUIPrompt(brief: VisualDirectorBrief, styleSeed: StyleSeed): string {
+  // Use the director's written scene description as the narrative lead.
+  // It's 90–150 words of actual visual content — exactly what the model needs first.
+  const lead = (brief.finalPrompt?.length ?? 0) > 80 ? brief.finalPrompt : brief.composition;
+
+  // Pull the highest-priority visible elements — their depiction field is the
+  // richest per-element visual description the director produced.
+  const topElements = [...brief.blocking.elements]
+    .sort((a, b) => b.visualPriority - a.visualPriority)
+    .slice(0, 3)
+    .map((el) => el.depiction)
+    .filter(Boolean);
+
+  // Compact tag list: mood → anchors → lore → palette → light → style
+  const tags = [
+    brief.dominantEmotion,
+    ...brief.emotionalTone.slice(0, 2),
+    ...brief.concreteAnchors.slice(0, 4),
+    ...brief.loreDescriptorsUsed.slice(0, 4),
+    ...brief.symbolicAnchors.slice(0, 2),
+    ...brief.palette.slice(0, 4),
+    brief.lighting,
+    humanize(brief.perspective),
+    humanize(brief.motionLevel),
+    styleSeed.promptFragment,
+    "fine art quality",
+    "no text",
+    "no watermark",
+  ].filter(Boolean);
+
+  const parts = [lead, ...topElements, tags.join(", ")].filter(Boolean);
+  return parts.join(". ");
+}
+
 export function buildFinalImagePrompt(brief: VisualDirectorBrief, styleSeed: StyleSeed): string {
   const register =
     brief.interpretationLevel >= 80
