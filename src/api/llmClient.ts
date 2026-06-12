@@ -98,6 +98,73 @@ export async function hydrateOdysseusConfig(): Promise<void> {
   }
 }
 
+// ── Odysseus parallel graph ───────────────────────────────────────────────────
+
+export interface OdysseusParallelTask {
+  id: string;
+  agent: string;
+  prompt?: string;
+  messages?: Array<Record<string, unknown>>;
+  goal?: string;
+  skill?: string;
+  depends_on?: string[];
+  temperature?: number;
+  max_tokens?: number;
+  packet_mode?: "compact" | "full";
+}
+
+export interface OdysseusParallelRequest {
+  shared_context?: unknown;
+  max_concurrency?: number;
+  workflow?: {
+    type?: string;
+    label?: string;
+    task_goal?: string;
+    context?: Record<string, unknown>;
+  };
+  tasks: OdysseusParallelTask[];
+  merge_agent?: string;
+  merge_prompt?: string;
+}
+
+export interface OdysseusParallelResult {
+  ok: boolean;
+  workflow_id?: string | null;
+  phases: Array<{ phase: number; task_ids: string[]; duration_ms: number }>;
+  packets: Record<string, unknown>;
+  results: Array<{
+    id: string;
+    agent: string;
+    status: "done" | "error" | "blocked";
+    duration_ms?: number;
+    content?: string;
+    packet?: unknown;
+    error?: string;
+  }>;
+  merge?: unknown;
+  errors: Record<string, string>;
+}
+
+export async function runOdysseusParallel(
+  request: OdysseusParallelRequest
+): Promise<OdysseusParallelResult> {
+  const base = getOdysseusUrl();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getOdysseusToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${base}/api/agents/parallel`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Odysseus parallel ${res.status}: ${text.slice(0, 240)}`);
+  }
+  return (await res.json()) as OdysseusParallelResult;
+}
+
 // ── Generate ───────────────────────────────────────────────────────────────────
 
 export interface LLMGenerateOptions {
