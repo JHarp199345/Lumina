@@ -553,28 +553,16 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async archiveAndResetGeneration(book: Book): Promise<void> {
     const bookId = book.id;
-    // 1. Snapshot the current generation's counts into the archive.
+    // 1. Snapshot counts into the archive. Generated media is reader-owned and
+    // stays in place; the archive is a view over preserved artifacts, not a copy
+    // made right before deletion.
     await this._materializeNotesForArchive(bookId).catch(() => {});
     const counts = await this._archiveCounts(bookId);
     await this._saveArchiveEntry(book.id, book.title, book.author, counts);
 
-    // 2. Clear the active generated artifacts (book + user data stay).
-    const semanticMaps = await dbGetAll<SemanticMap>(STORES.SEMANTIC_MAPS);
-    await Promise.all(
-      semanticMaps
-        .filter((map) => matchesBookScope(map.bookId, bookId))
-        .map((map) => dbDelete(STORES.SEMANTIC_MAPS, map.bookId))
-    );
-
-    const profiles = await dbGetAll<SourceIntelligenceProfile>(STORES.SOURCE_PROFILES);
-    await Promise.all(
-      profiles
-        .filter((profile) => matchesBookScope(profile.bookId, bookId))
-        .map((profile) => dbDelete(STORES.SOURCE_PROFILES, profile.bookId))
-    );
-
-    await this.deleteImages(bookId);
-    await this.deleteAudioArtifacts(bookId);
+    // 2. Do not delete generated artifacts here. A fresh analysis may overwrite
+    // the active semantic map by key, but app updates/restarts/re-ingest setup
+    // must never silently remove expensive reader-owned work.
   }
 
   async archiveAndRemoveBook(book: Book): Promise<void> {

@@ -16,8 +16,8 @@ import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { subdivideOversizedChapters, READING_CHAPTER_MIN_SPLIT } from "@/utils/chapterSubdivision";
 import { ensureReadingParagraphs } from "@/utils/readingText";
 import { getDisplayImage, hydrateImageWordPositions } from "@/utils/imagePosition";
-import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { diagnosticInfo } from "@/utils/diagnostics";
+import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { markLedgerImportedFromImport } from "@/utils/importHistory";
 
 function describeError(err: unknown): string {
@@ -348,12 +348,9 @@ export function useEpubImport() {
         storage.loadStudyGuide(book.id).catch(() => null),
         storage.loadAudioArtifacts(book.id).catch(() => []),
       ]);
-      const semanticMap =
-        storedSemanticMap?.visualPlanVersion === VISUAL_PLAN_VERSION
-          ? storedSemanticMap
-          : null;
-      if (storedSemanticMap && !semanticMap) {
-        diagnosticInfo("semantic_map.stale_ignored", "Ignoring stale visual plan", {
+      const semanticMap = storedSemanticMap ?? null;
+      if (storedSemanticMap && storedSemanticMap.visualPlanVersion !== VISUAL_PLAN_VERSION) {
+        diagnosticInfo("semantic_map.older_version_loaded", "Loaded older visual plan as a durable artifact", {
           bookId: book.id,
           semanticBookId,
           storedVersion: storedSemanticMap.visualPlanVersion ?? null,

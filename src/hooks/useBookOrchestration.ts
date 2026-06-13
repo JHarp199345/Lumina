@@ -108,21 +108,22 @@ export function useBookOrchestration() {
       const loadedMap = await storage.loadSemanticMap(slice.semanticBookId);
       const existingMap = loadedMap ? sanitizeMapForBook(loadedMap, slice.semanticBookId) : loadedMap;
       if (existingMap && existingMap.visualPlanVersion !== VISUAL_PLAN_VERSION) {
-        diagnosticInfo("semantic_map.stale_deleted", "Deleting stale visual plan", {
+        diagnosticInfo("semantic_map.older_version_loaded", "Loaded older visual plan as a durable artifact", {
           semanticBookId: slice.semanticBookId,
           storedVersion: existingMap.visualPlanVersion ?? null,
           currentVersion: VISUAL_PLAN_VERSION,
           scenes: existingMap.scenes.length,
         });
-        await storage.deleteSemanticMap(slice.semanticBookId).catch(() => {});
       }
 
-      if (existingMap?.visualPlanVersion === VISUAL_PLAN_VERSION) {
+      if (existingMap) {
         console.log(`[Orchestration] Using cached semantic map for ${slice.label}`);
         diagnosticInfo("orchestration.cached_map", "Using cached semantic map", {
           semanticBookId: slice.semanticBookId,
           scenes: existingMap.scenes.length,
           hasStoryboard: Boolean(existingMap.storyboard),
+          storedVersion: existingMap.visualPlanVersion ?? null,
+          currentVersion: VISUAL_PLAN_VERSION,
         });
         setActiveSemanticMap(existingMap);
 
