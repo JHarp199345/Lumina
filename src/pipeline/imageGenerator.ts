@@ -13,6 +13,7 @@ import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
 import { buildFinalImagePrompt, buildComfyUIPrompt, buildIterativePassPlan, buildNegativePrompt } from "./visualDirector";
 import { getProvider, getOdysseusUrl, getOdysseusToken } from "@/api/llmClient";
+import { buildReaderVisualDirectionPrompt, buildReaderVisualDirectionTags } from "@/utils/visualDirectionPrompt";
 
 const IMAGEN_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const FAL_BASE = "https://queue.fal.run";
@@ -217,9 +218,14 @@ export function buildImagePrompt(
     const directorPrompt = getProvider() === "odysseus"
       ? buildComfyUIPrompt(scene.directorBrief, styleSeed)
       : buildFinalImagePrompt(scene.directorBrief, styleSeed);
-    return priorPaletteContext
-      ? `${directorPrompt}, established palette: ${priorPaletteContext}`
-      : directorPrompt;
+    const readerDirection = getProvider() === "odysseus"
+      ? buildReaderVisualDirectionTags(scene)
+      : buildReaderVisualDirectionPrompt(scene);
+    return [
+      directorPrompt,
+      readerDirection,
+      priorPaletteContext ? `established palette: ${priorPaletteContext}` : "",
+    ].filter(Boolean).join(getProvider() === "odysseus" ? ", " : "\n\n");
   }
 
   const description = scene.imageDescription || buildFallbackDescription(scene);
@@ -232,6 +238,7 @@ export function buildImagePrompt(
       ...scene.symbolicMotifs.slice(0, 3),
       ...styleSeed.paletteKeywords.slice(0, 3),
       styleSeed.promptFragment,
+      buildReaderVisualDirectionTags(scene),
       "fine art quality",
       "no text",
       "no watermark",
@@ -243,6 +250,8 @@ export function buildImagePrompt(
   const parts: string[] = [];
   parts.push(description);
   parts.push(styleSeed.promptFragment);
+  const readerDirection = buildReaderVisualDirectionPrompt(scene);
+  if (readerDirection) parts.push(readerDirection);
   parts.push(`Palette: ${styleSeed.paletteKeywords.join(", ")}`);
   if (priorPaletteContext) {
     parts.push(`Maintain visual continuity with established style: ${priorPaletteContext}`);
@@ -412,6 +421,9 @@ async function generateWithComfyUIIterative(
     dominant_emotion: scene.directorBrief?.dominantEmotion ?? scene.emotionalVector[0] ?? "",
     focal_point: scene.directorBrief?.blocking.focalPoint ?? "",
     palette: scene.directorBrief?.palette ?? styleSeed.paletteKeywords,
+    reader_visual_direction: scene.publicVisualBrief
+      ? buildReaderVisualDirectionPrompt(scene)
+      : "",
   };
 
   const body = {

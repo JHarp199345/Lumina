@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ModalPortal from "@/components/common/ModalPortal";
 import { animate, AnimatePresence, motion, useMotionValue } from "framer-motion";
-import { X, MapPin, ChevronLeft, ChevronRight, Sparkles, Loader, ListFilter, RefreshCw, Check, AlertTriangle, BookOpen, Image, List } from "lucide-react";
+import { X, MapPin, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Loader, ListFilter, RefreshCw, Check, AlertTriangle, BookOpen, Image, List, Wand2 } from "lucide-react";
 import { isTauri } from "@/utils/runtime";
 import { toAssetUrl } from "@/utils/tauriBridge";
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
@@ -25,7 +25,10 @@ import { visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { getImageForScene } from "@/utils/imagePosition";
 import { segmentScenesForSemanticMap } from "@/utils/sceneDedup";
 import { EMPTY_BEATS, EMPTY_CHAPTERS, EMPTY_SCENES } from "@/utils/stableEmpty";
-import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat } from "@/types";
+import { buildPublicVisualBrief } from "@/utils/publicVisualBrief";
+import { storage } from "@/storage";
+import { analyzeReferenceImage } from "@/services/referenceImageAnalysis";
+import type { AnalysisProgressPhase, CachedImage, IdentifiedScene, SemanticMap, VisualBeat, VisualDirectionWeightKind, VisualReferenceImage } from "@/types";
 
 function displaySrc(src: string): string {
   const isUrl =
@@ -36,6 +39,32 @@ function displaySrc(src: string): string {
     src.startsWith("https:");
   return isTauri && !isUrl ? toAssetUrl(src) : src;
 }
+
+// Calm visual treatment for each direction kind — replaces raw weight numbers
+// and the internal `kind · source` debug tooltip with a quiet colour + label.
+const DIRECTION_STYLES: Record<VisualDirectionWeightKind, { dot: string; ring: string; text: string; label: string }> = {
+  required:    { dot: "bg-lumina-gold",     ring: "border-lumina-gold/35 bg-lumina-gold/[0.07]", text: "text-lumina-gold/90", label: "Must include" },
+  important:   { dot: "bg-amber-200/80",    ring: "border-white/12 bg-white/[0.03]",             text: "text-white/65",      label: "Important" },
+  style:       { dot: "bg-sky-300/70",      ring: "border-sky-300/15 bg-sky-300/[0.045]",        text: "text-sky-100/65",    label: "Style" },
+  composition: { dot: "bg-violet-300/70",   ring: "border-violet-300/15 bg-violet-300/[0.045]",  text: "text-violet-100/65", label: "Composition" },
+  optional:    { dot: "bg-white/40",        ring: "border-white/10 bg-white/[0.02]",             text: "text-white/45",      label: "Optional" },
+  avoid:       { dot: "bg-rose-400/80",     ring: "border-rose-400/20 bg-rose-400/[0.05]",       text: "text-rose-200/75",   label: "Avoid" },
+};
+
+function directionSourceNote(source: string): string {
+  if (source === "reader") return " · your direction";
+  if (source === "reference_image") return " · from a reference";
+  if (source === "lore") return " · from the book's lore";
+  return "";
+}
+
+// Reader-friendly labels for the reference analysis lifecycle — no raw enums.
+const REFERENCE_STATUS: Record<VisualReferenceImage["analysisStatus"], { label: string; dot: string; text: string }> = {
+  analyzed:   { label: "Analyzed",         dot: "bg-emerald-300/80", text: "text-emerald-200/75" },
+  pending:    { label: "Analyzing…",       dot: "bg-lumina-gold/70", text: "text-lumina-gold/72" },
+  unanalyzed: { label: "Not analyzed yet", dot: "bg-white/35",       text: "text-white/40" },
+  failed:     { label: "Couldn't analyze", dot: "bg-rose-400/70",    text: "text-rose-200/70" },
+};
 
 interface GalleryItem {
   scene: IdentifiedScene;
@@ -94,8 +123,16 @@ export default function GalleryFocalView({
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showBookMenu, setShowBookMenu] = useState(false);
+  const [activeTagId, setActiveTagId] = useState<string | null>(null);
+  const [readerDirection, setReaderDirection] = useState("");
+  const [showDirector, setShowDirector] = useState(false);
+  const [referenceRightsConfirmed, setReferenceRightsConfirmed] = useState(false);
+  const [analyzingReferences, setAnalyzingReferences] = useState(false);
+  const [referenceError, setReferenceError] = useState<string | null>(null);
   const selectedThumbRef = useRef<HTMLButtonElement>(null);
   const openedAtRef = useRef(Date.now());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const setActiveSemanticMap = useBookStore((state) => state.setActiveSemanticMap);
 
   useEffect(() => {
     openedAtRef.current = Date.now();
@@ -148,6 +185,10 @@ export default function GalleryFocalView({
   }, [index]);
 
   const current = items[index];
+  const currentBrief = current
+    ? current.scene.publicVisualBrief ?? buildPublicVisualBrief(current.scene, current.beat)
+    : null;
+  const activeTag = currentBrief?.tags.find((tag) => tag.id === activeTagId);
   const caption = current
     ? current.scene.expositoryBeat?.centralClaim ||
       current.scene.expositoryBeat?.sectionTitle ||
@@ -166,6 +207,13 @@ export default function GalleryFocalView({
       (isGenerating && !!currentSlotKey && activeSlot === currentSlotKey)
     : false;
 
+  useEffect(() => {
+    setActiveTagId(null);
+    setReaderDirection(currentBrief?.readerDirection ?? "");
+    setReferenceRightsConfirmed(false);
+    setShowDirector(false);
+  }, [current?.scene.id, currentBrief?.readerDirection]);
+
   const handleBackdropClose = () => {
     if (Date.now() - openedAtRef.current < 350) return;
     onClose();
@@ -174,6 +222,151 @@ export default function GalleryFocalView({
   const switchPhonePanel = (panel: "reader" | "visual" | "toc") => {
     setPhonePanel(panel);
     onClose();
+  };
+
+  const updateCurrentBrief = async (patch: Partial<NonNullable<typeof currentBrief>>) => {
+    if (!current || !activeSemanticMap || !currentBrief) return;
+    const nextBrief = {
+      ...currentBrief,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+    const nextMap: SemanticMap = {
+      ...activeSemanticMap,
+      scenes: activeSemanticMap.scenes.map((scene) =>
+        scene.id === current.scene.id ? { ...scene, publicVisualBrief: nextBrief } : scene
+      ),
+    };
+    setActiveSemanticMap(nextMap);
+    await storage.saveSemanticMap(nextMap).catch(() => {});
+  };
+
+  const saveReaderDirection = () => {
+    if (!currentBrief) return;
+    const trimmed = readerDirection.trim();
+    const withoutPrevious = currentBrief.weightedDirections.filter((item) => item.id !== "reader_override_direction");
+    void updateCurrentBrief({
+      readerDirection,
+      weightedDirections: trimmed
+        ? [
+            {
+              id: "reader_override_direction",
+              label: trimmed,
+              kind: "required",
+              weight: 10,
+              source: "reader",
+            },
+            ...withoutPrevious,
+          ]
+        : withoutPrevious,
+    });
+  };
+
+  const addReferenceImages = async (files: FileList | null) => {
+    if (!files?.length || !currentBrief || !referenceRightsConfirmed) return;
+    const nextRefs = await Promise.all(
+      Array.from(files).slice(0, 4).map(
+        (file) =>
+          new Promise<NonNullable<typeof currentBrief>["referenceImages"][number]>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              resolve({
+                id: `ref_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                fileName: file.name,
+                dataUrl: typeof reader.result === "string" ? reader.result : undefined,
+                addedAt: new Date().toISOString(),
+                rightsConfirmed: true,
+                analysisStatus: "unanalyzed",
+              });
+            };
+            reader.onerror = () => {
+              resolve({
+                id: `ref_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                fileName: file.name,
+                addedAt: new Date().toISOString(),
+                rightsConfirmed: true,
+                analysisStatus: "failed",
+              });
+            };
+            reader.readAsDataURL(file);
+          })
+      )
+    );
+    await updateCurrentBrief({
+      referenceImages: [...currentBrief.referenceImages, ...nextRefs],
+    });
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const analyzeCurrentReferences = async () => {
+    if (!currentBrief || analyzingReferences) return;
+    const pendingRefs = currentBrief.referenceImages.filter((ref) =>
+      ref.rightsConfirmed && (ref.analysisStatus === "pending" || ref.analysisStatus === "unanalyzed" || ref.analysisStatus === "failed")
+    );
+    if (!pendingRefs.length) return;
+
+    setReferenceError(null);
+    setAnalyzingReferences(true);
+    try {
+      const analyzed = [];
+      const referenceDirections = [];
+      for (const ref of currentBrief.referenceImages) {
+        if (!pendingRefs.some((item) => item.id === ref.id)) {
+          analyzed.push(ref);
+          continue;
+        }
+        try {
+          const analysis = await analyzeReferenceImage(ref);
+          analyzed.push({
+            ...ref,
+            analysis,
+            analysisStatus: analysis.provider === "unavailable" ? "unanalyzed" as const : "analyzed" as const,
+          });
+          if (analysis.provider !== "unavailable") {
+            referenceDirections.push(
+              ...analysis.visualTraits.slice(0, 4).map((label, i) => ({
+                id: `${ref.id}_trait_${i}`,
+                label,
+                kind: "important" as const,
+                weight: Math.max(5, 8 - i),
+                source: "reference_image" as const,
+              })),
+              ...analysis.palette.slice(0, 3).map((label, i) => ({
+                id: `${ref.id}_palette_${i}`,
+                label,
+                kind: "style" as const,
+                weight: Math.max(4, 6 - i),
+                source: "reference_image" as const,
+              })),
+              ...analysis.compositionHints.slice(0, 2).map((label, i) => ({
+                id: `${ref.id}_composition_${i}`,
+                label,
+                kind: "composition" as const,
+                weight: Math.max(4, 6 - i),
+                source: "reference_image" as const,
+              })),
+              ...analysis.avoidCopying.slice(0, 3).map((label, i) => ({
+                id: `${ref.id}_avoid_${i}`,
+                label,
+                kind: "avoid" as const,
+                weight: 10,
+                source: "reference_image" as const,
+              }))
+            );
+          }
+        } catch (err) {
+          analyzed.push({ ...ref, analysisStatus: "failed" as const });
+          setReferenceError(err instanceof Error ? err.message : "Reference analysis failed");
+        }
+      }
+      const existing = currentBrief.weightedDirections.filter((item) => item.source !== "reference_image");
+      await updateCurrentBrief({
+        referenceImages: analyzed,
+        weightedDirections: [...existing, ...referenceDirections],
+      });
+    } finally {
+      setAnalyzingReferences(false);
+    }
   };
 
   return (
@@ -419,7 +612,182 @@ export default function GalleryFocalView({
           {/* Plaque */}
           <div className="mt-5 max-w-xl text-center">
             <p className="text-[10px] uppercase tracking-[0.28em] text-lumina-gold/55">{beatLabel}</p>
-            {caption && <p className="mt-2 font-serif text-sm leading-relaxed text-white/55">{caption}</p>}
+            <p className="mt-1 font-serif text-lg leading-tight text-white/78">
+              {currentBrief?.title ?? caption}
+            </p>
+            {currentBrief?.teaser && (
+              <p className="mt-1 text-xs leading-relaxed text-white/45">{currentBrief.teaser}</p>
+            )}
+            {caption && !currentBrief?.teaser && <p className="mt-2 font-serif text-sm leading-relaxed text-white/55">{caption}</p>}
+            {currentBrief && (
+              <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] text-left">
+                {/* ── About this moment — calm, read-only placard ── */}
+                <div className="p-4">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-white/35">About this moment</p>
+                  <p className="mt-2 text-xs leading-relaxed text-white/60">{currentBrief.expectedDepiction}</p>
+                  <p className="mt-2 text-[11px] italic leading-relaxed text-white/38">{currentBrief.whyChosen}</p>
+
+                  {currentBrief.tags.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {currentBrief.tags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          onClick={() => setActiveTagId((id) => id === tag.id ? null : tag.id)}
+                          className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.11em] transition-colors ${
+                            activeTagId === tag.id
+                              ? "border-lumina-gold/55 bg-lumina-gold/12 text-lumina-gold/90"
+                              : "border-white/10 text-white/42 hover:border-lumina-gold/35 hover:text-lumina-gold/75"
+                          }`}
+                        >
+                          {tag.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeTag && (
+                    <p className="mt-2 rounded-lg border border-lumina-gold/15 bg-lumina-gold/[0.045] px-3 py-2 text-[11px] leading-relaxed text-white/52">
+                      {activeTag.description}
+                    </p>
+                  )}
+
+                  {currentBrief.weightedDirections.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-white/30">
+                        What this image emphasizes
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {currentBrief.weightedDirections
+                          .slice()
+                          .sort((a, b) => b.weight - a.weight)
+                          .slice(0, 8)
+                          .map((item) => {
+                            const ds = DIRECTION_STYLES[item.kind] ?? DIRECTION_STYLES.optional;
+                            const strength = item.weight >= 8 ? 3 : item.weight >= 5 ? 2 : 1;
+                            return (
+                              <span
+                                key={item.id}
+                                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] ${ds.ring} ${ds.text}`}
+                                title={`${ds.label}${directionSourceNote(item.source)}`}
+                              >
+                                <span className={`h-1.5 w-1.5 rounded-full ${ds.dot}`} />
+                                {item.label.length > 34 ? `${item.label.slice(0, 34)}…` : item.label}
+                                <span className="ml-0.5 flex items-end gap-px" aria-hidden="true">
+                                  {[0, 1, 2].map((n) => (
+                                    <span
+                                      key={n}
+                                      className={`w-0.5 rounded-full ${n < strength ? ds.dot : "bg-white/12"}`}
+                                      style={{ height: `${4 + n * 2}px` }}
+                                    />
+                                  ))}
+                                </span>
+                              </span>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Direct this image — editing tools, tucked away by default ── */}
+                <div className="border-t border-white/[0.07]">
+                  <button
+                    onClick={() => setShowDirector((open) => !open)}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]"
+                    aria-expanded={showDirector}
+                  >
+                    <span className="flex items-center gap-2 text-[11px] font-medium text-white/55">
+                      <Wand2 size={13} className="text-lumina-gold/65" />
+                      Direct this image
+                      {(readerDirection.trim() || currentBrief.referenceImages.length > 0) && !showDirector && (
+                        <span className="rounded-full bg-lumina-gold/15 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-lumina-gold/75">
+                          edited
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      size={15}
+                      className={`text-white/35 transition-transform ${showDirector ? "rotate-180" : ""}`}
+                    />
+                  </button>
+
+                  {showDirector && (
+                    <div className="space-y-3 px-4 pb-4">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-[0.14em] text-white/30">Your direction</label>
+                        <textarea
+                          value={readerDirection}
+                          onChange={(event) => setReaderDirection(event.target.value)}
+                          onBlur={saveReaderDirection}
+                          placeholder="Tell Lumina what matters most for this image…"
+                          rows={3}
+                          className="mt-1.5 w-full resize-none rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs leading-relaxed text-white/70 outline-none transition-colors placeholder:text-white/25 focus:border-lumina-gold/35"
+                        />
+                      </div>
+
+                      <div className="rounded-lg border border-white/[0.07] bg-black/15 p-3">
+                        <p className="text-[10px] uppercase tracking-[0.14em] text-white/30">Reference images</p>
+                        <label className="mt-2 flex items-start gap-2 text-[11px] leading-relaxed text-white/42">
+                          <input
+                            type="checkbox"
+                            checked={referenceRightsConfirmed}
+                            onChange={(event) => setReferenceRightsConfirmed(event.target.checked)}
+                            className="mt-0.5 accent-[#c9a83f]"
+                          />
+                          <span>Add only images you own, created, licensed, or have permission to use.</span>
+                        </label>
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            onChange={(event) => void addReferenceImages(event.target.files)}
+                          />
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={!referenceRightsConfirmed}
+                            className="rounded-full border border-white/12 px-3 py-1.5 text-[10px] uppercase tracking-[0.12em] text-white/42 transition-colors hover:border-lumina-gold/35 hover:text-lumina-gold/75 disabled:opacity-40"
+                          >
+                            Add reference
+                          </button>
+                          {currentBrief.referenceImages.some((ref) => ref.analysisStatus !== "analyzed") && (
+                            <button
+                              onClick={() => void analyzeCurrentReferences()}
+                              disabled={analyzingReferences}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-lumina-gold/25 px-3 py-1.5 text-[10px] uppercase tracking-[0.12em] text-lumina-gold/72 transition-colors hover:border-lumina-gold/45 hover:text-lumina-gold disabled:opacity-45"
+                            >
+                              {analyzingReferences && <Loader size={11} className="animate-spin" />}
+                              {analyzingReferences ? "Analyzing…" : "Analyze references"}
+                            </button>
+                          )}
+                        </div>
+                        {currentBrief.referenceImages.length > 0 && (
+                          <div className="mt-2.5 grid gap-1">
+                            {currentBrief.referenceImages.slice(0, 4).map((ref) => {
+                              const rs = REFERENCE_STATUS[ref.analysisStatus] ?? REFERENCE_STATUS.unanalyzed;
+                              return (
+                                <div key={ref.id} className="flex items-center justify-between gap-2 rounded-md bg-white/[0.025] px-2.5 py-1.5 text-[10px] text-white/45">
+                                  <span className="truncate">{ref.fileName}</span>
+                                  <span className={`inline-flex shrink-0 items-center gap-1.5 ${rs.text}`}>
+                                    <span className={`h-1.5 w-1.5 rounded-full ${rs.dot}`} />
+                                    {rs.label}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {referenceError && (
+                          <p className="mt-2 text-[11px] leading-relaxed text-rose-300/80">{referenceError}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <button
               onClick={() => onVisitPassage(current.scene.id)}
               className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-white/45 transition-colors hover:border-lumina-gold/40 hover:text-lumina-gold/80"

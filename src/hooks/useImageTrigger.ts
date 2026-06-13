@@ -172,10 +172,17 @@ export function useImageTrigger() {
       Date.now() < store.navigationJumpUntil ||
       Math.abs(positionDelta) >= LUMINA_CONFIG.VISUAL_JUMP_THRESHOLD_WORDS;
 
+    if (isPlanningRef.current && (isNavigationJump || Math.abs(positionDelta) > 0)) {
+      useImageStore
+        .getState()
+        .setVisualPlanningNotice("Lumina is still preparing the current visual request. Let that finish before starting another.");
+    }
+
     if (!isPlanningRef.current && activeStyleSeed && activeStructure) {
       const styleSeed = getStyleSeedById(activeStyleSeed);
       if (styleSeed) {
         isPlanningRef.current = true;
+        useImageStore.getState().setVisualPlanningNotice(null);
         void (async () => {
           try {
             const apiKey = await storage.loadApiKey("lumina_google_ai_key").catch(() => "");
@@ -193,6 +200,7 @@ export function useImageTrigger() {
             }
           } finally {
             isPlanningRef.current = false;
+            useImageStore.getState().setVisualPlanningNotice(null);
           }
         })();
       }

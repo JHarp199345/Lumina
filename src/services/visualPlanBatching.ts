@@ -4,6 +4,7 @@ import { createVisualDirectorBrief } from "@/pipeline/visualDirector";
 import { storage } from "@/storage";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
+import { buildPublicVisualBrief } from "@/utils/publicVisualBrief";
 import type {
   AnalysisProgressReporter,
   BookStructure,
@@ -24,6 +25,8 @@ interface EnsureVisualPlanBatchParams {
   apiKey: string;
   wordPosition: number;
   reason: "read_ahead" | "gallery_request" | "jump";
+  /** For direct reader requests, prepare this exact scene instead of a local batch. */
+  targetSceneId?: string;
   onProgress?: AnalysisProgressReporter;
 }
 
@@ -50,14 +53,27 @@ function activeAheadCount(
 function choosePromotionScenes(
   semanticMap: SemanticMap,
   structure: BookStructure,
-  wordPosition: number
+  wordPosition: number,
+  reason: EnsureVisualPlanBatchParams["reason"],
+  targetSceneId?: string
 ): IdentifiedScene[] {
   const beatsBySceneId = new Map(semanticMap.storyboard?.beats.map((beat) => [beat.sceneId, beat]) ?? []);
+
+  if (targetSceneId) {
+    const target = semanticMap.scenes.find((scene) => scene.id === targetSceneId);
+    const beat = target ? beatsBySceneId.get(target.id) : undefined;
+    return target && beat?.generationIntent === "planned_only" ? [target] : [];
+  }
+
   const aheadActive = activeAheadCount(semanticMap.scenes, beatsBySceneId, structure, wordPosition);
   if (aheadActive >= LUMINA_CONFIG.VISUAL_ACTIVE_BATCH_REFILL_THRESHOLD) return [];
 
+  const maxPromotions =
+    reason === "read_ahead"
+      ? LUMINA_CONFIG.VISUAL_MAX_BATCH_PROMOTIONS
+      : LUMINA_CONFIG.VISUAL_SINGLE_SLOT_PROMOTIONS;
   const needed = Math.min(
-    LUMINA_CONFIG.VISUAL_MAX_BATCH_PROMOTIONS,
+    maxPromotions,
     Math.max(0, LUMINA_CONFIG.VISUAL_ACTIVE_BATCH_SIZE - aheadActive)
   );
   if (needed <= 0) return [];
@@ -79,11 +95,13 @@ function updateBeatIntent(beat: VisualBeat, promotedIds: Set<string>): VisualBea
   };
 }
 
-function applyBrief(scene: IdentifiedScene, brief: VisualDirectorBrief): IdentifiedScene {
+function applyBrief(scene: IdentifiedScene, brief: VisualDirectorBrief, beat?: VisualBeat): IdentifiedScene {
   return {
     ...scene,
     directorBrief: brief,
     imageDescription: brief.finalPrompt,
+    visualPreparationState: "directed",
+    publicVisualBrief: buildPublicVisualBrief({ ...scene, directorBrief: brief, imageDescription: brief.finalPrompt }, beat),
   };
 }
 
@@ -100,7 +118,13 @@ export async function ensureVisualPlanBatch(
   const canDirect = getProvider() === "odysseus" || Boolean(params.apiKey);
   if (!canDirect) return params.semanticMap;
 
-  const promotions = choosePromotionScenes(params.semanticMap, params.structure, params.wordPosition);
+  const promotions = choosePromotionScenes(
+    params.semanticMap,
+    params.structure,
+    params.wordPosition,
+    params.reason,
+    params.targetSceneId
+  );
   if (promotions.length === 0) return params.semanticMap;
 
   const key = [
@@ -110,6 +134,15 @@ export async function ensureVisualPlanBatch(
     promotions.map((scene) => scene.id).join(","),
   ].join("|");
   if (activeBatchKey === key) return params.semanticMap;
+  if (activeBatchKey) {
+    diagnosticWarn("visual_plan.batch_busy", "Visual planning request skipped while another batch is active", {
+      bookId: params.semanticMap.bookId,
+      reason: params.reason,
+      wordPosition: params.wordPosition,
+      targetSceneId: params.targetSceneId ?? null,
+    });
+    return params.semanticMap;
+  }
   activeBatchKey = key;
 
   try {
@@ -160,7 +193,8 @@ export async function ensureVisualPlanBatch(
           apiKey: params.apiKey,
         });
         recentBriefs.push(brief);
-        currentScenes = currentScenes.map((item) => (item.id === scene.id ? applyBrief(item, brief) : item));
+        const beat = updatedStoryboard.beats.find((item) => item.sceneId === scene.id);
+        currentScenes = currentScenes.map((item) => (item.id === scene.id ? applyBrief(item, brief, beat) : item));
         params.onProgress?.({
           phase: "prompts",
           message: "Preparing the next visual story batch…",

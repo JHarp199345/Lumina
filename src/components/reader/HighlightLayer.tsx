@@ -14,6 +14,7 @@ import { storage } from "@/storage";
 import { getProvider } from "@/api/llmClient";
 import { lensClassName, lensSwatchStyle, useLensStore } from "@/store/lensStore";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { buildPublicVisualBrief } from "@/utils/publicVisualBrief";
 import type { HighlightColor, IdentifiedScene } from "@/types";
 
 interface SelectionMenu {
@@ -166,7 +167,19 @@ export default function HighlightLayer() {
           .filter((brief): brief is NonNullable<typeof brief> => Boolean(brief)),
         apiKey: googleKey ?? "",
       });
-      const directedScene = { ...customScene, directorBrief: brief, imageDescription: brief.finalPrompt };
+      const directedScene = {
+        ...customScene,
+        directorBrief: brief,
+        imageDescription: brief.finalPrompt,
+        visualPreparationState: "directed" as const,
+        publicVisualBrief: {
+          ...buildPublicVisualBrief({ ...customScene, directorBrief: brief, imageDescription: brief.finalPrompt }),
+          title: "Reader-selected image",
+          teaser: "A custom image anchored to highlighted text.",
+          expectedDepiction: selectionMenu.selectedText.slice(0, 700),
+          whyChosen: "The reader selected this passage for direct visual depiction.",
+        },
+      };
       const mergedScenes = [...activeSemanticMap.scenes.filter((scene) => scene.id !== directedScene.id), directedScene]
         .sort((a, b) => a.anchor.spineIndex - b.anchor.spineIndex || a.anchor.wordOffset - b.anchor.wordOffset);
       const storyboard = buildVisualStoryboard({

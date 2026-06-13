@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CachedImage, Chapter, GenerationQueueItem, GenerationStatus } from "@/types";
+import type { CachedImage, Chapter, GenerationQueueItem, GenerationStatus, VisualGenerationJob } from "@/types";
 import { LUMINA_CONFIG } from "@/config";
 import { findImageAtPosition } from "@/utils/imagePosition";
 
@@ -18,6 +18,9 @@ interface ImageStore {
   activeGenerationSlot: string | null;
   /** When the current generation started — used to recover from stuck state. */
   generationStartedAt: number | null;
+  /** Gentle reader-facing warning when visual work would pile up too aggressively. */
+  visualPlanningNotice: string | null;
+  activeVisualJob: VisualGenerationJob | null;
   navigationJumpUntil: number;
   regenerateCooldownUntil: number;
 
@@ -28,6 +31,8 @@ interface ImageStore {
   setCurrentImage: (image: CachedImage | null) => void;
   setCurrentThemes: (themes: string[]) => void;
   setIsTransitioning: (transitioning: boolean) => void;
+  setVisualPlanningNotice: (notice: string | null) => void;
+  setActiveVisualJob: (job: VisualGenerationJob | null) => void;
 
   addToCache: (image: CachedImage) => void;
   getCachedImage: (sceneId: string) => CachedImage | undefined;
@@ -61,6 +66,8 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
   isGenerating: false,
   activeGenerationSlot: null,
   generationStartedAt: null,
+  visualPlanningNotice: null,
+  activeVisualJob: null,
   navigationJumpUntil: 0,
   regenerateCooldownUntil: 0,
 
@@ -106,6 +113,8 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
     set({ currentThemes });
   },
   setIsTransitioning: (isTransitioning) => set({ isTransitioning }),
+  setVisualPlanningNotice: (visualPlanningNotice) => set({ visualPlanningNotice }),
+  setActiveVisualJob: (activeVisualJob) => set({ activeVisualJob }),
 
   addToCache: (image) =>
     set((state) => {
@@ -258,6 +267,8 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       activeGenerationSlot: null,
       generationStartedAt: null,
       isGenerating: false,
+      visualPlanningNotice: null,
+      activeVisualJob: null,
     });
   },
 
@@ -274,6 +285,8 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       generationStartedAt: null,
       navigationJumpUntil: 0,
       regenerateCooldownUntil: 0,
+      visualPlanningNotice: null,
+      activeVisualJob: null,
     });
   },
 }));

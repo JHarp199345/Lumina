@@ -37,6 +37,7 @@ import {
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
 import { buildVisualSlotPlan } from "@/utils/sceneDedup";
+import { buildPublicVisualBrief } from "@/utils/publicVisualBrief";
 
 // ─── Main Entry Point ─────────────────────────────────────────────────────────
 
@@ -205,6 +206,18 @@ async function analyzeNarrativeBook(
     total: plannedScenes.length,
   });
 
+  const beatsBySceneId = new Map(storyboard.beats.map((beat) => [beat.sceneId, beat]));
+  const scenesForRoadmap = plannedScenes.map((scene) => {
+    const beat = beatsBySceneId.get(scene.id);
+    const isDirected = Boolean(scene.directorBrief);
+    return {
+      ...scene,
+      visualSlotKey: scene.visualSlotKey ?? scene.chapterId,
+      visualPreparationState: isDirected ? "directed" as const : "planned" as const,
+      publicVisualBrief: scene.publicVisualBrief ?? buildPublicVisualBrief(scene, beat),
+    };
+  });
+
   return {
     bookId: analysisStructure.bookId,
     visualPlanVersion: VISUAL_PLAN_VERSION,
@@ -212,10 +225,7 @@ async function analyzeNarrativeBook(
     workType: workProtocol.workType,
     arcShape: macroArc.arcShape,
     inflectionPoints: macroArc.inflectionPoints,
-    scenes: plannedScenes.map((scene) => ({
-      ...scene,
-      visualSlotKey: scene.visualSlotKey ?? scene.chapterId,
-    })),
+    scenes: scenesForRoadmap,
     goldenNumber,
     analyzedAt: new Date().toISOString(),
     storyboard,
@@ -911,4 +921,3 @@ function truncateText(text: string, maxWords: number): string {
   if (words.length <= maxWords) return text;
   return words.slice(0, maxWords).join(" ") + "…";
 }
-

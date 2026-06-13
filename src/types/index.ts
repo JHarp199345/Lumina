@@ -206,6 +206,10 @@ export interface IdentifiedScene {
   narrativeWeight: number; // 0–1
   imageDescription?: string;
   directorBrief?: VisualDirectorBrief;
+  /** Reader-facing slot state. The hidden director prompt may be absent while this is still planned. */
+  visualPreparationState?: VisualSlotPreparationState;
+  /** Clean editable description shown to readers instead of raw prompt machinery. */
+  publicVisualBrief?: PublicVisualBrief;
   /** Populated when analysisProtocol is expository. */
   expositoryBeat?: ExpositoryBeat;
   /** Narrative thread this scene serves, set by thread-aware selection. */
@@ -484,6 +488,74 @@ export interface VisualDirectorBrief {
   negativePrompt: string;
 }
 
+// ─── Reader Visual Direction ─────────────────────────────────────────────────
+
+export type VisualSlotPreparationState = "planned" | "directed" | "generated" | "failed";
+
+export type VisualDirectionWeightKind =
+  | "required"
+  | "important"
+  | "optional"
+  | "avoid"
+  | "style"
+  | "composition";
+
+export interface WeightedVisualDirection {
+  id: string;
+  label: string;
+  kind: VisualDirectionWeightKind;
+  /** 1-10, where 10 means Lumina should strongly honor this instruction. */
+  weight: number;
+  /** Reader text, canonical book-derived direction, or reference-image extraction. */
+  source: "book" | "reader" | "reference_image" | "lore";
+}
+
+export interface PublicVisualTag {
+  id: string;
+  label: string;
+  description: string;
+  weight?: number;
+}
+
+export interface ReferenceImageAnalysis {
+  summary: string;
+  visualTraits: string[];
+  palette: string[];
+  materials: string[];
+  compositionHints: string[];
+  lighting: string[];
+  mood: string[];
+  preserve: string[];
+  avoidCopying: string[];
+  provider: "odysseus" | "gemini" | "manual" | "unavailable";
+  analyzedAt: string;
+}
+
+export interface VisualReferenceImage {
+  id: string;
+  fileName: string;
+  filePath?: string;
+  dataUrl?: string;
+  addedAt: string;
+  /** Reader must confirm ownership/permission before use. */
+  rightsConfirmed: boolean;
+  analysisStatus: "pending" | "analyzed" | "failed" | "unanalyzed";
+  analysis?: ReferenceImageAnalysis;
+}
+
+export interface PublicVisualBrief {
+  title: string;
+  teaser: string;
+  expectedDepiction: string;
+  whyChosen: string;
+  tags: PublicVisualTag[];
+  readerDirection?: string;
+  weightedDirections: WeightedVisualDirection[];
+  referenceImages: VisualReferenceImage[];
+  highlightColor?: HighlightColor;
+  updatedAt: string;
+}
+
 // ─── Style Seeds ──────────────────────────────────────────────────────────────
 
 export type StyleSeedId =
@@ -548,6 +620,24 @@ export interface CachedImage {
   generatedAt: string;
   generationApi: "imagen3" | "gemini-image" | "flux" | "comfyui";
   emotionalThemes: string[];
+}
+
+export type VisualGenerationJobStatus = "running" | "complete" | "failed";
+
+export interface VisualGenerationJob {
+  id: string;
+  bookId: string;
+  sceneId: string;
+  visualSlotKey?: string;
+  wordPosition?: number;
+  label: string;
+  status: VisualGenerationJobStatus;
+  phase: "planning" | "generating" | "saving";
+  message: string;
+  percent: number;
+  startedAt: string;
+  updatedAt: string;
+  error?: string;
 }
 
 // ─── Annotations ─────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useBookStore } from "@/store/bookStore";
+import { useImageStore } from "@/store/imageStore";
 import { useReaderStore } from "@/store/readerStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useUiStore } from "@/store/uiStore";
@@ -64,6 +65,7 @@ export function useGalleryActions() {
         apiKey: apiKey ?? "",
         wordPosition,
         reason: "gallery_request",
+        targetSceneId: scene.id,
       });
       setActiveSemanticMap(mapForGeneration);
       scene = mapForGeneration.scenes.find((s) => s.id === sceneId) ?? scene;
@@ -130,6 +132,11 @@ export function useGalleryActions() {
         reason: result.ok ? "generated" : result.reason,
       },
     });
+
+    if (!result.ok && result.reason === "busy") {
+      useImageStore.getState().setVisualPlanningNotice("That image is already being composed. The progress tracker has been restored.");
+      throw new Error("Image generation is already underway.");
+    }
 
     if (!result.ok && result.reason === "error") {
       throw new Error(result.error || "Image generation failed");

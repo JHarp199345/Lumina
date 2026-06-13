@@ -15,6 +15,13 @@ import { analyzeBook } from "@/pipeline/semanticAnalyzer";
 import { buildVisualLoreDossier } from "@/pipeline/visualLore";
 import { createVisualDirectorBriefs } from "@/pipeline/visualDirector";
 import { generateImage } from "@/pipeline/imageGenerator";
+import {
+  activeVisualJobForSlot,
+  completeVisualJob,
+  failVisualJob,
+  startVisualJob,
+  updateVisualJob,
+} from "@/services/visualGenerationJobs";
 import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { getStyleSeedById } from "@/data/styleSeeds";
 import { storage } from "@/storage";
@@ -736,10 +743,33 @@ export function useBookOrchestration() {
       const falKey = await storage.loadApiKey("lumina_fal_key");
       if (!styleSeed || (!googleKey && getProvider() === "gemini")) return null;
 
-      if (slotKey && !store.claimGenerationSlot(slotKey)) return null;
+      const existingJob = activeVisualJobForSlot(semanticBookId, slotKey);
+      if (existingJob) {
+        store.setActiveVisualJob(existingJob);
+        store.setVisualPlanningNotice(`${existingJob.label} is already being composed. Progress has been restored.`);
+        return null;
+      }
+
+      if (slotKey && !store.claimGenerationSlot(slotKey)) {
+        store.setVisualPlanningNotice("That image is already being composed. Watch the progress indicator instead of starting it again.");
+        return null;
+      }
 
       setIsGenerating(true);
+      const job = startVisualJob({
+        bookId: semanticBookId,
+        scene,
+        visualSlotKey: slotKey,
+        wordPosition: scenePosition,
+      });
+      store.setActiveVisualJob(job);
+      store.setVisualPlanningNotice(null);
       try {
+        updateVisualJob(job.id, {
+          phase: "generating",
+          message: "Composing this visual moment...",
+          percent: 45,
+        });
         const generated = await generateImage({
           scene,
           styleSeed,
@@ -761,6 +791,13 @@ export function useBookOrchestration() {
           setCurrentImage(generated);
           setCurrentThemes(generated.emotionalThemes);
         }
+        updateVisualJob(job.id, {
+          phase: "saving",
+          message: "Saving generated image...",
+          percent: 92,
+        });
+        completeVisualJob(job.id);
+        store.setActiveVisualJob(null);
         console.info("[Orchestration] Scene image committed:", generated.sceneId);
         diagnosticInfo("image.scene.committed", "Scene image committed", {
           sceneId: generated.sceneId,
@@ -775,6 +812,8 @@ export function useBookOrchestration() {
           sceneId: scene.id,
           error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
         });
+        failVisualJob(job.id, err instanceof Error ? err.message : String(err));
+        store.setActiveVisualJob(null);
         enqueue({
           sceneId: scene.id,
           bookId: semanticBookId,

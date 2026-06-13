@@ -23,6 +23,7 @@ import { getImageForScene } from "@/utils/imagePosition";
 import { segmentScenesForSemanticMap, visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 import { showReaderAndNavigate } from "@/utils/readerNavigation";
+import { activeVisualJobsForBook } from "@/services/visualGenerationJobs";
 import type { CachedImage, SemanticMap } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -73,6 +74,9 @@ export default function VisualPanel() {
     setCurrentImage,
     setCurrentThemes,
     addToCache,
+    visualPlanningNotice,
+    activeVisualJob,
+    setActiveVisualJob,
   } = useImageStore();
   const {
     activeBook,
@@ -141,6 +145,15 @@ export default function VisualPanel() {
       setShowPlanStrip(true);
     }
   }, [analysisOutcome?.kind, setShowPlanStrip, showPlanStrip]);
+
+  useEffect(() => {
+    if (!activeSemanticMap?.bookId) {
+      setActiveVisualJob(null);
+      return;
+    }
+    const [job] = activeVisualJobsForBook(activeSemanticMap.bookId);
+    setActiveVisualJob(job ?? null);
+  }, [activeSemanticMap?.bookId, setActiveVisualJob]);
 
   // Clicking the image opens the gallery focal view (the art experience).
   const handleImageClick = useCallback(
@@ -290,6 +303,40 @@ export default function VisualPanel() {
         {...(isTablet ? longPress : {})}
         onClick={activeBook ? handleImageClick : undefined}
       >
+        <AnimatePresence>
+          {(visualPlanningNotice || activeVisualJob) && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="pointer-events-none absolute left-1/2 top-4 z-20 w-[min(460px,calc(100%-32px))] -translate-x-1/2 rounded-lg border border-lumina-gold/25 bg-surface-dark/90 px-3 py-2 text-xs text-ink-soft shadow-xl shadow-black/20 backdrop-blur-md"
+            >
+              <div className="flex items-center gap-2">
+                {activeVisualJob ? (
+                  <Loader size={14} className="shrink-0 animate-spin text-lumina-gold/80" />
+                ) : (
+                  <AlertTriangle size={14} className="shrink-0 text-lumina-gold/80" />
+                )}
+                <span className="min-w-0 flex-1 truncate">
+                  {visualPlanningNotice || activeVisualJob?.message}
+                </span>
+                {activeVisualJob && (
+                  <span className="shrink-0 tabular-nums text-ink-faint">
+                    {Math.round(activeVisualJob.percent)}%
+                  </span>
+                )}
+              </div>
+              {activeVisualJob && (
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.08]">
+                  <div
+                    className="h-full rounded-full bg-lumina-gold/75 transition-all duration-500"
+                    style={{ width: `${Math.max(6, Math.min(100, activeVisualJob.percent))}%` }}
+                  />
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
         {!activeBook ? (
           <AmbientSceneLayer phase="empty" />
         ) : !imageGenerationEnabled ? (

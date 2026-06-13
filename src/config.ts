@@ -22,6 +22,10 @@ export const LUMINA_CONFIG = {
   VISUAL_ACTIVE_BATCH_REFILL_THRESHOLD: 3,
   /** Safety cap for how many planned moments can be activated in one background pass. */
   VISUAL_MAX_BATCH_PROMOTIONS: 8,
+  /** Jumps/gallery requests prepare only the requested visual slot, never a local batch. */
+  VISUAL_SINGLE_SLOT_PROMOTIONS: 1,
+  /** Long local/remote image jobs can survive reloads; after this, Lumina allows retry. */
+  VISUAL_GENERATION_STALE_MS: 45 * 60 * 1000,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words

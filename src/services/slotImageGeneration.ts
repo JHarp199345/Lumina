@@ -13,9 +13,17 @@ import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import { useImageStore } from "@/store/imageStore";
 import { useBookStore } from "@/store/bookStore";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
+import { LUMINA_CONFIG } from "@/config";
+import {
+  activeVisualJobForSlot,
+  completeVisualJob,
+  failVisualJob,
+  startVisualJob,
+  updateVisualJob,
+} from "@/services/visualGenerationJobs";
 import type { CachedImage, IdentifiedScene } from "@/types";
 
-const STALE_GENERATION_MS = 7 * 60 * 1000;
+const STALE_GENERATION_MS = LUMINA_CONFIG.VISUAL_GENERATION_STALE_MS;
 
 export function reconcileStaleGeneration(): void {
   const store = useImageStore.getState();
@@ -78,13 +86,22 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
     return { ok: false, reason: "cached" };
   }
 
+  const existingJob = activeVisualJobForSlot(req.bookId, slotKey);
+  if (existingJob) {
+    store.setActiveVisualJob(existingJob);
+    store.setVisualPlanningNotice(`${existingJob.label} is already being composed. Progress has been restored.`);
+    return { ok: false, reason: "busy" };
+  }
+
   if (req.force) {
     store.clearQueueForSlot(slotKey);
   } else if (store.isSlotBusy(slotKey)) {
+    store.setVisualPlanningNotice("That image is already being composed. Watch the progress indicator instead of starting it again.");
     return { ok: false, reason: "busy" };
   }
 
   if (!store.claimGenerationSlot(slotKey)) {
+    store.setVisualPlanningNotice("Another visual is already being composed. Let it finish before starting another.");
     return { ok: false, reason: "busy" };
   }
 
@@ -103,8 +120,21 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
 
   store.setIsGenerating(true);
   store.markGenerationStarted();
+  const job = startVisualJob({
+    bookId: req.bookId,
+    scene: req.scene,
+    visualSlotKey: slotKey,
+    wordPosition: computeSceneWordPosition(req.scene, chapters),
+  });
+  store.setActiveVisualJob(job);
+  store.setVisualPlanningNotice(null);
 
   try {
+    updateVisualJob(job.id, {
+      phase: "generating",
+      message: "Sending this visual moment to the image engine...",
+      percent: 45,
+    });
     const image = await generateImage({
       scene: req.scene,
       styleSeed,
@@ -121,7 +151,14 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
 
     store.addToCache(image);
     store.completeQueueForSlot(slotKey);
+    updateVisualJob(job.id, {
+      phase: "saving",
+      message: "Saving generated image...",
+      percent: 92,
+    });
     req.onComplete?.(image);
+    completeVisualJob(job.id);
+    store.setActiveVisualJob(null);
     diagnosticInfo("image.generation.complete", "Slot image generation complete", {
       sceneId: image.sceneId,
       visualSlotKey: slotKey,
@@ -135,6 +172,8 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
       error: message,
     });
     store.failQueueForSlot(slotKey);
+    failVisualJob(job.id, message);
+    store.setActiveVisualJob(null);
     return { ok: false, reason: "error", error: message };
   } finally {
     store.setIsGenerating(false);
