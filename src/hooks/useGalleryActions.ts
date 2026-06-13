@@ -11,6 +11,7 @@ import { getStyleSeedById } from "@/data/styleSeeds";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
+import type { SlotGenerationResult } from "@/services/slotImageGeneration";
 
 export function useGalleryActions() {
   const visitPassage = useCallback((sceneId: string) => {
@@ -86,52 +87,66 @@ export function useGalleryActions() {
       "Generate one user-requested visual story image"
     );
 
-    const result = await trackStep(
-      workflowId,
-      {
-        name: "manual-scene-image",
-        goal: "Generate and persist the requested visual slot image",
-        agent: "image_director",
-        skill: "scene-image-generation",
-      },
-      () =>
-        generateForVisualSlot({
-          scene,
-          bookId: mapForGeneration.bookId,
-          force: true,
+    let result: SlotGenerationResult | null = null;
+    let thrownError: unknown = null;
+    try {
+      result = await trackStep(
+        workflowId,
+        {
+          name: "manual-scene-image",
+          goal: "Generate and persist the requested visual slot image",
+          agent: "image_director",
+          skill: "scene-image-generation",
+        },
+        () =>
+          generateForVisualSlot({
+            scene,
+            bookId: mapForGeneration.bookId,
+            force: true,
+          }),
+        (outcome) => ({
+          metrics: {
+            ok: outcome.ok,
+            reason: outcome.ok ? "generated" : outcome.reason,
+            error: outcome.ok ? null : outcome.error ?? null,
+            scene_id: scene.id,
+            visual_slot_key: visualSlotKey,
+            word_position: wordPosition,
+            image_id: outcome.ok ? outcome.image.id : null,
+          },
+          goal_achieved: outcome.ok ? 1 : outcome.reason === "cached" ? 0.75 : 0,
+          unblocked_next: outcome.ok || outcome.reason === "cached",
         }),
-      (outcome) => ({
-        metrics: {
-          ok: outcome.ok,
-          reason: outcome.ok ? "generated" : outcome.reason,
+        (err) => ({
+          metrics: {
+            ok: false,
+            reason: "exception",
+            scene_id: scene.id,
+            visual_slot_key: visualSlotKey,
+            word_position: wordPosition,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          goal_achieved: 0,
+          unblocked_next: false,
+        })
+      );
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      await completeWorkflow(workflowId, {
+        outcome_metrics: {
           scene_id: scene.id,
           visual_slot_key: visualSlotKey,
           word_position: wordPosition,
-          image_id: outcome.ok ? outcome.image.id : null,
+          ok: result?.ok ?? false,
+          reason: result ? (result.ok ? "generated" : result.reason) : "exception",
+          error: result && !result.ok ? result.error ?? null : thrownError instanceof Error ? thrownError.message : thrownError ? String(thrownError) : null,
         },
-        goal_achieved: outcome.ok ? 1 : outcome.reason === "cached" ? 0.75 : 0,
-        unblocked_next: outcome.ok || outcome.reason === "cached",
-      }),
-      (err) => ({
-        metrics: {
-          scene_id: scene.id,
-          visual_slot_key: visualSlotKey,
-          word_position: wordPosition,
-          error: err instanceof Error ? err.message : String(err),
-        },
-        goal_achieved: 0,
-        unblocked_next: true,
-      })
-    );
+      });
+    }
 
-    await completeWorkflow(workflowId, {
-      outcome_metrics: {
-        scene_id: scene.id,
-        visual_slot_key: visualSlotKey,
-        ok: result.ok,
-        reason: result.ok ? "generated" : result.reason,
-      },
-    });
+    if (thrownError) throw thrownError;
+    if (!result) throw new Error("Image generation failed before a result was returned.");
 
     if (!result.ok && result.reason === "busy") {
       useImageStore.getState().setVisualPlanningNotice("That image is already being composed. The progress tracker has been restored.");
@@ -140,6 +155,10 @@ export function useGalleryActions() {
 
     if (!result.ok && result.reason === "error") {
       throw new Error(result.error || "Image generation failed");
+    }
+
+    if (!result.ok && result.reason === "no_key") {
+      throw new Error("Image generation needs an API key before it can run.");
     }
   }, []);
 

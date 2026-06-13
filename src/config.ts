@@ -26,6 +26,8 @@ export const LUMINA_CONFIG = {
   VISUAL_SINGLE_SLOT_PROMOTIONS: 1,
   /** Long local/remote image jobs can survive reloads; after this, Lumina allows retry. */
   VISUAL_GENERATION_STALE_MS: 45 * 60 * 1000,
+  /** Any single image-engine network request longer than this is treated as stalled. */
+  IMAGE_FETCH_TIMEOUT_MS: 90 * 1000,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words

@@ -166,7 +166,7 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
 async function generateWithGeminiImage(prompt: string, apiKey: string): Promise<Uint8Array> {
   const url = `${IMAGEN_BASE}/models/${LUMINA_CONFIG.GEMINI_IMAGE_MODEL}:generateContent?key=${apiKey}`;
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -310,7 +310,7 @@ export function extractPaletteContext(styleSeed: StyleSeed, prevPrompts: string[
 async function generateWithImagen3(prompt: string, apiKey: string, negativePrompt: string): Promise<Uint8Array> {
   const url = `${IMAGEN_BASE}/models/${LUMINA_CONFIG.IMAGEN_MODEL}:predict?key=${apiKey}`;
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -342,7 +342,7 @@ async function generateWithImagen3(prompt: string, apiKey: string, negativePromp
 
 async function generateWithFlux(prompt: string, falApiKey: string): Promise<Uint8Array> {
   // Submit to Flux queue
-  const submitResponse = await fetch(`${FAL_BASE}/fal-ai/flux/dev`, {
+  const submitResponse = await fetchWithTimeout(`${FAL_BASE}/fal-ai/flux/dev`, {
     method: "POST",
     headers: {
       "Authorization": `Key ${falApiKey}`,
@@ -371,7 +371,7 @@ async function generateWithFlux(prompt: string, falApiKey: string): Promise<Uint
   for (let attempt = 0; attempt < 30; attempt++) {
     await sleep(2000);
 
-    const pollResponse = await fetch(`${FAL_BASE}/fal-ai/flux/dev/requests/${requestId}`, {
+    const pollResponse = await fetchWithTimeout(`${FAL_BASE}/fal-ai/flux/dev/requests/${requestId}`, {
       headers: { "Authorization": `Key ${falApiKey}` },
     });
 
@@ -383,7 +383,7 @@ async function generateWithFlux(prompt: string, falApiKey: string): Promise<Uint
       if (!imageUrl) throw new Error("No image URL in Flux response");
 
       // Fetch the image bytes
-      const imgResponse = await fetch(imageUrl);
+      const imgResponse = await fetchWithTimeout(imageUrl);
       const arrayBuffer = await imgResponse.arrayBuffer();
       return new Uint8Array(arrayBuffer);
     }
@@ -439,7 +439,7 @@ async function generateWithComfyUIIterative(
 
   try {
     // Try the iterative endpoint first.
-    const startRes = await fetch(`${base}/api/images/generate/iterative`, {
+    const startRes = await fetchWithTimeout(`${base}/api/images/generate/iterative`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify(body),
@@ -473,11 +473,11 @@ async function pollComfyUIJob(
 ): Promise<Uint8Array> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise<void>((r) => setTimeout(r, 3000));
-    const pollRes = await fetch(`${base}/api/images/jobs/${jobId}`, { headers: authHeaders });
+    const pollRes = await fetchWithTimeout(`${base}/api/images/jobs/${jobId}`, { headers: authHeaders });
     if (!pollRes.ok) continue;
     const job = await pollRes.json() as { status: string; image_url?: string; error?: string };
     if (job.status === "done" && job.image_url) {
-      const imgRes = await fetch(`${base}${job.image_url}`, { headers: authHeaders });
+      const imgRes = await fetchWithTimeout(`${base}${job.image_url}`, { headers: authHeaders });
       if (!imgRes.ok) throw new Error(`Image fetch error ${imgRes.status}`);
       return new Uint8Array(await imgRes.arrayBuffer());
     }
@@ -494,7 +494,7 @@ async function generateWithComfyUI(prompt: string, negativePrompt: string): Prom
   const authHeaders: Record<string, string> = token ? { "Authorization": `Bearer ${token}` } : {};
 
   // POST returns immediately with a job_id — no long-lived connection through the tunnel.
-  const startRes = await fetch(`${base}/api/images/generate`, {
+  const startRes = await fetchWithTimeout(`${base}/api/images/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ prompt, negative_prompt: negativePrompt, width: 1024, height: 576 }),
@@ -525,6 +525,25 @@ function base64ToUint8Array(base64: string): Uint8Array {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = LUMINA_CONFIG.IMAGE_FETCH_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: init.signal ?? controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error(`Image engine request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw err;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
 }
 
 function describeError(err: unknown): string {

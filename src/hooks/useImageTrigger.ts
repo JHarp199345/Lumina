@@ -13,6 +13,7 @@ import { useImageStore } from "@/store/imageStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { extractPaletteContext } from "@/pipeline/imageGenerator";
 import { generateForVisualSlot, reconcileStaleGeneration } from "@/services/slotImageGeneration";
+import type { SlotGenerationResult } from "@/services/slotImageGeneration";
 import { ensureVisualPlanBatch } from "@/services/visualPlanBatching";
 import { storage } from "@/storage";
 import { getStyleSeedById } from "@/data/styleSeeds";
@@ -363,49 +364,79 @@ export function useImageTrigger() {
       "Generate the next visual as the reader approaches it"
     );
 
-    const result = await trackStep(
-      workflowId,
-      {
-        name: "auto-scene-image",
-        goal: "Generate and persist the upcoming visual slot image",
-        agent: "image_director",
-        skill: "scene-image-generation",
-      },
-      () =>
-        generateForVisualSlot({
-          scene,
-          bookId: next.bookId,
-          onComplete: (img) => {
-            if (activeStyleSeed) {
-              const styleSeed = getStyleSeedById(activeStyleSeed);
-              if (styleSeed) {
-                priorPromptRef.current = extractPaletteContext(styleSeed, [img.descriptionUsed]);
+    let result: SlotGenerationResult | null = null;
+    let thrownError: unknown = null;
+    try {
+      result = await trackStep(
+        workflowId,
+        {
+          name: "auto-scene-image",
+          goal: "Generate and persist the upcoming visual slot image",
+          agent: "image_director",
+          skill: "scene-image-generation",
+        },
+        () =>
+          generateForVisualSlot({
+            scene,
+            bookId: next.bookId,
+            onComplete: (img) => {
+              if (activeStyleSeed) {
+                const styleSeed = getStyleSeedById(activeStyleSeed);
+                if (styleSeed) {
+                  priorPromptRef.current = extractPaletteContext(styleSeed, [img.descriptionUsed]);
+                }
               }
-            }
+            },
+          }),
+        (outcome) => ({
+          metrics: {
+            ok: outcome.ok,
+            reason: outcome.ok ? "generated" : outcome.reason,
+            error: outcome.ok ? null : outcome.error ?? null,
+            scene_id: scene.id,
+            visual_slot_key: slotKey,
+            word_position: scenePosition,
+            image_id: outcome.ok ? outcome.image.id : null,
           },
+          goal_achieved: outcome.ok ? 1 : outcome.reason === "cached" ? 0.75 : 0,
+          unblocked_next: outcome.ok || outcome.reason === "cached",
         }),
-      (outcome) => ({
-        metrics: {
-          ok: outcome.ok,
-          reason: outcome.ok ? "generated" : outcome.reason,
+        (err) => ({
+          metrics: {
+            ok: false,
+            reason: "exception",
+            scene_id: scene.id,
+            visual_slot_key: slotKey,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          goal_achieved: 0,
+          unblocked_next: false,
+        })
+      );
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      await completeWorkflow(workflowId, {
+        outcome_metrics: {
           scene_id: scene.id,
           visual_slot_key: slotKey,
-          word_position: scenePosition,
-          image_id: outcome.ok ? outcome.image.id : null,
+          ok: result?.ok ?? false,
+          reason: result ? (result.ok ? "generated" : result.reason) : "exception",
+          error: result && !result.ok ? result.error ?? null : thrownError instanceof Error ? thrownError.message : thrownError ? String(thrownError) : null,
         },
-        goal_achieved: outcome.ok ? 1 : outcome.reason === "cached" ? 0.75 : 0,
-        unblocked_next: outcome.ok || outcome.reason === "cached",
-      }),
-      (err) => ({
-        metrics: { scene_id: scene.id, visual_slot_key: slotKey, error: err instanceof Error ? err.message : String(err) },
-        goal_achieved: 0,
-        unblocked_next: true,
-      })
-    );
+      });
+    }
 
-    await completeWorkflow(workflowId, {
-      outcome_metrics: { scene_id: scene.id, visual_slot_key: slotKey, ok: result.ok, reason: result.ok ? "generated" : result.reason },
-    });
+    if (thrownError) {
+      store.updateQueueItemStatus(next.sceneId, "failed");
+      isGeneratingRef.current = false;
+      return;
+    }
+    if (!result) {
+      store.updateQueueItemStatus(next.sceneId, "failed");
+      isGeneratingRef.current = false;
+      return;
+    }
 
     if (result.ok) {
       store.updateQueueItemStatus(next.sceneId, "complete");
