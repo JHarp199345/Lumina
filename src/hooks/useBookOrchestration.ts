@@ -53,6 +53,13 @@ import type {
 import { useReaderStore } from "@/store/readerStore";
 import { useNotificationStore } from "@/store/notificationStore";
 
+// Module-level re-entrancy lock. The workflow tracker keeps a single global
+// "active run" context, so two analyses running at once clobber each other's
+// run id — their steps bleed into one run and the log looks scrambled (e.g.
+// parallel scoring batches interleaved with a second run's sequential scoring
+// calls). One analysis at a time keeps each pipeline's telemetry isolated.
+let _analysisInFlight = false;
+
 export function useBookOrchestration() {
   const {
     setActiveSemanticMap,
@@ -331,6 +338,23 @@ export function useBookOrchestration() {
         return;
       }
 
+      // Load the tracker before taking the lock — it's the only awaited call
+      // before the try/finally, so a chunk-load failure here can't leak the lock.
+      const { startWorkflow, trackStep, completeWorkflow, setWorkflowContext, setActivePhase } =
+        await import("@/services/workflowTracker");
+
+      // Re-entrancy guard: refuse a second analysis while one is running so the
+      // two don't share/clobber the global workflow context (see _analysisInFlight).
+      // The check + set are synchronous (no await between), so this is atomic.
+      if (_analysisInFlight) {
+        diagnosticWarn("analysis.concurrent_skipped", "Analysis already in progress — skipped concurrent run", {
+          semanticBookId,
+          label,
+        });
+        return;
+      }
+      _analysisInFlight = true;
+
       setIsAnalyzing(true);
       const reportProgress = (progress: AnalysisProgressUpdate) => {
         if (typeof progress === "string") {
@@ -349,9 +373,6 @@ export function useBookOrchestration() {
         message: `Analyzing ${label}…`,
         percent: 2,
       });
-
-      const { startWorkflow, trackStep, completeWorkflow, setWorkflowContext, setActivePhase } =
-        await import("@/services/workflowTracker");
 
       let wfId: string | null = null;
       const bookTitleEarly = useBookStore.getState().activeBook?.title ?? label;
@@ -674,6 +695,8 @@ export function useBookOrchestration() {
           message: err instanceof Error ? err.message : "Analysis failed before it could finish.",
           percent: 0,
         });
+      } finally {
+        _analysisInFlight = false;
       }
     },
     [
