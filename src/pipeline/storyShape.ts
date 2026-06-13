@@ -114,7 +114,8 @@ async function scoreChapters(
 
 function _buildScoringPrompt(
   chapters: { title: string; index: number; rawText?: string }[],
-  bookTitle: string
+  bookTitle: string,
+  totalChapters: number
 ): string {
   const summaries = chapters
     .map((ch) => {
@@ -122,7 +123,15 @@ function _buildScoringPrompt(
       return `Chapter ${ch.index + 1} "${ch.title}": ${excerpt}`;
     })
     .join("\n\n");
-  return `You are scoring the emotional valence of chapters in "${bookTitle}".
+  // Horizon awareness (PLAN XIII, Stage 1): each batch is one slice of the book,
+  // so tell it the whole's size and its position, and make it calibrate to the
+  // full arc — not just the handful of chapters in front of it. Without this,
+  // batches score in a vacuum and the stitched arc has mismatched seams.
+  const first = (chapters[0]?.index ?? 0) + 1;
+  const last = (chapters[chapters.length - 1]?.index ?? 0) + 1;
+  return `You are scoring the emotional valence of chapters in "${bookTitle}", a book of ${totalChapters} chapters in total.
+
+You are scoring chapters ${first}–${last} of ${totalChapters}. These are ONE SLICE of the whole book. Calibrate every score against the book's full emotional range from beginning to end — not just the chapters shown here. A calm chapter inside an otherwise dark book is not automatically 0.0; place it where it truly sits across the entire arc.
 
 For each chapter below, provide a sentiment score from -1.0 (pure despair/tragedy) to +1.0 (pure joy/triumph).
 Consider: emotional tone, what happens to characters, tension level, hope vs. hopelessness.
@@ -149,7 +158,7 @@ async function scoreChaptersParallel(
   const tasks: OdysseusParallelTask[] = batches.map((b, i) => ({
     id: `score-batch-${i}`,
     agent: "reading",
-    prompt: _buildScoringPrompt(b.chapters, bookTitle),
+    prompt: _buildScoringPrompt(b.chapters, bookTitle, chapters.length),
     temperature: 0.3,
     max_tokens: 256,
   }));
