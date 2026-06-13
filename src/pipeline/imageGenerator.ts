@@ -439,15 +439,19 @@ async function generateWithComfyUIIterative(
 
   try {
     // Try the iterative endpoint first.
-    const startRes = await fetchWithTimeout(`${base}/api/images/generate/iterative`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify(body),
-    });
+    const startRes = await fetchWithTimeout(
+      `${base}/api/images/generate/iterative`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(body),
+      },
+      LUMINA_CONFIG.LOCAL_IMAGE_FETCH_TIMEOUT_MS
+    );
 
     if (startRes.ok) {
       const { job_id } = await startRes.json() as { job_id: string };
-      return await pollComfyUIJob(job_id, base, authHeaders, 180);
+      return await pollComfyUIJob(job_id, base, authHeaders, LUMINA_CONFIG.LOCAL_IMAGE_JOB_TIMEOUT_MS);
     }
 
     // If 404, iterative endpoint not yet deployed — fall through to single-pass.
@@ -469,21 +473,30 @@ async function pollComfyUIJob(
   jobId: string,
   base: string,
   authHeaders: Record<string, string>,
-  maxAttempts: number
+  timeoutMs: number
 ): Promise<Uint8Array> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
     await new Promise<void>((r) => setTimeout(r, 3000));
-    const pollRes = await fetchWithTimeout(`${base}/api/images/jobs/${jobId}`, { headers: authHeaders });
+    const pollRes = await fetchWithTimeout(
+      `${base}/api/images/jobs/${jobId}`,
+      { headers: authHeaders },
+      LUMINA_CONFIG.LOCAL_IMAGE_FETCH_TIMEOUT_MS
+    );
     if (!pollRes.ok) continue;
     const job = await pollRes.json() as { status: string; image_url?: string; error?: string };
     if (job.status === "done" && job.image_url) {
-      const imgRes = await fetchWithTimeout(`${base}${job.image_url}`, { headers: authHeaders });
+      const imgRes = await fetchWithTimeout(
+        `${base}${job.image_url}`,
+        { headers: authHeaders },
+        LUMINA_CONFIG.LOCAL_IMAGE_FETCH_TIMEOUT_MS
+      );
       if (!imgRes.ok) throw new Error(`Image fetch error ${imgRes.status}`);
       return new Uint8Array(await imgRes.arrayBuffer());
     }
     if (job.status === "error") throw new Error(`Generation failed: ${job.error ?? "unknown"}`);
   }
-  throw new Error("ComfyUI generation timed out");
+  throw new Error(`ComfyUI generation timed out after ${Math.round(timeoutMs / 60000)} min`);
 }
 
 // ─── ComfyUI via Odysseus — single pass ──────────────────────────────────────
@@ -494,11 +507,15 @@ async function generateWithComfyUI(prompt: string, negativePrompt: string): Prom
   const authHeaders: Record<string, string> = token ? { "Authorization": `Bearer ${token}` } : {};
 
   // POST returns immediately with a job_id — no long-lived connection through the tunnel.
-  const startRes = await fetchWithTimeout(`${base}/api/images/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders },
-    body: JSON.stringify({ prompt, negative_prompt: negativePrompt, width: 1024, height: 576 }),
-  });
+  const startRes = await fetchWithTimeout(
+    `${base}/api/images/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ prompt, negative_prompt: negativePrompt, width: 1024, height: 576 }),
+    },
+    LUMINA_CONFIG.LOCAL_IMAGE_FETCH_TIMEOUT_MS
+  );
   if (!startRes.ok) {
     const msg = await startRes.text().catch(() => "");
     if (startRes.status === 401 || startRes.status === 403) {
@@ -509,7 +526,7 @@ async function generateWithComfyUI(prompt: string, negativePrompt: string): Prom
     throw new Error(`ComfyUI queue error ${startRes.status}: ${msg}`);
   }
   const { job_id } = await startRes.json() as { job_id: string };
-  return pollComfyUIJob(job_id, base, authHeaders, 120);
+  return pollComfyUIJob(job_id, base, authHeaders, LUMINA_CONFIG.LOCAL_IMAGE_JOB_TIMEOUT_MS);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -537,7 +554,10 @@ async function fetchWithTimeout(
   try {
     return await fetch(input, { ...init, signal: init.signal ?? controller.signal });
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if (
+      (err instanceof DOMException && err.name === "AbortError") ||
+      (err instanceof Error && err.name === "AbortError")
+    ) {
       throw new Error(`Image engine request timed out after ${Math.round(timeoutMs / 1000)}s`);
     }
     throw err;

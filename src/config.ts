@@ -28,6 +28,10 @@ export const LUMINA_CONFIG = {
   VISUAL_GENERATION_STALE_MS: 45 * 60 * 1000,
   /** Any single image-engine network request longer than this is treated as stalled. */
   IMAGE_FETCH_TIMEOUT_MS: 90 * 1000,
+  /** Local Odysseus/ComfyUI requests can legitimately run long on older machines. */
+  LOCAL_IMAGE_FETCH_TIMEOUT_MS: 15 * 60 * 1000,
+  /** Total local image job budget before Lumina marks the job failed. */
+  LOCAL_IMAGE_JOB_TIMEOUT_MS: 30 * 60 * 1000,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words
