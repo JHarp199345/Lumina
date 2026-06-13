@@ -1,5 +1,6 @@
 import { llmGenerateJSON } from "@/api/llmClient";
 import { findRelevantLoreEntities, formatLoreForPrompt } from "@/pipeline/visualLore";
+import { loreForBook } from "@/utils/bookIsolation";
 import type {
   AnalysisProgressReporter,
   BookStructure,
@@ -240,8 +241,11 @@ export async function createVisualDirectorBrief(params: {
   const nearbyText = getNearbyText(params.structure, params.scene, 700);
   const memory = buildDiversityMemory(params.recentBriefs);
   const beat = params.semanticMap.storyboard?.beats.find((item) => item.sceneId === params.scene.id);
+  // Isolation guard: only ever ground a brief in lore built for THIS book.
+  // A foreign dossier (wrong bookId) is the proven cross-book contamination
+  // carrier, so it is dropped here before it can reach the prompt.
   const loreEntities = findRelevantLoreEntities(
-    params.semanticMap.visualLore,
+    loreForBook(params.semanticMap.visualLore, params.semanticMap.bookId),
     `${params.scene.imageDescription ?? ""}\n${params.scene.symbolicMotifs.join(" ")}\n${nearbyText}`
   );
   const prompt = buildDirectorPrompt({ ...params, nearbyText, memory, beat, loreEntities });

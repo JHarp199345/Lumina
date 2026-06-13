@@ -69,6 +69,25 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
     return { ok: false, reason: "error", error: "No active book analysis" };
   }
 
+  // Isolation guard: never generate for a book other than the active one, and
+  // never for a scene that isn't part of the active map. This is the hard wall
+  // that makes one book's image impossible to produce under another book.
+  if (req.bookId !== activeSemanticMap.bookId) {
+    diagnosticError("isolation.generation_book_mismatch", "Refused image generation across books", {
+      requestBookId: req.bookId,
+      activeBookId: activeSemanticMap.bookId,
+      sceneId: req.scene.id,
+    });
+    return { ok: false, reason: "error", error: "Book mismatch — refused to generate one book's image under another." };
+  }
+  if (!activeSemanticMap.scenes.some((s) => s.id === req.scene.id)) {
+    diagnosticError("isolation.scene_not_in_active_map", "Refused generation for a scene outside the active map", {
+      bookId: req.bookId,
+      sceneId: req.scene.id,
+    });
+    return { ok: false, reason: "error", error: "This scene does not belong to the active book." };
+  }
+
   const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
   const slotKey = visualSlotKeyForScene(req.scene, chapters);
   if (!slotKey) return { ok: false, reason: "no_slot" };

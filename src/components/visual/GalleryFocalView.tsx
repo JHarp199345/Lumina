@@ -527,10 +527,12 @@ export default function GalleryFocalView({
         </AnimatePresence>
       </div>
 
-      {/* Hero: the piece on the wall ─ matte frame + soft shadow, no lamp */}
-      <div className="relative flex min-h-0 flex-1 items-center justify-center px-6" onClick={(e) => e.stopPropagation()}>
+      {/* Hero: the piece on the wall ─ matte frame + soft shadow, no lamp.
+          Top-aligned + internally scrollable so a long expanded brief scrolls
+          here instead of overlapping the filmstrip; the image sits up top. */}
+      <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 py-3 scrollbar-thin" onClick={(e) => e.stopPropagation()}>
         {items.length === 0 ? (
-          <div className="max-w-md text-center">
+          <div className="m-auto max-w-md text-center">
             <Sparkles size={24} className="mx-auto text-lumina-gold/45" />
             <p className="mt-4 text-sm text-white/50">No visual plan yet.</p>
             <p className="mt-2 text-xs text-white/35">Run analysis to map the book&apos;s visual moments.</p>
@@ -569,7 +571,7 @@ export default function GalleryFocalView({
           initial={{ opacity: 0, scale: 0.985 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
-          className="flex max-h-full max-w-[min(1100px,92vw)] flex-col items-center"
+          className="my-auto flex w-full max-w-[min(1100px,92vw)] flex-col items-center"
         >
           {/* Matte / passe-partout frame */}
           <div className="rounded-[3px] bg-[#16140f] p-[clamp(10px,2.2vw,26px)] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.85)] ring-1 ring-white/[0.06]">
@@ -578,7 +580,7 @@ export default function GalleryFocalView({
                 <img
                   src={displaySrc(current.image.filePath)}
                   alt={caption || "Generated visual"}
-                  className="block max-h-[62vh] w-auto max-w-full rounded-[1px] object-contain"
+                  className="block max-h-[46vh] w-auto max-w-full rounded-[1px] object-contain"
                   draggable={false}
                 />
               ) : (

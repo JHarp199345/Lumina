@@ -5,6 +5,7 @@ import { storage } from "@/storage";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
 import { buildPublicVisualBrief } from "@/utils/publicVisualBrief";
+import { sanitizeMapForBook } from "@/utils/bookIsolation";
 import type {
   AnalysisProgressReporter,
   BookStructure,
@@ -112,6 +113,9 @@ function activeBeatCount(beats: VisualBeat[]): number {
 export async function ensureVisualPlanBatch(
   params: EnsureVisualPlanBatchParams
 ): Promise<SemanticMap> {
+  // Isolation guard: strip any foreign visual lore before on-demand briefs are
+  // written, so the briefs (and the map we return/persist) stay book-pure.
+  params.semanticMap = sanitizeMapForBook(params.semanticMap, params.semanticMap.bookId);
   const storyboard = params.semanticMap.storyboard;
   if (!storyboard?.beats.length) return params.semanticMap;
 

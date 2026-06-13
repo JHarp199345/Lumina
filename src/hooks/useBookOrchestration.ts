@@ -28,6 +28,7 @@ import { storage } from "@/storage";
 import { getProvider } from "@/api/llmClient";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { sanitizeMapForBook } from "@/utils/bookIsolation";
 import {
   findImageAtPosition,
   getDisplayImage,
@@ -95,7 +96,10 @@ export function useBookOrchestration() {
       const slice = getAnalysisSlice(structure, currentChapterIndex);
 
       // Check for cached semantic map for this book or collection segment.
-      const existingMap = await storage.loadSemanticMap(slice.semanticBookId);
+      // Sanitize on load — a cached map from before isolation guards could
+      // carry a foreign book's visual lore; strip it before it can be used.
+      const loadedMap = await storage.loadSemanticMap(slice.semanticBookId);
+      const existingMap = loadedMap ? sanitizeMapForBook(loadedMap, slice.semanticBookId) : loadedMap;
       if (existingMap && existingMap.visualPlanVersion !== VISUAL_PLAN_VERSION) {
         diagnosticInfo("semantic_map.stale_deleted", "Deleting stale visual plan", {
           semanticBookId: slice.semanticBookId,
@@ -539,7 +543,12 @@ export function useBookOrchestration() {
               )
             : loreSemanticMap.scenes;
 
-        const semanticMap = { ...loreSemanticMap, scenes: directedScenes };
+        // Sanitize before persisting — guarantees the saved map only carries
+        // lore built for this book, so a contaminated map can never be written.
+        const semanticMap = sanitizeMapForBook(
+          { ...loreSemanticMap, scenes: directedScenes },
+          baseSemanticMap.bookId
+        );
 
         await storage.saveSemanticMap(semanticMap).catch((e) =>
           console.error("[Storage] Failed to save semantic map:", e)
