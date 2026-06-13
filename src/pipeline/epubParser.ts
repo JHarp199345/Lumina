@@ -442,7 +442,18 @@ async function navPointsToChapters(
   const flatPoints = flattenNcxNavPoints(navPoints);
   const slices: NavSlice[] = [];
 
-  const sortedPoints = flatPoints.sort((a, b) => a.playOrder - b.playOrder);
+  // The depth-first flatten already yields the EPUB's reading order. NCX
+  // playOrder is optional and frequently missing/0/inconsistent (especially in
+  // Part-structured books), and re-sorting by a bad playOrder scrambles the
+  // chapters. Only honor playOrder when EVERY entry has a distinct positive
+  // value; otherwise trust document order.
+  const playOrders = flatPoints.map((p) => p.playOrder);
+  const playOrderReliable =
+    playOrders.every((n) => Number.isFinite(n) && n > 0) &&
+    new Set(playOrders).size === playOrders.length;
+  const sortedPoints = playOrderReliable
+    ? [...flatPoints].sort((a, b) => a.playOrder - b.playOrder)
+    : flatPoints;
   onProgress?.(`Reading table of contents: ${sortedPoints.length} entries…`);
 
   for (let i = 0; i < sortedPoints.length; i++) {
@@ -455,7 +466,9 @@ async function navPointsToChapters(
       title: buildHierarchicalTitle(point.label, point.parentLabels),
       href: resolved.href,
       fragment: resolved.fragment,
-      playOrder: point.playOrder,
+      // Stamp the resolved reading-order index so the downstream sort in
+      // chaptersFromNavSlices stays in this exact order (matches the NAV path).
+      playOrder: i,
       parentLabels: point.parentLabels,
       hasChildren: point.hasChildren,
     });
@@ -480,7 +493,10 @@ function flattenNcxNavPoints(
       id: point.id || generateId(`${cleanLabel}${point.src}${depth}${fallbackIndex}`),
       label: cleanLabel || `Section ${fallbackIndex + 1}`,
       src: point.src,
-      playOrder: point.playOrder || Number.MAX_SAFE_INTEGER,
+      // Keep the raw value (0 = missing). Reliability is judged before sorting;
+      // the old `|| MAX_SAFE_INTEGER` shoved every play-order-less entry to the
+      // end, scrambling reading order for NCX books with sparse playOrder.
+      playOrder: point.playOrder,
       depth,
       parentLabels,
       hasChildren: point.children.length > 0,
