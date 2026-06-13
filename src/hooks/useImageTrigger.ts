@@ -344,17 +344,67 @@ export function useImageTrigger() {
     isGeneratingRef.current = true;
     store.updateQueueItemStatus(next.sceneId, "generating");
 
-    const result = await generateForVisualSlot({
-      scene,
-      bookId: next.bookId,
-      onComplete: (img) => {
-        if (activeStyleSeed) {
-          const styleSeed = getStyleSeedById(activeStyleSeed);
-          if (styleSeed) {
-            priorPromptRef.current = extractPaletteContext(styleSeed, [img.descriptionUsed]);
-          }
-        }
+    // Track every reader-triggered generation as its own job so the workflow
+    // log shows all generation activity, not just manual/ingestion runs.
+    // (startWorkflow is a no-op off Odysseus, so this is free for Gemini.)
+    const { startWorkflow, trackStep, completeWorkflow } = await import("@/services/workflowTracker");
+    const bookTitle = useBookStore.getState().activeBook?.title ?? "Book";
+    const workflowId = await startWorkflow(
+      "auto-image-generation",
+      `${bookTitle} — auto scene image`,
+      {
+        book_id: next.bookId,
+        book_title: bookTitle,
+        scene_id: scene.id,
+        visual_slot_key: slotKey,
+        word_position: scenePosition,
+        reader_position: readerPosition,
       },
+      "Generate the next visual as the reader approaches it"
+    );
+
+    const result = await trackStep(
+      workflowId,
+      {
+        name: "auto-scene-image",
+        goal: "Generate and persist the upcoming visual slot image",
+        agent: "image_director",
+        skill: "scene-image-generation",
+      },
+      () =>
+        generateForVisualSlot({
+          scene,
+          bookId: next.bookId,
+          onComplete: (img) => {
+            if (activeStyleSeed) {
+              const styleSeed = getStyleSeedById(activeStyleSeed);
+              if (styleSeed) {
+                priorPromptRef.current = extractPaletteContext(styleSeed, [img.descriptionUsed]);
+              }
+            }
+          },
+        }),
+      (outcome) => ({
+        metrics: {
+          ok: outcome.ok,
+          reason: outcome.ok ? "generated" : outcome.reason,
+          scene_id: scene.id,
+          visual_slot_key: slotKey,
+          word_position: scenePosition,
+          image_id: outcome.ok ? outcome.image.id : null,
+        },
+        goal_achieved: outcome.ok ? 1 : outcome.reason === "cached" ? 0.75 : 0,
+        unblocked_next: outcome.ok || outcome.reason === "cached",
+      }),
+      (err) => ({
+        metrics: { scene_id: scene.id, visual_slot_key: slotKey, error: err instanceof Error ? err.message : String(err) },
+        goal_achieved: 0,
+        unblocked_next: true,
+      })
+    );
+
+    await completeWorkflow(workflowId, {
+      outcome_metrics: { scene_id: scene.id, visual_slot_key: slotKey, ok: result.ok, reason: result.ok ? "generated" : result.reason },
     });
 
     if (result.ok) {

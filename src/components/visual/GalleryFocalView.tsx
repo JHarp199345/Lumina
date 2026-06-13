@@ -307,6 +307,20 @@ export default function GalleryFocalView({
 
     setReferenceError(null);
     setAnalyzingReferences(true);
+    // Track reference-image analysis as its own job (one run per "Analyze"
+    // action, one step per image) so every AI vision event shows in the log.
+    const { startWorkflow, trackStep, completeWorkflow } = await import("@/services/workflowTracker");
+    const refBookTitle = useBookStore.getState().activeBook?.title ?? "Book";
+    const refWorkflowId = await startWorkflow(
+      "reference-analysis",
+      `${refBookTitle} — reference image analysis`,
+      {
+        book_id: activeSemanticMap?.bookId,
+        scene_id: current?.scene.id,
+        reference_count: pendingRefs.length,
+      },
+      "Analyze reader reference images into broad visual guidance"
+    );
     try {
       const analyzed = [];
       const referenceDirections = [];
@@ -316,7 +330,31 @@ export default function GalleryFocalView({
           continue;
         }
         try {
-          const analysis = await analyzeReferenceImage(ref);
+          const analysis = await trackStep(
+            refWorkflowId,
+            {
+              name: "reference-image",
+              goal: `Extract visual guidance from ${ref.fileName}`,
+              agent: "visual_analyst",
+              skill: "reference-image-analysis",
+            },
+            () => analyzeReferenceImage(ref),
+            (a) => ({
+              metrics: {
+                file_name: ref.fileName,
+                provider: a.provider,
+                traits: a.visualTraits.length,
+                palette: a.palette.length,
+              },
+              goal_achieved: a.provider === "unavailable" ? 0.4 : 1,
+              unblocked_next: a.provider !== "unavailable",
+            }),
+            (err) => ({
+              metrics: { file_name: ref.fileName, error: err instanceof Error ? err.message : String(err) },
+              goal_achieved: 0,
+              unblocked_next: true,
+            })
+          );
           analyzed.push({
             ...ref,
             analysis,
@@ -366,6 +404,9 @@ export default function GalleryFocalView({
       });
     } finally {
       setAnalyzingReferences(false);
+      await completeWorkflow(refWorkflowId, {
+        outcome_metrics: { reference_count: pendingRefs.length, scene_id: current?.scene.id },
+      });
     }
   };
 
