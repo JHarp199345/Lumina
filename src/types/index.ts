@@ -244,6 +244,12 @@ export interface VisualLoreEntity {
   name: string;
   category: "character" | "species" | "faction" | "place" | "object" | "concept" | "unknown";
   confidence: number;
+  /** Book-local provenance for retrieval. Global/canonical entries may omit this. */
+  sourceSceneId?: string;
+  sourceChapterId?: string;
+  sourceStartWord?: number;
+  sourceEndWord?: number;
+  sourceTerms?: string[];
   aliases: string[];
   canonicalTraits: string[];
   silhouette: string;
@@ -262,6 +268,16 @@ export interface VisualLoreDossier {
   universeHint: string;
   searchQueries: string[];
   entities: VisualLoreEntity[];
+  artifactStamps?: Array<{
+    bookId: string;
+    sceneId?: string;
+    chapterId?: string;
+    packetIndex: number;
+    packetCount: number;
+    startWord: number;
+    endWord: number;
+    terms: string[];
+  }>;
   globalStyleNotes: string[];
   safetyRules: string[];
 }

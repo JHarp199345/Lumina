@@ -19,6 +19,7 @@ import {
   runOdysseusParallel,
   type OdysseusParallelTask,
 } from "@/api/llmClient";
+import { diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
 
 // ─── Six Canonical Arc Shapes ─────────────────────────────────────────────────
 
@@ -144,8 +145,292 @@ Respond with ONLY a JSON array of numbers in order, one per chapter. Example: [-
 Numbers must be between -1.0 and 1.0.`;
 }
 
+type ChapterForScoring = { id: string; title: string; index: number; rawText?: string };
+
+interface ScoringPacket {
+  range: {
+    startChapter: number;
+    endChapter: number;
+    totalChapters: number;
+  };
+  localMin: number;
+  localMax: number;
+  dominantTone: string[];
+  turningPoints: Array<{
+    chapter: number;
+    label: string;
+    direction: "rise" | "fall" | "steady";
+  }>;
+  entryTone: string;
+  exitTone: string;
+  preview: string;
+  confidence: number;
+}
+
+interface ScoringBatchPayload {
+  scores?: unknown[];
+  packet?: Partial<ScoringPacket>;
+}
+
+interface ParsedScoringBatch {
+  scores: number[];
+  packet: ScoringPacket;
+  usedFallback: boolean;
+}
+
+interface MergePayload {
+  scores?: unknown[];
+  globalMin?: unknown;
+  globalMax?: unknown;
+  arcSummary?: unknown;
+  seamCorrections?: unknown[];
+  confidence?: unknown;
+}
+
+function stripJsonFences(text: string): string {
+  return text.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
+}
+
+function clampScore(value: unknown, fallback = 0): number {
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(-1, Math.min(1, num));
+}
+
+function clampUnit(value: unknown, fallback = 0.5): number {
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(1, num));
+}
+
+function parseJsonObject<T extends object>(content: string): T | null {
+  try {
+    const cleaned = stripJsonFences(content);
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    return JSON.parse(match[0]) as T;
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonArray(content: string): unknown[] | null {
+  try {
+    const cleaned = stripJsonFences(content);
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]) as unknown;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePacket(
+  packet: Partial<ScoringPacket> | undefined,
+  batch: { start: number; chapters: ChapterForScoring[] },
+  scores: number[],
+  totalChapters: number,
+  fallbackConfidence = 0.45
+): ScoringPacket {
+  const first = batch.chapters[0]?.index ?? batch.start;
+  const last = batch.chapters[batch.chapters.length - 1]?.index ?? first;
+  const localMin = Math.min(...scores);
+  const localMax = Math.max(...scores);
+  const tones = Array.isArray(packet?.dominantTone)
+    ? packet.dominantTone.filter((tone): tone is string => typeof tone === "string").slice(0, 5)
+    : [];
+  const turningPoints = Array.isArray(packet?.turningPoints)
+    ? packet.turningPoints
+        .map((point) => ({
+          chapter: Math.max(1, Math.min(totalChapters, Number(point.chapter) || first + 1)),
+          label: typeof point.label === "string" ? point.label.slice(0, 80) : "local shift",
+          direction:
+            point.direction === "rise" || point.direction === "fall" || point.direction === "steady"
+              ? point.direction
+              : "steady",
+        }))
+        .slice(0, 4)
+    : [];
+
+  return {
+    range: {
+      startChapter: Math.max(1, Number(packet?.range?.startChapter) || first + 1),
+      endChapter: Math.max(1, Number(packet?.range?.endChapter) || last + 1),
+      totalChapters,
+    },
+    localMin: clampScore(packet?.localMin, localMin),
+    localMax: clampScore(packet?.localMax, localMax),
+    dominantTone: tones.length ? tones : inferDominantTone(scores),
+    turningPoints,
+    entryTone: typeof packet?.entryTone === "string" ? packet.entryTone.slice(0, 120) : inferToneLabel(scores[0] ?? 0),
+    exitTone:
+      typeof packet?.exitTone === "string"
+        ? packet.exitTone.slice(0, 120)
+        : inferToneLabel(scores[scores.length - 1] ?? 0),
+    preview:
+      typeof packet?.preview === "string"
+        ? packet.preview.slice(0, 240)
+        : `${batch.chapters[0]?.title ?? "Opening"} through ${batch.chapters[batch.chapters.length - 1]?.title ?? "closing"}`,
+    confidence: clampUnit(packet?.confidence, fallbackConfidence),
+  };
+}
+
+function inferToneLabel(score: number): string {
+  if (score >= 0.45) return "bright / triumphant";
+  if (score >= 0.15) return "hopeful";
+  if (score <= -0.45) return "bleak / catastrophic";
+  if (score <= -0.15) return "tense";
+  return "balanced";
+}
+
+function inferDominantTone(scores: number[]): string[] {
+  const avg = scores.reduce((sum, score) => sum + score, 0) / Math.max(1, scores.length);
+  const spread = Math.max(...scores) - Math.min(...scores);
+  const tones = [inferToneLabel(avg)];
+  if (spread > 0.65) tones.push("volatile");
+  return tones;
+}
+
+function roughScoresForBatch(batch: { chapters: ChapterForScoring[] }): number[] {
+  return batch.chapters.map((ch) => heuristicSentiment(ch.rawText || ""));
+}
+
+function parseScoringBatchResult(
+  content: string | undefined,
+  batch: { start: number; chapters: ChapterForScoring[] },
+  totalChapters: number
+): ParsedScoringBatch | null {
+  if (!content) return null;
+
+  const objectPayload = parseJsonObject<ScoringBatchPayload>(content);
+  if (objectPayload && Array.isArray(objectPayload.scores)) {
+    const scores = batch.chapters.map((_, i) => clampScore(objectPayload.scores?.[i]));
+    return {
+      scores,
+      packet: normalizePacket(objectPayload.packet, batch, scores, totalChapters, 0.7),
+      usedFallback: false,
+    };
+  }
+
+  const arrayPayload = parseJsonArray(content);
+  if (arrayPayload) {
+    const scores = batch.chapters.map((_, i) => clampScore(arrayPayload[i]));
+    return {
+      scores,
+      packet: normalizePacket(undefined, batch, scores, totalChapters, 0.35),
+      usedFallback: false,
+    };
+  }
+
+  return null;
+}
+
+function buildScoringBlackboardPrompt(
+  chapters: ChapterForScoring[],
+  bookTitle: string,
+  totalChapters: number
+): string {
+  const first = (chapters[0]?.index ?? 0) + 1;
+  const last = (chapters[chapters.length - 1]?.index ?? 0) + 1;
+  const summaries = chapters
+    .map((ch) => {
+      const excerpt = ch.rawText ? ch.rawText.split(/\s+/).slice(0, 90).join(" ") : "";
+      return `Chapter ${ch.index + 1} "${ch.title}": ${excerpt}`;
+    })
+    .join("\n\n");
+
+  return `You are scoring the emotional valence of chapters in "${bookTitle}", a book of ${totalChapters} chapters.
+
+You are scoring chapters ${first}-${last} of ${totalChapters}. This is one slice of the whole book. Calibrate against the entire book's likely emotional range, not only this slice.
+
+For each chapter, provide a sentiment score from -1.0 (despair, dread, catastrophe) to +1.0 (joy, relief, triumph). Also write a compact blackboard packet that helps a merge worker reconcile this slice with the rest of the book.
+
+Chapters:
+${summaries}
+
+Return ONLY this JSON object:
+{
+  "scores": [number],
+  "packet": {
+    "range": { "startChapter": ${first}, "endChapter": ${last}, "totalChapters": ${totalChapters} },
+    "localMin": number,
+    "localMax": number,
+    "dominantTone": ["brief tone label"],
+    "turningPoints": [{ "chapter": number, "label": "brief reason", "direction": "rise" | "fall" | "steady" }],
+    "entryTone": "brief phrase",
+    "exitTone": "brief phrase",
+    "preview": "one compact sentence describing this slice's emotional function",
+    "confidence": number
+  }
+}
+
+Rules:
+- scores length must be exactly ${chapters.length}, in chapter order.
+- localMin/localMax must describe only this slice.
+- Do not invent events outside the excerpts.
+- Keep packet text short; it is for machine reconciliation, not reader display.`;
+}
+
+function buildArcMergePrompt(bookTitle: string, chapters: ChapterForScoring[]): string {
+  const chapterIndex = chapters
+    .map((ch) => `${ch.index + 1}. ${ch.title}`)
+    .join("\n");
+
+  return `You are reconciling parallel emotional chapter scores for "${bookTitle}".
+
+You will receive upstream worker outputs. Each worker output should be a JSON object with:
+- scores: local chapter scores
+- packet: range, localMin/localMax, dominantTone, turningPoints, entryTone, exitTone, preview, confidence
+
+Use those upstream packets to produce one coherent book-wide score array. You are not rewriting the story analysis. You are only fixing scale, seams, and obvious local calibration mismatches across batches.
+
+Book chapter order:
+${chapterIndex}
+
+Return ONLY this JSON object:
+{
+  "scores": [number],
+  "globalMin": number,
+  "globalMax": number,
+  "arcSummary": "one compact sentence",
+  "seamCorrections": [{ "afterChapter": number, "reason": "brief" }],
+  "confidence": number
+}
+
+Rules:
+- scores length must be exactly ${chapters.length}.
+- Every score must be between -1.0 and 1.0.
+- Preserve chapter order.
+- Do not invent plot events.
+- If upstream workers disagree, smooth seams conservatively instead of flattening the whole arc.`;
+}
+
+function parseMergedScores(merge: unknown, chapterCount: number): { scores: number[]; confidence: number; arcSummary?: string } | null {
+  let payload: MergePayload | null = null;
+
+  if (typeof merge === "string") {
+    payload = parseJsonObject<MergePayload>(merge);
+  } else if (merge && typeof merge === "object") {
+    const maybeContent = (merge as { content?: unknown }).content;
+    if (typeof maybeContent === "string") {
+      payload = parseJsonObject<MergePayload>(maybeContent);
+    } else {
+      payload = merge as MergePayload;
+    }
+  }
+
+  if (!payload || !Array.isArray(payload.scores) || payload.scores.length !== chapterCount) return null;
+
+  return {
+    scores: payload.scores.map((score) => clampScore(score)),
+    confidence: clampUnit(payload.confidence, 0.5),
+    arcSummary: typeof payload.arcSummary === "string" ? payload.arcSummary.slice(0, 240) : undefined,
+  };
+}
+
 async function scoreChaptersParallel(
-  chapters: { id: string; title: string; index: number; rawText?: string }[],
+  chapters: ChapterForScoring[],
   bookTitle: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<number[]> {
@@ -158,9 +443,10 @@ async function scoreChaptersParallel(
   const tasks: OdysseusParallelTask[] = batches.map((b, i) => ({
     id: `score-batch-${i}`,
     agent: "reading",
-    prompt: _buildScoringPrompt(b.chapters, bookTitle, chapters.length),
+    prompt: buildScoringBlackboardPrompt(b.chapters, bookTitle, chapters.length),
     temperature: 0.3,
-    max_tokens: 256,
+    max_tokens: 700,
+    packet_mode: "compact",
   }));
 
   onProgress?.({
@@ -180,6 +466,83 @@ async function scoreChaptersParallel(
     },
     tasks,
     max_concurrency: 8,
+    merge_agent: "reading",
+    merge_prompt: buildArcMergePrompt(bookTitle, chapters),
+  });
+
+  onProgress?.({
+    phase: "scoring",
+    message: `Reconciling ${batches.length} chapter score packets into one arc…`,
+    percent: 35,
+    current: chapters.length,
+    total: chapters.length,
+  });
+
+  const scores: number[] = new Array(chapters.length).fill(0);
+  const packets: ScoringPacket[] = [];
+  let failedBatches = 0;
+  let fallbackBatches = 0;
+
+  for (let i = 0; i < batches.length; i++) {
+    const taskResult = result.results.find((r) => r.id === `score-batch-${i}`);
+    const batch = batches[i];
+
+    const parsed = taskResult?.status === "done"
+      ? parseScoringBatchResult(taskResult.content, batch, chapters.length)
+      : null;
+
+    if (parsed) {
+      parsed.scores.forEach((score, j) => {
+        scores[batch.start + j] = score;
+      });
+      packets.push(parsed.packet);
+      if (parsed.usedFallback) fallbackBatches += 1;
+      continue;
+    }
+
+    // Heuristic fallback for failed batch
+    failedBatches += 1;
+    fallbackBatches += 1;
+    const fallbackScores = roughScoresForBatch(batch);
+    fallbackScores.forEach((score, j) => {
+      scores[batch.start + j] = score;
+    });
+    packets.push(normalizePacket(undefined, batch, fallbackScores, chapters.length, 0.2));
+  }
+
+  diagnosticInfo("story_shape.parallel_scoring.complete", "Parallel chapter score packets parsed", {
+    bookTitle,
+    chapterCount: chapters.length,
+    batchCount: batches.length,
+    packetCount: packets.length,
+    failedBatches,
+    fallbackBatches,
+  });
+
+  const merged = parseMergedScores(result.merge, chapters.length);
+  if (merged) {
+    diagnosticInfo("story_shape.merge_reconcile.complete", "Merged chapter scores into one book-wide arc", {
+      bookTitle,
+      chapterCount: chapters.length,
+      batchCount: batches.length,
+      confidence: merged.confidence,
+      arcSummary: merged.arcSummary,
+    });
+    onProgress?.({
+      phase: "scoring",
+      message: `Arc scoring reconciled — fitting story shape…`,
+      percent: 38,
+      current: chapters.length,
+      total: chapters.length,
+    });
+    return merged.scores;
+  }
+
+  diagnosticWarn("story_shape.merge_reconcile.failed", "Merge reconciliation missing or invalid; using parsed batch scores", {
+    bookTitle,
+    chapterCount: chapters.length,
+    batchCount: batches.length,
+    hasMerge: Boolean(result.merge),
   });
 
   onProgress?.({
@@ -189,34 +552,6 @@ async function scoreChaptersParallel(
     current: chapters.length,
     total: chapters.length,
   });
-
-  const scores: number[] = new Array(chapters.length).fill(0);
-  for (let i = 0; i < batches.length; i++) {
-    const taskResult = result.results.find((r) => r.id === `score-batch-${i}`);
-    const batch = batches[i];
-    if (taskResult?.status === "done" && taskResult.content) {
-      try {
-        const cleaned = taskResult.content.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
-        const match = cleaned.match(/\[[\s\S]*\]/);
-        if (match) {
-          const parsed = JSON.parse(match[0]) as unknown[];
-          if (Array.isArray(parsed)) {
-            batch.chapters.forEach((_, j) => {
-              const val = parsed[j];
-              scores[batch.start + j] = typeof val === "number" ? Math.max(-1, Math.min(1, val)) : 0;
-            });
-            continue;
-          }
-        }
-      } catch {
-        // fall through to heuristic
-      }
-    }
-    // Heuristic fallback for failed batch
-    batch.chapters.forEach((ch, j) => {
-      scores[batch.start + j] = heuristicSentiment(ch.rawText || "");
-    });
-  }
 
   return scores;
 }

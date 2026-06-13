@@ -3,8 +3,10 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles/globals.css";
 import { diagnosticError, installDiagnostics } from "./utils/diagnostics";
+import { checkWebStorageHealth } from "./utils/storageHealth";
 
 installDiagnostics();
+void checkWebStorageHealth();
 
 class LuminaCrashBoundary extends React.Component<
   { children: React.ReactNode },

@@ -1,6 +1,7 @@
 import { llmGenerateJSON } from "@/api/llmClient";
 import { findRelevantLoreEntities, formatLoreForPrompt } from "@/pipeline/visualLore";
 import { loreForBook } from "@/utils/bookIsolation";
+import { computeSceneWordPosition } from "@/utils/scenePosition";
 import type {
   AnalysisProgressReporter,
   BookStructure,
@@ -244,9 +245,12 @@ export async function createVisualDirectorBrief(params: {
   // Isolation guard: only ever ground a brief in lore built for THIS book.
   // A foreign dossier (wrong bookId) is the proven cross-book contamination
   // carrier, so it is dropped here before it can reach the prompt.
+  const sceneWordPosition = computeSceneWordPosition(params.scene, params.structure.chapters);
   const loreEntities = findRelevantLoreEntities(
     loreForBook(params.semanticMap.visualLore, params.semanticMap.bookId),
-    `${params.scene.imageDescription ?? ""}\n${params.scene.symbolicMotifs.join(" ")}\n${nearbyText}`
+    `${params.scene.imageDescription ?? ""}\n${params.scene.symbolicMotifs.join(" ")}\n${nearbyText}`,
+    5,
+    sceneWordPosition
   );
   const prompt = buildDirectorPrompt({ ...params, nearbyText, memory, beat, loreEntities });
 
@@ -967,4 +971,3 @@ function cleanArray(value: unknown, fallback: string[]): string[] {
   const cleaned = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
   return cleaned.length ? cleaned.slice(0, 8) : fallback;
 }
-

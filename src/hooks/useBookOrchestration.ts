@@ -515,6 +515,7 @@ export function useBookOrchestration() {
               () =>
                 buildVisualLoreDossier({
                   structure,
+                  scenes: baseSemanticMap.scenes,
                   apiKey: googleKey ?? "",
                   onProgress: reportProgress,
                 }),

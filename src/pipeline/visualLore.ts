@@ -1,16 +1,18 @@
 import { LUMINA_CONFIG } from "@/config";
-import { getProvider, runOdysseusParallel, type OdysseusParallelTask } from "@/api/llmClient";
+import { getProvider, llmGenerateJSON } from "@/api/llmClient";
 import type {
   AnalysisProgressReporter,
   BookStructure,
+  IdentifiedScene,
   VisualLoreDossier,
   VisualLoreEntity,
 } from "@/types";
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
+import { computeSceneWordPosition } from "@/utils/scenePosition";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const MAX_LORE_TERMS = 25;
-const VISUAL_LORE_MAX_CONCURRENCY = 4;
+const MAX_LORE_TERMS = 60;
+const INITIAL_LOCAL_ARTIFACT_COUNT = 8;
 
 // Words that get capitalized at sentence starts but are NOT proper nouns.
 // Pronouns are the primary offender: "She", "He", "His" etc. repeat the most.
@@ -53,6 +55,7 @@ const STOP_WORDS = new Set([
 
 export async function buildVisualLoreDossier(params: {
   structure: BookStructure;
+  scenes?: IdentifiedScene[];
   apiKey: string;
   onProgress?: AnalysisProgressReporter;
 }): Promise<VisualLoreDossier | undefined> {
@@ -73,14 +76,16 @@ export async function buildVisualLoreDossier(params: {
     itemLabel: terms.slice(0, 3).join(", "),
   });
 
-  // Odysseus: one dedicated agent per entity, with concurrency capped to the
-  // real worker throughput. Higher values mostly create waiting tasks in logs.
+  // Odysseus: one visual-lore worker writes organized, stamped artifacts. This
+  // keeps the local workflow sequential and readable instead of creating a wall
+  // of competing lore operators.
   if (getProvider() === "odysseus") {
     try {
-      const dossier = await buildLoreOdysseus(params.structure, terms, params.onProgress);
-      diagnosticInfo("visual_lore.complete", "Visual lore dossier created (parallel)", {
+      const dossier = await buildLoreOdysseus(params.structure, terms, params.scenes ?? [], params.onProgress);
+      diagnosticInfo("visual_lore.complete", "Visual lore dossier created", {
         bookId: params.structure.bookId,
         entities: dossier.entities.length,
+        artifactStamps: dossier.artifactStamps?.length ?? 0,
       });
       return dossier;
     } catch (err) {
@@ -156,20 +161,140 @@ function findEntitySnippet(structure: BookStructure, entityName: string): string
   return "";
 }
 
-/** Per-entity prompt for one parallel visual_analyst task. */
-function buildEntityPrompt(structure: BookStructure, entityName: string, snippet: string): string {
+interface LoreArtifactPlan {
+  bookId: string;
+  sceneId?: string;
+  chapterId?: string;
+  packetIndex: number;
+  packetCount: number;
+  startWord: number;
+  endWord: number;
+  terms: string[];
+  evidence: string;
+}
+
+function wordsBeforeChapter(structure: BookStructure, chapterId: string): number {
+  const chapter = structure.chapters.find((item) => item.id === chapterId);
+  if (!chapter) return 0;
+  return structure.chapters.slice(0, chapter.index).reduce((sum, item) => sum + item.wordCount, 0);
+}
+
+function chapterAtPosition(structure: BookStructure, position: number) {
+  let cursor = 0;
+  for (const chapter of structure.chapters) {
+    const next = cursor + chapter.wordCount;
+    if (position >= cursor && position < next) return { chapter, start: cursor };
+    cursor = next;
+  }
+  const last = structure.chapters[structure.chapters.length - 1];
+  return last ? { chapter: last, start: Math.max(0, structure.totalWords - last.wordCount) } : null;
+}
+
+function textWindowForPosition(structure: BookStructure, startWord: number, endWord: number): string {
+  const located = chapterAtPosition(structure, startWord);
+  if (!located) return "";
+  const words = (located.chapter.rawText ?? "").split(/\s+/).filter(Boolean);
+  const localStart = Math.max(0, startWord - located.start);
+  const localEnd = Math.min(words.length, Math.max(localStart + 80, endWord - located.start));
+  return words.slice(localStart, localEnd).join(" ").slice(0, 1800);
+}
+
+function extractTermsFromText(text: string, maxTerms = 10): string[] {
+  const counts = new Map<string, number>();
+  const matches = text.matchAll(/\b(?:[A-Z][a-zA-Z’’.-]{2,})(?:\s+(?:the|of|and|[A-Z][a-zA-Z’’.-]{2,})){0,3}\b/g);
+  for (const match of matches) {
+    const term = match[0].replace(/\s+/g, " ").trim();
+    const firstWord = term.split(/\s+/)[0];
+    if (!term || STOP_WORDS.has(firstWord) || /^Chapter\s+/i.test(term)) continue;
+    counts.set(term, (counts.get(term) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .map(([term]) => term)
+    .slice(0, maxTerms);
+}
+
+function selectTermsForEvidence(globalTerms: string[], evidence: string, fallbackOffset: number): string[] {
+  const lower = evidence.toLowerCase();
+  const localTerms = extractTermsFromText(evidence, 10);
+  const matchedGlobal = globalTerms.filter((term) => lower.includes(term.toLowerCase())).slice(0, 8);
+  const fallback = globalTerms.slice(fallbackOffset, fallbackOffset + 8);
+  return [...new Set([...localTerms, ...matchedGlobal, ...fallback])].slice(0, 12);
+}
+
+function planInitialLoreArtifacts(
+  structure: BookStructure,
+  terms: string[],
+  scenes: IdentifiedScene[]
+): LoreArtifactPlan[] {
+  const sortedScenes = scenes
+    .map((scene) => ({ scene, position: computeSceneWordPosition(scene, structure.chapters) }))
+    .sort((a, b) => a.position - b.position)
+    .slice(0, INITIAL_LOCAL_ARTIFACT_COUNT);
+
+  const anchors = sortedScenes.length
+    ? sortedScenes
+    : [{ scene: undefined, position: 0 } as { scene?: IdentifiedScene; position: number }];
+
+  return anchors.map(({ scene, position }, index) => {
+    const nextPosition = sortedScenes[index + 1]?.position;
+    const startWord = Math.max(0, position - (index === 0 ? 0 : 250));
+    const endWord = Math.min(
+      structure.totalWords,
+      Math.max(startWord + 900, Math.min(nextPosition ?? startWord + 1800, startWord + 2200))
+    );
+    const evidence = textWindowForPosition(structure, startWord, endWord);
+    const termsForArtifact = selectTermsForEvidence(terms, evidence, index * 6);
+    return {
+      bookId: structure.bookId,
+      sceneId: scene?.id,
+      chapterId: scene?.chapterId ?? chapterAtPosition(structure, startWord)?.chapter.id,
+      packetIndex: index,
+      packetCount: anchors.length,
+      startWord,
+      endWord,
+      terms: termsForArtifact,
+      evidence,
+    };
+  });
+}
+
+function buildLoreArtifactPrompt(structure: BookStructure, artifacts: LoreArtifactPlan[], terms: string[]): string {
   const bookInfo = `"${structure.title}"${structure.author ? ` by ${structure.author}` : ""}`;
-  const snippetBlock = snippet
-    ? `\nBook passage mentioning this entity:\n---\n${snippet.slice(0, 600)}\n---\n`
-    : "";
-  return `You are a visual lore researcher for the EPUB reader Lumina.
+  const artifactBlocks = artifacts
+    .map((artifact) => `Artifact ${artifact.packetIndex + 1}/${artifact.packetCount}
+Stamp: ${JSON.stringify({
+      bookId: artifact.bookId,
+      sceneId: artifact.sceneId,
+      chapterId: artifact.chapterId,
+      packetIndex: artifact.packetIndex,
+      packetCount: artifact.packetCount,
+      startWord: artifact.startWord,
+      endWord: artifact.endWord,
+      terms: artifact.terms,
+    })}
+Source evidence:
+${artifact.evidence || "(no local passage available)"}`)
+    .join("\n\n---\n\n");
+
+  return `You are the single visual lore worker for the EPUB reader Lumina.
 
 Book: ${bookInfo}
-Entity: "${entityName}"
-${snippetBlock}
-Your task: produce a comprehensive visual dossier entry for a LOCAL image-generation AI model. Draw on your full training knowledge. If this entity exists in a published fictional universe (Warhammer 40K, Star Wars, a novel series, game franchise, etc.), describe it with maximum visual specificity — the local AI has no internet access and needs every detail spelled out.
+Book ID stamp: ${structure.bookId}
 
-Cover all of the following:
+You are not generating images. You are writing organized, readable lore artifacts that later visual directors and image generators can consult by book position.
+
+The first artifact is opening-heavy because Lumina generates the first image from the first visual section. Later artifacts prepare nearby scene windows.
+
+Global recurring terms, for context only:
+${terms.slice(0, 40).map((term) => `- ${term}`).join("\n")}
+
+Stamped local artifacts to fill:
+${artifactBlocks}
+
+For each artifact, create useful visual entities from its local evidence and term list. These can include characters, places, factions, objects, species, concepts, materials, architecture, flowers/plants, vehicles, weapons, weather, rituals, or anything visually important in that local section.
+
+For each entity, cover:
 - Physical form (height category, build, surface texture, skin/hide/metal, distinguishing features)
 - Clothing / armor / equipment (construction, layering, ornamentation, wear and damage)
 - Color palette (dominant colors, secondary accents, how colors shift in shadow vs. light)
@@ -180,87 +305,92 @@ Cover all of the following:
 
 Return ONLY valid JSON, no markdown fences:
 {
-  "name": "${entityName}",
-  "category": "character|species|faction|place|object|concept|unknown",
-  "confidence": 0.0-1.0,
-  "aliases": ["other names if any"],
-  "canonicalTraits": ["specific trait 1", "specific trait 2", "up to 8 traits"],
-  "silhouette": "one sentence describing the distinctive silhouette",
-  "materials": ["material1", "material2"],
-  "colors": ["primary color", "secondary/accent color"],
-  "motifs": ["motif1", "motif2"],
-  "sceneUse": "how to compose this entity in a visual scene",
-  "avoidCopying": ["specific official art or designs to avoid recreating exactly"],
-  "sourceTitles": ["published source titles if applicable"],
-  "sourceUrls": []
-}`;
+  "universeHint": "short likely setting/franchise/world context, or unknown",
+  "artifactStamps": [
+    {
+      "bookId": "${structure.bookId}",
+      "sceneId": "scene id when present",
+      "chapterId": "chapter id",
+      "packetIndex": 0,
+      "packetCount": ${artifacts.length},
+      "startWord": 0,
+      "endWord": 1200,
+      "terms": ["terms covered"]
+    }
+  ],
+  "entities": [
+    {
+      "name": "visual entity name",
+      "category": "character|species|faction|place|object|concept|unknown",
+      "confidence": 0.0-1.0,
+      "sourceSceneId": "scene id when present",
+      "sourceChapterId": "chapter id",
+      "sourceStartWord": 0,
+      "sourceEndWord": 1200,
+      "sourceTerms": ["terms from the artifact this came from"],
+      "aliases": ["other names if any"],
+      "canonicalTraits": ["specific trait 1", "specific trait 2", "up to 8 traits"],
+      "silhouette": "one sentence describing the distinctive silhouette",
+      "materials": ["material1", "material2"],
+      "colors": ["primary color", "secondary/accent color"],
+      "motifs": ["motif1", "motif2"],
+      "sceneUse": "how to compose this entity in a visual scene",
+      "avoidCopying": ["specific official art or designs to avoid recreating exactly"],
+      "sourceTitles": ["published source titles if applicable"],
+      "sourceUrls": []
+    }
+  ],
+  "globalStyleNotes": ["brief visual grammar discovered in this packet"],
+  "safetyRules": [
+    "Use traits as descriptive grounding only",
+    "Do not recreate a specific public image"
+  ]
 }
 
-/** Odysseus path: one dedicated visual_analyst task per entity, run in parallel. */
+Rules:
+- Preserve the artifact stamps exactly enough that bookId/startWord/endWord remain correct.
+- Every entity must include sourceStartWord and sourceEndWord from the artifact it came from.
+- Favor local evidence over end-of-book or global lore, especially for artifact 1.
+- Global/canonical knowledge may enrich visual traits, but do not copy a specific public image, composition, logo, or named artist style.
+- Keep the artifact readable and organized; the next AI should be able to quickly find what matters for a local image.`;
+}
+
+/** Odysseus path: one visual-lore worker writes stamped readable artifacts. */
 async function buildLoreOdysseus(
   structure: BookStructure,
   terms: string[],
+  scenes: IdentifiedScene[],
   onProgress?: AnalysisProgressReporter
 ): Promise<VisualLoreDossier> {
-  const tasks: OdysseusParallelTask[] = terms.map((term, i) => ({
-    id: `lore-${i}`,
-    agent: "visual_analyst",
-    prompt: buildEntityPrompt(structure, term, findEntitySnippet(structure, term)),
-    temperature: 0.3,
-    max_tokens: 1500,
-  }));
+  const limitedTerms = terms.slice(0, MAX_LORE_TERMS);
+  const artifacts = planInitialLoreArtifacts(structure, limitedTerms, scenes);
 
   onProgress?.({
     phase: "prompts",
-    message: `Researching ${terms.length} lore entities in parallel…`,
+    message: `Writing ${artifacts.length} stamped visual lore artifact${artifacts.length === 1 ? "" : "s"}…`,
     percent: 85,
     current: 0,
-    total: terms.length,
+    total: artifacts.length,
   });
 
-  const result = await runOdysseusParallel({
-    workflow: {
-      type: "visual-lore",
-      label: `Visual lore research — ${structure.title}`,
-      task_goal: `Build detailed visual dossier for ${terms.length} lore entities`,
-      context: { book_title: structure.title, entity_count: terms.length },
-    },
-    tasks,
-    max_concurrency: VISUAL_LORE_MAX_CONCURRENCY,
-  });
+  const raw = await llmGenerateJSON<Partial<VisualLoreDossier>>(
+    "visual_analyst",
+    buildLoreArtifactPrompt(structure, artifacts, limitedTerms),
+    { temperature: 0.28, maxTokens: 9000 }
+  );
+  const dossier = normalizeDossier(structure.bookId, raw, limitedTerms);
+  const stamped = applyArtifactFallbacks(dossier, artifacts);
 
-  const entities: VisualLoreEntity[] = [];
-  for (let i = 0; i < terms.length; i++) {
-    const task = result.results.find((r) => r.id === `lore-${i}`);
-    if (task?.status === "done" && task.content) {
-      try {
-        const cleaned = task.content.replace(/```json\n?/gi, "").replace(/```\n?/gi, "").trim();
-        const raw = JSON.parse(cleaned) as Partial<VisualLoreEntity>;
-        const entity = normalizeEntity(raw);
-        if (entity.name) {
-          entities.push(entity);
-          continue;
-        }
-      } catch {
-        // fall through to fallback
-      }
-    }
-    entities.push(fallbackEntity(terms[i]));
-  }
-
-  return {
+  diagnosticInfo("visual_lore.artifacts_complete", "Visual lore artifacts built", {
     bookId: structure.bookId,
-    generatedAt: new Date().toISOString(),
-    universeHint: "unknown",
-    searchQueries: [],
-    entities,
-    globalStyleNotes: [],
-    safetyRules: [
-      "Use public references only to infer broad visual traits.",
-      "Do not recreate any specific official or fan artwork.",
-      "Avoid named artist styles, exact compositions, logos, and watermarks.",
-    ],
-  };
+    artifacts: stamped.artifactStamps?.length ?? 0,
+    entities: stamped.entities.length,
+    openingRange: stamped.artifactStamps?.[0]
+      ? [stamped.artifactStamps[0].startWord, stamped.artifactStamps[0].endWord]
+      : null,
+  });
+
+  return stamped;
 }
 
 function buildLorePrompt(structure: BookStructure, terms: string[]): string {
@@ -362,6 +492,24 @@ function normalizeDossier(
     universeHint: stringOr(raw.universeHint, "unknown"),
     searchQueries: metadataQueries,
     entities: entities.length ? entities : terms.map(fallbackEntity),
+    artifactStamps: Array.isArray(raw.artifactStamps)
+      ? raw.artifactStamps
+          .map((stamp) => ({
+            bookId,
+            sceneId: stringOr(stamp.sceneId, ""),
+            chapterId: stringOr(stamp.chapterId, ""),
+            packetIndex: numberOr(stamp.packetIndex, 0),
+            packetCount: numberOr(stamp.packetCount, raw.artifactStamps?.length ?? 1),
+            startWord: numberOr(stamp.startWord, 0),
+            endWord: numberOr(stamp.endWord, 0),
+            terms: cleanArray(stamp.terms, []),
+          }))
+          .map((stamp) => ({
+            ...stamp,
+            ...(stamp.sceneId ? { sceneId: stamp.sceneId } : {}),
+            ...(stamp.chapterId ? { chapterId: stamp.chapterId } : {}),
+          }))
+      : undefined,
     globalStyleNotes: cleanArray(raw.globalStyleNotes, []),
     safetyRules: cleanArray(raw.safetyRules, [
       "Use public references only to infer broad visual traits.",
@@ -376,6 +524,11 @@ function normalizeEntity(raw: Partial<VisualLoreEntity>): VisualLoreEntity {
     name: stringOr(raw.name, ""),
     category: enumOr(raw.category, ["character", "species", "faction", "place", "object", "concept", "unknown"], "unknown"),
     confidence: typeof raw.confidence === "number" ? Math.max(0, Math.min(1, raw.confidence)) : 0.5,
+    ...(stringOr(raw.sourceSceneId, "") ? { sourceSceneId: stringOr(raw.sourceSceneId, "") } : {}),
+    ...(stringOr(raw.sourceChapterId, "") ? { sourceChapterId: stringOr(raw.sourceChapterId, "") } : {}),
+    ...(typeof raw.sourceStartWord === "number" ? { sourceStartWord: Math.max(0, Math.round(raw.sourceStartWord)) } : {}),
+    ...(typeof raw.sourceEndWord === "number" ? { sourceEndWord: Math.max(0, Math.round(raw.sourceEndWord)) } : {}),
+    ...(Array.isArray(raw.sourceTerms) ? { sourceTerms: cleanArray(raw.sourceTerms, []) } : {}),
     aliases: cleanArray(raw.aliases, []),
     canonicalTraits: cleanArray(raw.canonicalTraits, []),
     silhouette: stringOr(raw.silhouette, ""),
@@ -386,6 +539,52 @@ function normalizeEntity(raw: Partial<VisualLoreEntity>): VisualLoreEntity {
     avoidCopying: cleanArray(raw.avoidCopying, []),
     sourceTitles: cleanArray(raw.sourceTitles, []),
     sourceUrls: cleanArray(raw.sourceUrls, []),
+  };
+}
+
+function applyArtifactFallbacks(dossier: VisualLoreDossier, artifacts: LoreArtifactPlan[]): VisualLoreDossier {
+  const stamps = artifacts.map((artifact) => ({
+    bookId: artifact.bookId,
+    ...(artifact.sceneId ? { sceneId: artifact.sceneId } : {}),
+    ...(artifact.chapterId ? { chapterId: artifact.chapterId } : {}),
+    packetIndex: artifact.packetIndex,
+    packetCount: artifact.packetCount,
+    startWord: artifact.startWord,
+    endWord: artifact.endWord,
+    terms: artifact.terms,
+  }));
+
+  const existingStamps = dossier.artifactStamps?.length ? dossier.artifactStamps : stamps;
+  const defaultStamp = existingStamps[0] ?? stamps[0];
+  const stampedEntities = dossier.entities.map((entity, index) => {
+    if (typeof entity.sourceStartWord === "number" && typeof entity.sourceEndWord === "number") {
+      return entity;
+    }
+
+    const matchedStamp =
+      existingStamps.find((stamp) =>
+        [entity.name, ...entity.aliases].some((name) =>
+          stamp.terms.some((term) => term.toLowerCase() === name.toLowerCase())
+        )
+      ) ??
+      existingStamps[index % Math.max(1, existingStamps.length)] ??
+      defaultStamp;
+
+    if (!matchedStamp) return entity;
+    return {
+      ...entity,
+      sourceSceneId: entity.sourceSceneId ?? matchedStamp.sceneId,
+      sourceChapterId: entity.sourceChapterId ?? matchedStamp.chapterId,
+      sourceStartWord: matchedStamp.startWord,
+      sourceEndWord: matchedStamp.endWord,
+      sourceTerms: entity.sourceTerms?.length ? entity.sourceTerms : matchedStamp.terms,
+    };
+  });
+
+  return {
+    ...dossier,
+    artifactStamps: existingStamps,
+    entities: stampedEntities,
   };
 }
 
@@ -426,16 +625,39 @@ function fallbackEntity(name: string): VisualLoreEntity {
 export function findRelevantLoreEntities(
   dossier: VisualLoreDossier | undefined,
   text: string,
-  limit = 5
+  limit = 5,
+  wordPosition?: number
 ): VisualLoreEntity[] {
   if (!dossier) return [];
   const lower = text.toLowerCase();
+  const proximityWindow = 2500;
   return dossier.entities
-    .filter((entity) => {
+    .map((entity) => {
       const names = [entity.name, ...entity.aliases].filter(Boolean);
-      return names.some((name) => lower.includes(name.toLowerCase()));
+      const textMatch = names.some((name) => lower.includes(name.toLowerCase()));
+      const hasRange =
+        typeof wordPosition === "number" &&
+        typeof entity.sourceStartWord === "number" &&
+        typeof entity.sourceEndWord === "number";
+      const distance = hasRange
+        ? wordPosition < entity.sourceStartWord!
+          ? entity.sourceStartWord! - wordPosition
+          : wordPosition > entity.sourceEndWord!
+            ? wordPosition - entity.sourceEndWord!
+            : 0
+        : Number.POSITIVE_INFINITY;
+      const positionMatch = hasRange && distance <= proximityWindow;
+      const score =
+        entity.confidence +
+        (textMatch ? 1.5 : 0) +
+        (positionMatch ? 1.2 : 0) +
+        (distance === 0 ? 0.8 : 0) -
+        (Number.isFinite(distance) ? Math.min(distance / 10000, 0.5) : 0);
+      return { entity, textMatch, positionMatch, score };
     })
-    .sort((a, b) => b.confidence - a.confidence)
+    .filter((item) => item.textMatch || item.positionMatch)
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.entity)
     .slice(0, limit);
 }
 
@@ -462,6 +684,11 @@ export function formatLoreForPrompt(entities: VisualLoreEntity[]): string {
 function cleanArray(value: unknown, fallback: string[]): string[] {
   if (!Array.isArray(value)) return fallback;
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 12);
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
 }
 
 function stringOr(value: unknown, fallback: string): string {
