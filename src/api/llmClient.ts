@@ -121,6 +121,8 @@ export interface OdysseusParallelRequest {
     label?: string;
     task_goal?: string;
     context?: Record<string, unknown>;
+    /** Parent run to nest these tasks under, instead of a separate top-level run. */
+    run_id?: string;
   };
   tasks: OdysseusParallelTask[];
   merge_agent?: string;
@@ -152,6 +154,18 @@ export async function runOdysseusParallel(
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getOdysseusToken();
   if (token) headers.Authorization = `Bearer ${token}`;
+
+  // Nest these parallel tasks under the active pipeline run (e.g. book-ingestion)
+  // so they appear as steps in one tree instead of scattered top-level runs.
+  if (request.workflow) {
+    try {
+      const { getWorkflowContext } = await import("@/services/workflowTracker");
+      const parentId = getWorkflowContext()?.id;
+      if (parentId && !request.workflow.run_id) request.workflow.run_id = parentId;
+    } catch {
+      /* optional — falls back to a standalone run */
+    }
+  }
 
   const res = await fetch(`${base}/api/agents/parallel`, {
     method: "POST",
