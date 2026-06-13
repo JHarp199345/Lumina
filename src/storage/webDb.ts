@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 
 export const STORES = {
   SOURCE_PROFILES: "source_profiles", // SourceIntelligenceProfile, keyed by bookId
@@ -17,6 +17,7 @@ export const STORES = {
   HIGHLIGHTS:    "highlights",      // Highlight[], keyed by id, indexed by bookId
   NOTES:         "notes",           // Note[], keyed by id, indexed by bookId
   SEMANTIC_MAPS: "semantic_maps",   // SemanticMap, keyed by bookId
+  BLACKBOARD_NOTES: "blackboard_notes", // BlackboardNote, keyed by id, indexed by bookId
   STUDY_GUIDES:  "study_guides",    // StudyGuide, keyed by bookId
   STUDY_QUIZZES: "study_quizzes",    // StudyQuiz, keyed by id, indexed by bookId
   STUDY_ATTEMPTS:"study_attempts",   // StudyQuizAttempt, keyed by id, indexed by bookId
@@ -44,8 +45,8 @@ export const STORES = {
 //               progress, achievements, API keys). NEVER cleared by an update;
 //               removed only by an explicit reader action (delete book / note).
 //   generated — expensive AI output (images, audio, analysis, study, decks).
-//               Preserved across updates; retired only by explicit Re-Ingest or
-//               delete-book. Remaking it costs the reader real quota.
+//               Preserved across updates; retired only by explicit reader cleanup
+//               such as delete-book / purge-artifact. Remaking it costs real quota.
 //   cache     — purely derived, cheap to rebuild. The ONLY class an update may
 //               prune (by age/size — never a wholesale wipe).
 //
@@ -78,6 +79,7 @@ export const STORE_REGISTRY: StoreDef[] = [
   { name: STORES.NOTIFICATIONS,   lifecycle: "userData",  keyPath: "id", indexes: BOOK_INDEX },
 
   { name: STORES.SEMANTIC_MAPS,   lifecycle: "generated" },
+  { name: STORES.BLACKBOARD_NOTES, lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },
   { name: STORES.SOURCE_PROFILES, lifecycle: "generated" },
   { name: STORES.STUDY_GUIDES,    lifecycle: "generated" },
   { name: STORES.STUDY_QUIZZES,   lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },

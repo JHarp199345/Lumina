@@ -42,6 +42,7 @@ import {
 import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
 import { LUMINA_CONFIG } from "@/config";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
+import { buildBlackboardImageNote, buildBlackboardNotesForBook } from "@/services/blackboardNotes";
 import type {
   AnalysisProgressDetail,
   AnalysisProgressUpdate,
@@ -49,6 +50,7 @@ import type {
   BookStructure,
   IdentifiedScene,
   CachedImage,
+  SemanticMap,
 } from "@/types";
 import { useReaderStore } from "@/store/readerStore";
 import { useNotificationStore } from "@/store/notificationStore";
@@ -81,6 +83,44 @@ export function useBookOrchestration() {
     setIsGenerating,
   } = useImageStore();
   const { imageGenerationEnabled, visualInterpretationLevel } = useSettingsStore();
+
+  const ensureBlackboardNotes = useCallback(
+    async (semanticMap: SemanticMap, structure: BookStructure) => {
+      const existingNotes = await storage.loadBlackboardNotes(semanticMap.bookId).catch(() => []);
+      if (existingNotes.length > 0) return;
+
+      const sceneIds = new Set(semanticMap.scenes.map((scene) => scene.id));
+      const images = (await storage.loadImages(semanticMap.bookId).catch(() => [] as CachedImage[]))
+        .filter((image) => sceneIds.has(image.sceneId));
+      const notes = buildBlackboardNotesForBook({
+        semanticMap,
+        chapters: structure.chapters,
+        images: hydrateImageWordPositions(images, semanticMap.scenes, structure.chapters),
+      });
+      if (notes.length === 0) return;
+
+      await storage.saveBlackboardNotes(notes).catch((err) =>
+        diagnosticWarn("blackboard.notes.save_failed", "Failed to save indexed blackboard notes", {
+          bookId: semanticMap.bookId,
+          error: String(err),
+        })
+      );
+    },
+    []
+  );
+
+  const appendBlackboardImageNote = useCallback(async (image: CachedImage, semanticBookId: string) => {
+    const semanticMap = useBookStore.getState().activeSemanticMap;
+    if (!semanticMap || semanticMap.bookId !== semanticBookId) return;
+    await storage.saveBlackboardNotes([buildBlackboardImageNote(semanticMap, image)]).catch((err) =>
+      diagnosticWarn("blackboard.image_note.save_failed", "Failed to save generated image note", {
+        bookId: semanticBookId,
+        imageId: image.id,
+        sceneId: image.sceneId,
+        error: String(err),
+      })
+    );
+  }, []);
 
   // ── Normal import flow ───────────────────────────────────────────────────────
 
@@ -146,6 +186,8 @@ export function useBookOrchestration() {
           imageCache = useImageStore.getState().imageCache;
         }
 
+        await ensureBlackboardNotes(existingMap, slice.structure);
+
         const { wordPosition } = useReaderStore.getState();
         // Scope to the current generation's scenes (single source of truth) so an
         // orphaned image from a prior generation can never be picked for display.
@@ -177,7 +219,7 @@ export function useBookOrchestration() {
 
       await _runAnalysis(slice.structure, styleSeedId, slice.semanticBookId, slice.label);
     },
-    [imageGenerationEnabled, setActiveStyleSeed, setActiveSemanticMap, addToCache]
+    [imageGenerationEnabled, setActiveStyleSeed, setActiveSemanticMap, addToCache, ensureBlackboardNotes]
   );
 
   // ── Force full re-analysis (ignores any cached map) ─────────────────────────
@@ -576,6 +618,7 @@ export function useBookOrchestration() {
         await storage.saveSemanticMap(semanticMap).catch((e) =>
           console.error("[Storage] Failed to save semantic map:", e)
         );
+        await ensureBlackboardNotes(semanticMap, structure);
 
         setActiveSemanticMap(semanticMap);
 
@@ -711,6 +754,7 @@ export function useBookOrchestration() {
       setCurrentThemes,
       setIsGenerating,
       visualInterpretationLevel,
+      ensureBlackboardNotes,
     ]
   );
 
@@ -814,6 +858,7 @@ export function useBookOrchestration() {
           falApiKey: falKey ?? undefined,
           onComplete: async (img) => {
             addToCache(img);
+            await appendBlackboardImageNote(img, semanticBookId);
             if (shouldDisplay) {
               setCurrentImage(img);
               setCurrentThemes(img.emotionalThemes);
@@ -863,7 +908,7 @@ export function useBookOrchestration() {
         if (slotKey) store.releaseGenerationSlot();
       }
     },
-    [addToCache, enqueue, setCurrentImage, setCurrentThemes, setIsGenerating]
+    [addToCache, appendBlackboardImageNote, enqueue, setCurrentImage, setCurrentThemes, setIsGenerating]
   );
 
   // Opening image is prepared up front, but display still belongs to the

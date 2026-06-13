@@ -238,6 +238,38 @@ export interface SemanticMap {
   narrativeBlueprint?: NarrativeBlueprint;
 }
 
+// ─── Indexed Blackboard Artifacts ────────────────────────────────────────────
+
+export type BlackboardNoteKind =
+  | "scene"
+  | "lore"
+  | "image"
+  | "arc"
+  | "source"
+  | "study"
+  | "audio"
+  | "note";
+
+export interface BlackboardNote {
+  id: string;
+  bookId: string;
+  blackboardId: string;
+  kind: BlackboardNoteKind;
+  title: string;
+  body: string;
+  tags: string[];
+  sourceIds: string[];
+  chapterId?: string;
+  sceneId?: string;
+  visualSlotKey?: string;
+  startWord?: number;
+  endWord?: number;
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
 // ─── Visual Lore Grounding ──────────────────────────────────────────────────
 
 export interface VisualLoreEntity {

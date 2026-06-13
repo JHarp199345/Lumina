@@ -24,6 +24,7 @@ import { segmentScenesForSemanticMap, visualSlotKeyForScene } from "@/utils/scen
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 import { showReaderAndNavigate } from "@/utils/readerNavigation";
 import { activeVisualJobsForBook } from "@/services/visualGenerationJobs";
+import { buildBlackboardImageNote } from "@/services/blackboardNotes";
 import type { CachedImage, SemanticMap } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
@@ -220,6 +221,9 @@ export default function VisualPanel() {
           falApiKey: falKey ?? undefined,
           onComplete: async (img) => {
             addToCache(img);
+            await storage.saveBlackboardNotes([buildBlackboardImageNote(activeSemanticMap, img)]).catch((err) =>
+              console.warn("[Blackboard] Failed to save regenerated image note:", err)
+            );
             setCurrentImage(img);
             setCurrentThemes(img.emotionalThemes);
           },

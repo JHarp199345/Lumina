@@ -30,6 +30,7 @@ import type {
   PresentationDeck,
   ArchiveBook,
   LuminaNotification,
+  BlackboardNote,
 } from "@/types";
 import {
   openEpubDialog,
@@ -69,6 +70,9 @@ import {
   dbLoadSemanticMap,
   dbDeleteSemanticMap,
   dbDeleteSemanticMapsForBookPrefix,
+  dbSaveBlackboardNotes,
+  dbLoadBlackboardNotes,
+  dbDeleteBlackboardNotes,
   dbSaveSourceProfile,
   dbLoadSourceProfile,
   dbDeleteSourceProfile,
@@ -241,6 +245,20 @@ export class TauriStorageAdapter implements StorageAdapter {
 
   async deleteSemanticMap(bookId: string): Promise<void> {
     await dbDeleteSemanticMap(bookId);
+  }
+
+  // ── Indexed blackboard artifacts ────────────────────────────────────────
+
+  async saveBlackboardNotes(notes: BlackboardNote[]): Promise<void> {
+    await dbSaveBlackboardNotes(notes);
+  }
+
+  async loadBlackboardNotes(bookId: string): Promise<BlackboardNote[]> {
+    return dbLoadBlackboardNotes(bookId);
+  }
+
+  async deleteBlackboardNotes(bookId: string): Promise<void> {
+    await dbDeleteBlackboardNotes(bookId);
   }
 
   // ── Source Intelligence Profile ────────────────────────────────────────────

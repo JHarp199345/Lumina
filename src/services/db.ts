@@ -26,6 +26,7 @@ import type {
   PresentationDeck,
   ArchiveBook,
   LuminaNotification,
+  BlackboardNote,
 } from "@/types";
 
 let _db: Database | null = null;
@@ -131,6 +132,15 @@ async function initSchema(db: Database): Promise<void> {
       book_id TEXT PRIMARY KEY,
       profile_json TEXT NOT NULL,
       built_at TEXT NOT NULL
+    );
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS blackboard_notes (
+      id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      note_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
   `);
 
@@ -301,6 +311,7 @@ export async function dbDeleteBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM highlights WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM blackboard_notes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM source_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
@@ -572,6 +583,46 @@ export async function dbDeleteSemanticMap(bookId: string): Promise<void> {
 export async function dbDeleteSemanticMapsForBookPrefix(bookId: string): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, `${bookId}::%`]);
+}
+
+// ─── Indexed Blackboard Artifacts ─────────────────────────────────────────────
+
+export async function dbSaveBlackboardNotes(notes: BlackboardNote[]): Promise<void> {
+  const db = await getDb();
+  await Promise.all(
+    notes.map((note) =>
+      db.execute(
+        `INSERT OR REPLACE INTO blackboard_notes (id, book_id, note_json, updated_at)
+         VALUES ($1, $2, $3, $4)`,
+        [note.id, note.bookId, JSON.stringify(note), note.updatedAt]
+      )
+    )
+  );
+}
+
+export async function dbLoadBlackboardNotes(bookId: string): Promise<BlackboardNote[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT note_json FROM blackboard_notes WHERE book_id = $1 ORDER BY updated_at ASC`,
+    [bookId]
+  );
+  return rows.flatMap((row) => {
+    try {
+      return [JSON.parse(String(row.note_json)) as BlackboardNote];
+    } catch {
+      return [];
+    }
+  }).sort(
+    (a, b) =>
+      (a.startWord ?? 0) - (b.startWord ?? 0) ||
+      a.kind.localeCompare(b.kind) ||
+      a.id.localeCompare(b.id)
+  );
+}
+
+export async function dbDeleteBlackboardNotes(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM blackboard_notes WHERE book_id = $1`, [bookId]);
 }
 
 export async function dbLoadSemanticMap(bookId: string): Promise<SemanticMap | null> {
@@ -1070,19 +1121,22 @@ export async function dbDeleteCachedImage(imageId: string): Promise<void> {
 /** Delete all data rows for a book across every table. File cleanup is the caller's responsibility. */
 export async function dbDeleteAllBookData(bookId: string): Promise<void> {
   const db = await getDb();
+  const segmentPrefix = `${bookId}::%`;
   const queries = [
     [`DELETE FROM books WHERE id = $1`, [bookId]],
     [`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]],
     [`DELETE FROM highlights WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM semantic_maps WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM study_guides WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM study_quizzes WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM study_quiz_attempts WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM study_flashcards WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM image_cache WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM audio_cache WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM presentations WHERE book_id = $1`, [bookId]],
-    [`DELETE FROM book_settings WHERE book_id = $1`, [bookId]],
+    [`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM blackboard_notes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM source_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM study_quiz_attempts WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM study_flashcards WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM image_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM audio_cache WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM presentations WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM book_settings WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
   ] as [string, unknown[]][];
   for (const [sql, params] of queries) {
     await db.execute(sql, params).catch(() => {});

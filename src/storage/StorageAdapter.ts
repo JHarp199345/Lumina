@@ -31,6 +31,7 @@ import type {
   PresentationDeck,
   ArchiveBook,
   LuminaNotification,
+  BlackboardNote,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -100,6 +101,12 @@ export interface StorageAdapter {
   saveSemanticMap(map: SemanticMap): Promise<void>;
   loadSemanticMap(bookId: string): Promise<SemanticMap | null>;
   deleteSemanticMap(bookId: string): Promise<void>;
+
+  // ── Indexed blackboard artifacts ─────────────────────────────────────────
+
+  saveBlackboardNotes(notes: BlackboardNote[]): Promise<void>;
+  loadBlackboardNotes(bookId: string): Promise<BlackboardNote[]>;
+  deleteBlackboardNotes(bookId: string): Promise<void>;
 
   // ── Source Intelligence Profile (Audio Overview) ───────────────────────────
 
@@ -172,10 +179,9 @@ export interface StorageAdapter {
   /** Move generated artifacts to the archive and remove the book from the library. */
   archiveAndRemoveBook(book: Book): Promise<void>;
   /**
-   * Re-Ingest: snapshot the current generation into the archive (counts), then clear
-   * the active generated artifacts (images, audio, semantic map, source profile) so a
-   * fresh ingestion can re-lay the groundwork. The book stays in the library, and user
-   * data (highlights, notes, progress, the EPUB, study guide) is untouched.
+   * Re-Ingest: snapshot current generated artifact counts into the archive, then let
+   * the new ingestion supersede active analysis by key. Existing expensive artifacts
+   * are not silently deleted; explicit purge/delete actions own destructive cleanup.
    */
   archiveAndResetGeneration(book: Book): Promise<void>;
   loadArchiveBooks(): Promise<ArchiveBook[]>;

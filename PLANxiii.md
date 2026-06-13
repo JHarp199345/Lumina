@@ -245,14 +245,201 @@ If time allows, persist or expose an inspectable arc summary string somewhere in
 diagnostics. Do **not** add new storage tables in this stage unless necessary.
 Stage 3 will handle real persistent artifact files.
 
-### Stage 3 — Agent artifact workspace (DESIGNED)
+### Stage 3 — Persistent blackboard artifact workspace (DESIGNED)
 
-Give each pipeline run a real working directory on the Odysseus side
-(`data/artifacts/{run_id}/arc.md`, `lore.md`, `scenes.json`) that agents read and
-write across steps, instead of passing everything through prompt context. This is
-the "file system for the AI": the arc becomes an inspectable, resumable document
-the agent constructs piece by piece. Generalizes the parallel runner's existing
-in-memory "packets" into persistent, richer artifacts.
+Give each pipeline run a real working directory on the Odysseus side that agents
+read and write across steps, instead of forcing every intermediate thought
+through prompt context.
+
+This is the "file system for the AI": the book analysis becomes a set of
+inspectable, resumable documents the agents construct piece by piece.
+
+Possible layout:
+
+```text
+data/artifacts/{book_id or run_id}/
+  manifest.json
+  source/
+    chapter-0001.md
+    chapter-0002.md
+  packets/
+    reading-0001.json
+    reading-0002.json
+    reading-0003.json
+  blackboard.md
+  canonical/
+    semantic-map.json
+    arc.md
+    source-profile.md
+    visual-lore.md
+    visual-scenes.json
+  diagnostics/
+    contradictions.md
+    confidence.json
+    timing.json
+```
+
+The `.md`/`.json` files are not the live model context. They are durable shared
+blackboard artifacts. When an agent needs one, Odysseus loads the relevant file
+or excerpt into that request's context. The speed win is not mainly SSD vs RAM;
+the win is that each worker reads only what it needs and writes compact,
+structured findings instead of every worker trying to carry the whole book.
+
+#### Target methodology
+
+The goal is to discover a repeatable technique for Lumina's AI workflows:
+
+- as fast as possible on local hardware
+- not lossy in the wrong places
+- inspectable after every major step
+- resumable after interruption
+- resistant to cross-book contamination
+- quality-preserving for image generation
+- cheap where possible, deeper where it matters
+
+This is not only about the emotional arc. The same pattern should eventually
+govern semantic analysis, visual lore, source profiles, study guides, audio
+overviews, visual direction, and image generation.
+
+#### Worker model
+
+Prefer a small number of active reading workers over a swarm:
+
+1. **Reader workers**
+   - 2-3 active workers by default on local hardware.
+   - Each reads a distinct source slice.
+   - Each writes a structured packet to disk.
+   - Workers do not try to hold the whole book.
+
+2. **Shared blackboard**
+   - Packets are appended or saved to the book/run artifact directory.
+   - The blackboard records:
+     - source range
+     - chapter IDs
+     - word ranges
+     - key events
+     - emotional movement
+     - entities
+     - motifs
+     - visual implications
+     - confidence
+     - unresolved questions
+     - contradictions
+
+3. **Cleanup / merge reader**
+   - One reader loads the packets, not the whole raw book.
+   - It deduplicates, reconciles contradictions, normalizes confidence, and
+     writes the canonical artifact.
+   - This worker is the "one remains and cleans it up" step.
+
+4. **Downstream workers**
+   - Visual lore, visual direction, quizzes, audio overviews, presentation
+     generation, etc. read canonical artifacts first.
+   - They only go back to raw source text when the artifact is thin,
+     contradictory, or not specific enough.
+
+#### Why this may outperform raw parallelism
+
+Five reading jobs against one local Gemma 12B backend can become congestion, not
+speed. They may queue for the same compute and split attention into isolated
+contexts. A smaller number of workers writing durable packets should be more
+effective:
+
+- less context duplication
+- fewer live jobs fighting for local compute
+- better traceability
+- easier recovery after failure
+- fewer seams between batches
+- less repeated summarization
+- higher quality downstream prompts
+
+The correct optimization target is not "maximum visible workers." It is
+"maximum useful information per local generation minute."
+
+#### Non-lossy packet design
+
+Packets should be compact but not vague. Avoid lossy summaries like:
+
+> "The chapter gets darker and introduces conflict."
+
+Prefer structured observations:
+
+```json
+{
+  "source": {
+    "bookId": "...",
+    "chapterId": "...",
+    "startWord": 12040,
+    "endWord": 15320
+  },
+  "events": [
+    {
+      "label": "oath made under threat",
+      "cause": "the protagonist is forced into public submission",
+      "effect": "private resolve hardens",
+      "visualImplication": "small figure under institutional scale"
+    }
+  ],
+  "entities": ["protagonist", "regent", "citadel gate"],
+  "emotionalMovement": {
+    "entry": "dread",
+    "exit": "controlled defiance",
+    "scoreStart": -0.45,
+    "scoreEnd": 0.05
+  },
+  "confidence": 0.78,
+  "questions": ["Is the regent a recurring antagonist or only local authority?"]
+}
+```
+
+The packet is compact enough to merge, but detailed enough to preserve image
+quality and causation.
+
+#### Artifact durability
+
+These artifacts are expensive. They must not be deleted by:
+
+- app updates
+- refreshes
+- browser restarts
+- visual plan version bumps
+- normal book open/reopen
+
+They may be deleted only by explicit reader action:
+
+- delete book
+- purge archive
+- delete artifact category
+- regenerate images
+- future explicit "delete analysis artifacts" action
+
+If a newer build can improve an old artifact, it should enrich/migrate it rather
+than assume it is worthless.
+
+#### Open implementation questions
+
+- Should Odysseus expose a native artifact workspace API, or should Lumina write
+  these artifacts into its own storage first?
+- What is the best default local concurrency for reading workers on a 64 GB RAM
+  machine: 2 or 3?
+- Should worker packets be JSON only, Markdown only, or both?
+- How should artifacts be versioned so old analysis can be improved instead of
+  discarded?
+- How much raw source text should the cleanup reader be allowed to request when
+  packets conflict?
+- Which artifacts should be canonical first: arc, semantic map, source profile,
+  or visual lore?
+
+#### Acceptance direction
+
+This stage is successful when a whole-book analysis can:
+
+- pause/resume without starting over
+- show its intermediate artifacts
+- run with fewer active local workers
+- produce equal or better image plans
+- avoid hidden deletion of older AI work
+- explain why a scene/image/quiz/audio overview was generated the way it was
 
 ## Principles
 

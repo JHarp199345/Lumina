@@ -32,6 +32,7 @@ import type {
   PresentationDeck,
   ArchiveBook,
   LuminaNotification,
+  BlackboardNote,
 } from "@/types";
 import {
   STORES,
@@ -276,6 +277,26 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async deleteSemanticMap(bookId: string): Promise<void> {
     await dbDelete(STORES.SEMANTIC_MAPS, bookId);
+  }
+
+  // ── Indexed blackboard artifacts ────────────────────────────────────────
+
+  async saveBlackboardNotes(notes: BlackboardNote[]): Promise<void> {
+    await Promise.all(notes.map((note) => dbPut(STORES.BLACKBOARD_NOTES, note)));
+  }
+
+  async loadBlackboardNotes(bookId: string): Promise<BlackboardNote[]> {
+    const notes = await dbGetByIndex<BlackboardNote>(STORES.BLACKBOARD_NOTES, "bookId", bookId);
+    return notes.sort(
+      (a, b) =>
+        (a.startWord ?? 0) - (b.startWord ?? 0) ||
+        a.kind.localeCompare(b.kind) ||
+        a.id.localeCompare(b.id)
+    );
+  }
+
+  async deleteBlackboardNotes(bookId: string): Promise<void> {
+    await dbDeleteByIndex(STORES.BLACKBOARD_NOTES, "bookId", bookId);
   }
 
   // ── Source Intelligence Profile ────────────────────────────────────────────
@@ -584,6 +605,12 @@ export class WebStorageAdapter implements StorageAdapter {
         .filter((profile) => matchesBookScope(profile.bookId, bookId))
         .map((profile) => dbDelete(STORES.SOURCE_PROFILES, profile.bookId))
     );
+    const blackboardNotes = await dbGetAll<BlackboardNote>(STORES.BLACKBOARD_NOTES);
+    await Promise.all(
+      blackboardNotes
+        .filter((note) => matchesBookScope(note.bookId, bookId))
+        .map((note) => dbDelete(STORES.BLACKBOARD_NOTES, note.id))
+    );
 
     await Promise.allSettled([
       dbDelete(STORES.BOOKS, bookId),
@@ -619,6 +646,7 @@ export class WebStorageAdapter implements StorageAdapter {
     await Promise.allSettled([
       dbDeleteByIndex(STORES.HIGHLIGHTS, "bookId", bookId),
       dbDeleteByIndex(STORES.NOTES, "bookId", bookId),
+      dbDeleteByIndex(STORES.BLACKBOARD_NOTES, "bookId", bookId),
       dbDeleteByIndex(STORES.STUDY_BADGES, "bookId", bookId),
       this.deletePresentations(bookId),
       this.deleteAudioArtifacts(bookId),
@@ -705,6 +733,12 @@ export class WebStorageAdapter implements StorageAdapter {
       profiles
         .filter((profile) => matchesBookScope(profile.bookId, bookId))
         .map((profile) => dbDelete(STORES.SOURCE_PROFILES, profile.bookId))
+    );
+    const blackboardNotes = await dbGetAll<BlackboardNote>(STORES.BLACKBOARD_NOTES);
+    await Promise.all(
+      blackboardNotes
+        .filter((note) => matchesBookScope(note.bookId, bookId))
+        .map((note) => dbDelete(STORES.BLACKBOARD_NOTES, note.id))
     );
     await Promise.allSettled([
       dbDelete(STORES.BOOKS, bookId),
