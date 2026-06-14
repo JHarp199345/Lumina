@@ -166,6 +166,8 @@ export interface StorageAdapter {
    */
   loadImagesForPrefix(bookId: string): Promise<CachedImage[]>;
 
+  deleteImage(imageId: string, sceneId?: string): Promise<void>;
+
   deleteImages(bookId: string): Promise<void>;
 
   // ── API keys ──────────────────────────────────────────────────────────────

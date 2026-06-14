@@ -54,6 +54,8 @@ export interface SlotGenerationRequest {
   bookId: string;
   /** User explicitly requested this slot (gallery) — clears competing queue entries. */
   force?: boolean;
+  /** Replace the existing image for this visual slot, without touching any other slot. */
+  replaceExisting?: boolean;
   onComplete?: (image: CachedImage) => void;
 }
 
@@ -95,21 +97,29 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
   const store = useImageStore.getState();
   const mapScenes = segmentScenesForSemanticMap(activeSemanticMap.scenes, chapters, activeSemanticMap);
 
-  const cached = store.getCachedImageForSlot(slotKey);
-  if (cached) return { ok: false, reason: "cached" };
-
-  const persisted = await storage.loadImages(req.bookId).catch(() => [] as CachedImage[]);
-  const persistedHit = findImageForVisualSlot(slotKey, persisted, mapScenes, chapters);
-  if (persistedHit) {
-    store.addToCache(persistedHit);
-    return { ok: false, reason: "cached" };
-  }
-
   const existingJob = activeVisualJobForSlot(req.bookId, slotKey);
   if (existingJob) {
     store.setActiveVisualJob(existingJob);
     store.setVisualPlanningNotice(`${existingJob.label} is already being composed. Progress has been restored.`);
     return { ok: false, reason: "busy" };
+  }
+
+  const cached = store.getCachedImageForSlot(slotKey);
+  if (cached && !req.replaceExisting) return { ok: false, reason: "cached" };
+
+  const persisted = await storage.loadImages(req.bookId).catch(() => [] as CachedImage[]);
+  const persistedHit = findImageForVisualSlot(slotKey, persisted, mapScenes, chapters);
+  if (persistedHit && !req.replaceExisting) {
+    store.addToCache(persistedHit);
+    return { ok: false, reason: "cached" };
+  }
+
+  if (req.replaceExisting) {
+    const obsolete = [cached, persistedHit].filter((image): image is CachedImage => Boolean(image));
+    await Promise.all(
+      obsolete.map((image) => storage.deleteImage(image.id, image.sceneId).catch(() => {}))
+    );
+    store.removeCachedImagesForSlot(slotKey);
   }
 
   if (req.force) {
@@ -119,7 +129,7 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
     return { ok: false, reason: "busy" };
   }
 
-  if (!store.claimGenerationSlot(slotKey)) {
+  if (!store.claimGenerationSlot(slotKey, req.replaceExisting)) {
     store.setVisualPlanningNotice("Another visual is already being composed. Let it finish before starting another.");
     return { ok: false, reason: "busy" };
   }
@@ -164,6 +174,7 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
       falApiKey: falKey ?? undefined,
       bookStructure: activeStructure ?? undefined,
       bookProfile: activeSemanticMap.bookProfile ?? null,
+      forceCompositionRefresh: req.replaceExisting,
     });
 
     if (image.visualSlotKey !== slotKey) {

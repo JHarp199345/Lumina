@@ -395,6 +395,10 @@ export class TauriStorageAdapter implements StorageAdapter {
     return dbLoadImageCacheForBookPrefix(bookId);
   }
 
+  async deleteImage(imageId: string, _sceneId?: string): Promise<void> {
+    await dbDeleteCachedImage(imageId);
+  }
+
   async deleteImages(bookId: string): Promise<void> {
     await dbDeleteImageCache(bookId);
     // Best-effort file cleanup

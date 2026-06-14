@@ -84,7 +84,7 @@ interface GalleryFocalViewProps {
   /** Navigate the reader to a passage and CLOSE the gallery (go read it). */
   onVisitPassage: (sceneId: string) => void;
   /** Generate the image for a planned scene. */
-  onGenerateScene: (sceneId: string) => Promise<void>;
+  onGenerateScene: (sceneId: string, options?: { replaceExisting?: boolean }) => Promise<void>;
   onAnalyze: () => void;
   onRegenerateAll: () => void | Promise<void>;
   onClose: () => void;
@@ -147,12 +147,12 @@ export default function GalleryFocalView({
 
   const clamp = (i: number) => Math.max(0, Math.min(items.length - 1, i));
 
-  const runGenerate = async (sceneId: string) => {
+  const runGenerate = async (sceneId: string, options: { replaceExisting?: boolean } = {}) => {
     if (generatingId) return;
     setGenerateError(null);
     setGeneratingId(sceneId);
     try {
-      await onGenerateScene(sceneId);
+      await onGenerateScene(sceneId, options);
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : "Image generation failed");
     } finally {
@@ -241,11 +241,11 @@ export default function GalleryFocalView({
     await storage.saveSemanticMap(nextMap).catch(() => {});
   };
 
-  const saveReaderDirection = () => {
+  const saveReaderDirection = async () => {
     if (!currentBrief) return;
     const trimmed = readerDirection.trim();
     const withoutPrevious = currentBrief.weightedDirections.filter((item) => item.id !== "reader_override_direction");
-    void updateCurrentBrief({
+    await updateCurrentBrief({
       readerDirection,
       weightedDirections: trimmed
         ? [
@@ -260,6 +260,12 @@ export default function GalleryFocalView({
           ]
         : withoutPrevious,
     });
+  };
+
+  const regenerateCurrentImage = async () => {
+    if (!current || generatingId) return;
+    await saveReaderDirection();
+    await runGenerate(current.scene.id, { replaceExisting: Boolean(current.image) });
   };
 
   const addReferenceImages = async (files: FileList | null) => {
@@ -426,7 +432,7 @@ export default function GalleryFocalView({
       {/* Top bar */}
       <div className="relative flex items-center justify-between px-5 py-3" onClick={(e) => e.stopPropagation()}>
         <p className="text-[11px] uppercase tracking-[0.22em] text-white/35">
-          {index + 1} / {items.length}
+          {items.length ? index + 1 : 0} / {items.length}
         </p>
         <div className="flex items-center gap-2">
           <div className="mr-1 flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.025] p-1 md:hidden">
@@ -826,6 +832,30 @@ export default function GalleryFocalView({
                           <p className="mt-2 text-[11px] leading-relaxed text-rose-300/80">{referenceError}</p>
                         )}
                       </div>
+                      <button
+                        onClick={() => void regenerateCurrentImage()}
+                        disabled={currentGenerating || analyzingReferences}
+                        className="group relative flex min-h-12 w-full items-center justify-center overflow-hidden rounded-xl border border-lumina-gold/35 bg-lumina-gold/[0.075] px-4 text-[11px] font-semibold uppercase tracking-[0.17em] text-lumina-gold/88 shadow-[0_12px_36px_rgba(0,0,0,0.28)] transition-colors hover:border-lumina-gold/55 hover:bg-lumina-gold/[0.12] disabled:cursor-default disabled:opacity-55"
+                      >
+                        <span className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-r from-white/[0.035] via-white/[0.09] to-white/[0.035] opacity-75" />
+                        <span className="relative flex items-center gap-2">
+                          {currentGenerating ? (
+                            <Loader size={14} className="animate-spin" />
+                          ) : current.image ? (
+                            <RefreshCw size={14} />
+                          ) : (
+                            <Sparkles size={14} />
+                          )}
+                          {currentGenerating
+                            ? "Composing..."
+                            : current.image
+                              ? "Regenerate this image"
+                              : "Generate image"}
+                        </span>
+                      </button>
+                      <p className="-mt-1 text-center text-[10px] leading-relaxed text-white/30">
+                        Only this visual slot is replaced. The rest of the book stays intact.
+                      </p>
                     </div>
                   )}
                 </div>

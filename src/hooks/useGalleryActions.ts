@@ -42,7 +42,7 @@ export function useGalleryActions() {
     ui.closeGallery();
   }, []);
 
-  const generateForScene = useCallback(async (sceneId: string) => {
+  const generateForScene = useCallback(async (sceneId: string, options: { replaceExisting?: boolean } = {}) => {
     const { activeBook, activeSemanticMap, activeStructure, activeStyleSeed, setActiveSemanticMap } =
       useBookStore.getState();
     if (!activeBook || !activeSemanticMap || !activeStructure) return;
@@ -103,6 +103,7 @@ export function useGalleryActions() {
             scene,
             bookId: mapForGeneration.bookId,
             force: true,
+            replaceExisting: options.replaceExisting,
           }),
         (outcome) => ({
           metrics: {

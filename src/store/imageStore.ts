@@ -38,6 +38,7 @@ interface ImageStore {
   getCachedImage: (sceneId: string) => CachedImage | undefined;
   getCachedImageForSlot: (slotKey: string) => CachedImage | undefined;
   getCachedImageAtPosition: (position: number, chapters: Chapter[]) => CachedImage | undefined;
+  removeCachedImagesForSlot: (slotKey: string) => void;
 
   /** Returns false if another slot is generating or this slot already has an image. */
   claimGenerationSlot: (slotKey: string, allowReplace?: boolean) => boolean;
@@ -145,6 +146,23 @@ export const useImageStore = create<ImageStore>()((set, get) => ({
       undefined,
       LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE
     ),
+
+  removeCachedImagesForSlot: (slotKey) =>
+    set((state) => {
+      const next: Record<string, CachedImage> = {};
+      let removedCurrent = false;
+      for (const [key, image] of Object.entries(state.imageCache)) {
+        if (image.visualSlotKey === slotKey) {
+          removedCurrent ||= state.currentImage?.id === image.id;
+          continue;
+        }
+        next[key] = image;
+      }
+      return {
+        imageCache: next,
+        ...(removedCurrent ? { currentImage: null, currentThemes: [] } : {}),
+      };
+    }),
 
   claimGenerationSlot: (slotKey, allowReplace = false) => {
     const state = get();

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, RefreshCw, Loader, MapPin, X, LayoutGrid, CornerUpLeft, Check, AlertTriangle, PanelBottom } from "lucide-react";
+import { Sparkles, RefreshCw, Loader, MapPin, LayoutGrid, CornerUpLeft, Check, AlertTriangle } from "lucide-react";
 import { useImageStore } from "@/store/imageStore";
 import { useBookStore } from "@/store/bookStore";
 import { useReaderStore } from "@/store/readerStore";
@@ -19,13 +19,12 @@ import AmbientSceneLayer, { type AmbientPhase } from "@/components/visual/Ambien
 import { useAnalysisOutcome } from "@/hooks/useAnalysisOutcome";
 import { useUiStore } from "@/store/uiStore";
 import { computeSceneWordPosition, getCurrentPlannedScene } from "@/utils/scenePosition";
-import { getImageForScene } from "@/utils/imagePosition";
 import { segmentScenesForSemanticMap, visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 import { showReaderAndNavigate } from "@/utils/readerNavigation";
 import { activeVisualJobsForBook } from "@/services/visualGenerationJobs";
 import { buildBlackboardImageNote } from "@/services/blackboardNotes";
-import type { CachedImage, SemanticMap } from "@/types";
+import type { SemanticMap } from "@/types";
 
 // ─── Waiting phase resolver ───────────────────────────────────────────────────
 // Determines the precise ambient state when no image is being displayed.
@@ -68,7 +67,6 @@ export default function VisualPanel() {
   const {
     currentImage,
     currentThemes,
-    imageCache,
     isGenerating,
     queue,
     clearQueue,
@@ -95,8 +93,7 @@ export default function VisualPanel() {
   const wordPosition = useReaderStore((s) => s.wordPosition);
   const { isTablet } = useDeviceLayout();
   const [showRegenerate, setShowRegenerate] = useState(false);
-  const { openGallery, showPlanStrip, setShowPlanStrip, togglePlanStrip, returnCfi, setReturnCfi } =
-    useUiStore();
+  const { openGallery, returnCfi, setReturnCfi } = useUiStore();
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
   const { generateForScene } = useGalleryActions();
@@ -140,12 +137,6 @@ export default function VisualPanel() {
     },
     [openGallery, currentImage?.sceneId, currentPlannedScene?.id]
   );
-
-  useEffect(() => {
-    if (analysisOutcome?.kind === "done" && !showPlanStrip) {
-      setShowPlanStrip(true);
-    }
-  }, [analysisOutcome?.kind, setShowPlanStrip, showPlanStrip]);
 
   useEffect(() => {
     if (!activeSemanticMap?.bookId) {
@@ -278,27 +269,14 @@ export default function VisualPanel() {
         </span>
         <div className="flex-1" />
         {activeBook && (
-          <>
-            <button
-              onClick={togglePlanStrip}
-              className={`flex min-h-[28px] min-w-[28px] items-center justify-center rounded transition-colors ${
-                showPlanStrip ? "text-lumina-gold" : "text-ink-faint hover:text-ink-soft"
-              }`}
-              title="Visual plan strip"
-              aria-label="Toggle visual plan strip"
-              aria-pressed={showPlanStrip}
-            >
-              <PanelBottom size={14} />
-            </button>
-            <button
-              onClick={() => handleOpenGallery()}
-              className="flex min-h-[28px] min-w-[28px] items-center justify-center rounded text-ink-faint transition-colors hover:text-ink-soft"
-              title="Open gallery"
-              aria-label="Open gallery"
-            >
-              <LayoutGrid size={14} />
-            </button>
-          </>
+          <button
+            onClick={() => handleOpenGallery()}
+            className="flex min-h-[28px] min-w-[28px] items-center justify-center rounded text-ink-faint transition-colors hover:text-ink-soft"
+            title="Open gallery"
+            aria-label="Open gallery"
+          >
+            <LayoutGrid size={14} />
+          </button>
         )}
       </div>
 
@@ -457,19 +435,6 @@ export default function VisualPanel() {
             Return
           </button>
         )}
-
-        {/* Solo plan filmstrip — dismissible overlay, not a separate page */}
-        <AnimatePresence>
-          {showPlanStrip && activeSemanticMap && (
-            <VisualPlanFilmstrip
-              activeSemanticMap={activeSemanticMap}
-              imageCache={imageCache}
-              currentSceneId={currentImage?.sceneId}
-              onSelectScene={(sceneId) => handleOpenGallery(sceneId)}
-              onDismiss={() => setShowPlanStrip(false)}
-            />
-          )}
-        </AnimatePresence>
 
         {/* Regenerating overlay */}
         <AnimatePresence>
@@ -684,96 +649,6 @@ function ImageDisplay({
         </AnimatePresence>
       </motion.div>
     </AnimatePresence>
-  );
-}
-
-function getDisplayImageSrc(src: string): string {
-  const isDisplayUrl =
-    src.startsWith("blob:") ||
-    src.startsWith("data:") ||
-    src.startsWith("asset:") ||
-    src.startsWith("http:") ||
-    src.startsWith("https:");
-  return isTauri && !isDisplayUrl ? toAssetUrl(src) : src;
-}
-
-/** Dismissible solo filmstrip — informational overlay on the visual panel, not a page. */
-function VisualPlanFilmstrip({
-  activeSemanticMap,
-  imageCache,
-  currentSceneId,
-  onSelectScene,
-  onDismiss,
-}: {
-  activeSemanticMap: SemanticMap;
-  imageCache: Record<string, CachedImage>;
-  currentSceneId?: string;
-  onSelectScene: (sceneId: string) => void;
-  onDismiss: () => void;
-}) {
-  const chapters = useBookStore((state) => state.activeStructure?.chapters ?? EMPTY_CHAPTERS);
-  const allScenes = activeSemanticMap.scenes;
-  const scenes = segmentScenesForSemanticMap(allScenes, chapters, activeSemanticMap);
-  const cached = Object.values(imageCache);
-  const generatedCount = scenes.filter((scene) =>
-    getImageForScene(scene, cached, chapters, allScenes)
-  ).length;
-
-  if (scenes.length === 0) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 10 }}
-      transition={{ duration: 0.18 }}
-      className="absolute inset-x-0 bottom-0 z-20 border-t border-white/12 bg-[#06111d]/90 px-3 py-2.5 shadow-[0_-12px_40px_rgba(0,0,0,0.45)] backdrop-blur-xl"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-[10px] uppercase tracking-[0.18em] text-white/42">
-          {generatedCount} generated · {scenes.length - generatedCount} planned — tap to open gallery
-        </p>
-        <button
-          onClick={onDismiss}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white/75"
-          aria-label="Dismiss visual plan strip"
-        >
-          <X size={14} />
-        </button>
-      </div>
-      <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-thin">
-        {scenes.map((scene) => {
-          const image = getImageForScene(scene, cached, chapters, allScenes);
-          const selected = scene.id === currentSceneId;
-          return (
-            <button
-              key={scene.id}
-              onClick={() => onSelectScene(scene.id)}
-              className={`relative h-14 w-20 flex-shrink-0 overflow-hidden rounded-[2px] transition-all ${
-                selected
-                  ? "ring-2 ring-lumina-gold/70 opacity-100"
-                  : "opacity-55 ring-1 ring-white/10 hover:opacity-90"
-              }`}
-              aria-label={image ? "Open generated image in gallery" : "Open planned slot in gallery"}
-            >
-              {image ? (
-                <img
-                  src={getDisplayImageSrc(image.filePath)}
-                  alt=""
-                  className="h-full w-full object-cover"
-                  draggable={false}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-[#100e0b]">
-                  <Sparkles size={13} className="text-lumina-gold/35" />
-                </div>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </motion.div>
   );
 }
 

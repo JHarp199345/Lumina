@@ -469,6 +469,15 @@ export class WebStorageAdapter implements StorageAdapter {
     return this._resolveImageUrls(matched);
   }
 
+  async deleteImage(imageId: string, sceneId?: string): Promise<void> {
+    const meta = await dbGet<CachedImage>(STORES.IMAGE_META, imageId);
+    if (!meta) return;
+    await dbDelete(STORES.IMAGE_META, imageId);
+    await dbDelete(STORES.IMAGE_BLOBS, imageBlobKey(meta.id)).catch(() => {});
+    await dbDelete(STORES.IMAGE_BLOBS, scopedSceneBlobKey(meta.bookId, meta.sceneId)).catch(() => {});
+    if (sceneId) await dbDelete(STORES.IMAGE_BLOBS, sceneId).catch(() => {});
+  }
+
   async deleteImages(bookId: string): Promise<void> {
     const metas = await dbGetAll<CachedImage>(STORES.IMAGE_META);
     const toDelete = metas.filter(
