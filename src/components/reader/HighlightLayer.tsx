@@ -206,6 +206,8 @@ export default function HighlightLayer() {
         wordPosition: computeSceneWordPosition(directedScene, activeStructure.chapters),
         googleApiKey: googleKey ?? "",
         falApiKey: falKey ?? undefined,
+        bookStructure: activeStructure,
+        bookProfile: nextMap.bookProfile ?? activeSemanticMap.bookProfile ?? null,
       });
       addToCache(image);
       setCurrentImage(image);

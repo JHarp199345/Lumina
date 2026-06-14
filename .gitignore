@@ -36,3 +36,6 @@ lumina-keys.json
 *.njsproj
 *.sln
 *.sw?
+
+# Local MCP server config — contains the SonarCloud token, never commit
+.mcp.json

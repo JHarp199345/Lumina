@@ -219,6 +219,9 @@ export default function VisualPanel() {
           visualSlotKey: slotKey ?? undefined,
           googleApiKey: googleKey ?? "",
           falApiKey: falKey ?? undefined,
+          bookStructure: useBookStore.getState().activeStructure ?? undefined,
+          bookProfile: activeSemanticMap.bookProfile ?? null,
+          forceCompositionRefresh: true,
           onComplete: async (img) => {
             addToCache(img);
             await storage.saveBlackboardNotes([buildBlackboardImageNote(activeSemanticMap, img)]).catch((err) =>

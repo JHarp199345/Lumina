@@ -64,7 +64,7 @@ export type SlotGenerationResult =
 export async function generateForVisualSlot(req: SlotGenerationRequest): Promise<SlotGenerationResult> {
   reconcileStaleGeneration();
 
-  const { activeSemanticMap, activeStyleSeed } = useBookStore.getState();
+  const { activeSemanticMap, activeStyleSeed, activeStructure } = useBookStore.getState();
   if (!activeSemanticMap || !activeStyleSeed) {
     return { ok: false, reason: "error", error: "No active book analysis" };
   }
@@ -88,7 +88,7 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
     return { ok: false, reason: "error", error: "This scene does not belong to the active book." };
   }
 
-  const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
+  const chapters = activeStructure?.chapters ?? EMPTY_CHAPTERS;
   const slotKey = visualSlotKeyForScene(req.scene, chapters);
   if (!slotKey) return { ok: false, reason: "no_slot" };
 
@@ -150,9 +150,9 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
 
   try {
     updateVisualJob(job.id, {
-      phase: "generating",
-      message: "Sending this visual moment to the image engine...",
-      percent: 45,
+      phase: "planning",
+      message: "Grounding this visual moment in the book profile...",
+      percent: 32,
     });
     const image = await generateImage({
       scene: req.scene,
@@ -162,6 +162,8 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
       visualSlotKey: slotKey,
       googleApiKey: googleKey ?? "",
       falApiKey: falKey ?? undefined,
+      bookStructure: activeStructure ?? undefined,
+      bookProfile: activeSemanticMap.bookProfile ?? null,
     });
 
     if (image.visualSlotKey !== slotKey) {

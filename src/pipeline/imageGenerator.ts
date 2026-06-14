@@ -8,12 +8,18 @@
  * Style continuity maintained via prior palette context.
  */
 
-import type { IdentifiedScene, StyleSeed, CachedImage } from "@/types";
+import type { BlackboardNote, BookProfile, BookStructure, IdentifiedScene, StyleSeed, CachedImage, VisualCompositionArtifact } from "@/types";
 import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
 import { buildFinalImagePrompt, buildComfyUIPrompt, buildIterativePassPlan, buildNegativePrompt } from "./visualDirector";
-import { getProvider, getOdysseusUrl, getOdysseusToken } from "@/api/llmClient";
+import { getProvider, getOdysseusUrl, getOdysseusToken, llmGenerate } from "@/api/llmClient";
 import { buildReaderVisualDirectionPrompt, buildReaderVisualDirectionTags } from "@/utils/visualDirectionPrompt";
+import {
+  buildCompositionPrompt,
+  getPassageForScene,
+  makeCompositionArtifact,
+  selectBookProfileItems,
+} from "@/utils/bookProfile";
 
 const IMAGEN_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const FAL_BASE = "https://queue.fal.run";
@@ -80,6 +86,9 @@ export interface GenerateImageOptions {
   googleApiKey: string;
   falApiKey?: string;
   priorPaletteContext?: string; // from previous generations in this book
+  bookStructure?: BookStructure;
+  bookProfile?: BookProfile | null;
+  forceCompositionRefresh?: boolean;
   onComplete?: (image: CachedImage) => void;
 }
 
@@ -89,7 +98,14 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
 
   // Build the full prompt
   const isExpository = Boolean(scene.expositoryBeat);
-  const prompt = buildImagePrompt(scene, styleSeed, priorPaletteContext);
+  const compositionArtifact =
+    getProvider() === "odysseus"
+      ? await ensureSceneComposition(options).catch((err) => {
+          console.warn("[ImageGen] Composition planning failed; falling back to director prompt:", err);
+          return null;
+        })
+      : null;
+  const prompt = compositionArtifact?.composition || buildImagePrompt(scene, styleSeed, priorPaletteContext);
   const negativePrompt =
     scene.directorBrief?.negativePrompt ??
     (isExpository ? EXPOSITORY_NEGATIVE_PROMPT : NEGATIVE_PROMPT);
@@ -148,6 +164,8 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
     wordPosition,
     visualSlotKey,
     descriptionUsed: prompt,
+    visualCompositionId: compositionArtifact?.id,
+    visualComposition: compositionArtifact?.composition,
     styleSeed: styleSeed.id,
     generatedAt: new Date().toISOString(),
     generationApi: apiUsed,
@@ -166,6 +184,172 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
 
   options.onComplete?.(cachedImage);
   return cachedImage;
+}
+
+async function ensureSceneComposition(options: GenerateImageOptions): Promise<VisualCompositionArtifact | null> {
+  const { scene, styleSeed, bookId, visualSlotKey, bookStructure, bookProfile, forceCompositionRefresh } = options;
+  if (!bookStructure || scene.expositoryBeat) return null;
+
+  if (!forceCompositionRefresh && scene.visualComposition?.status === "ready") {
+    return scene.visualComposition;
+  }
+
+  const existing = !forceCompositionRefresh
+    ? await loadSavedComposition(bookId, scene.id, visualSlotKey)
+    : null;
+  if (existing) return existing;
+
+  const profile = bookProfile ?? null;
+  const passage = getPassageForScene(scene, bookStructure, profile);
+  if (!passage.text.trim()) return null;
+
+  const selectedItems = selectBookProfileItems({
+    profile,
+    scene,
+    passage,
+    limit: 10,
+  });
+  const prompt = buildCompositionPrompt({
+    scene,
+    styleSeed,
+    passage,
+    profileItems: selectedItems,
+  });
+
+  try {
+    const raw = await llmGenerate("reading", prompt, {
+      temperature: 0.42,
+      maxTokens: 1100,
+      think: false,
+    });
+    const composition = normalizeComposition(raw);
+    if (composition.length < 160) {
+      throw new Error("Composition response was too short to guide image generation.");
+    }
+    const artifact = await makeCompositionArtifact({
+      bookId,
+      scene,
+      visualSlotKey,
+      passage,
+      composition,
+      sourceItemIds: selectedItems.map((item) => item.id),
+      provider: "odysseus",
+      status: "ready",
+    });
+    await saveCompositionArtifact(artifact);
+    return artifact;
+  } catch (err) {
+    const failed = await makeCompositionArtifact({
+      bookId,
+      scene,
+      visualSlotKey,
+      passage,
+      composition: "",
+      sourceItemIds: selectedItems.map((item) => item.id),
+      provider: "odysseus",
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    await saveCompositionArtifact(failed).catch(() => {});
+    throw err;
+  }
+}
+
+async function loadSavedComposition(
+  bookId: string,
+  sceneId: string,
+  visualSlotKey?: string
+): Promise<VisualCompositionArtifact | null> {
+  const notes = await storage.loadBlackboardNotes(bookId).catch(() => [] as BlackboardNote[]);
+  const note = notes
+    .filter((candidate) => candidate.kind === "image")
+    .find((candidate) => {
+      const tags = new Set(candidate.tags.map((tag) => tag.toLowerCase()));
+      if (!tags.has("visual-composition")) return false;
+      if (!tags.has("ready")) return false;
+      if (candidate.sceneId !== sceneId) return false;
+      return !visualSlotKey || candidate.visualSlotKey === visualSlotKey;
+    });
+  if (!note?.body.trim()) return null;
+  return {
+    id: note.id,
+    bookId,
+    sceneId,
+    visualSlotKey: note.visualSlotKey,
+    startWord: note.startWord ?? 0,
+    endWord: note.endWord ?? note.startWord ?? 0,
+    wordPosition: note.startWord ?? 0,
+    provider: "odysseus",
+    textHash: note.sourceIds.find((id) => id.startsWith("text-hash:"))?.replace("text-hash:", "") ?? "",
+    composition: note.body,
+    sourceItemIds: note.sourceIds.filter((id) => id.startsWith("source-item:")).map((id) => id.replace("source-item:", "")),
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+    status: "ready",
+  };
+}
+
+async function saveCompositionArtifact(artifact: VisualCompositionArtifact): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const note: BlackboardNote = {
+    id: artifact.id,
+    bookId: artifact.bookId,
+    blackboardId: `${artifact.bookId}:blackboard`,
+    kind: "image",
+    title: artifact.status === "ready" ? "Saved visual composition" : "Failed visual composition",
+    body: artifact.composition || artifact.error || "",
+    tags: [
+      "visual-composition",
+      artifact.provider,
+      artifact.status,
+      artifact.visualSlotKey ?? "",
+    ].filter(Boolean),
+    sourceIds: [
+      artifact.sceneId,
+      artifact.visualSlotKey ?? "",
+      `text-hash:${artifact.textHash}`,
+      ...artifact.sourceItemIds.map((id) => `source-item:${id}`),
+    ].filter(Boolean),
+    sceneId: artifact.sceneId,
+    visualSlotKey: artifact.visualSlotKey,
+    startWord: artifact.startWord,
+    endWord: artifact.endWord,
+    confidence: artifact.status === "ready" ? 0.92 : 0.2,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    version: 1,
+  };
+  await storage.saveBlackboardNotes([note]);
+}
+
+function normalizeComposition(raw: string): string {
+  const cleaned = raw
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[a-z]*\n?/gi, "").replace(/```/g, ""))
+    .replace(/^["']|["']$/g, "")
+    .trim();
+  const paragraphs = cleaned
+    .split(/\n{2,}|\r{2,}/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const lower = part.toLowerCase();
+      if (/^(requirements|format exemplar|scene target|reader visual direction|relevant profile items|source passage)\b/.test(lower)) {
+        return false;
+      }
+      if (/^(lumina|convert|return only|length:|tense:|single frame:)/i.test(part)) return false;
+      if (/^\*|^-|^["“]/.test(part)) return false;
+      if (lower.includes("critique") || lower.includes("too short") || lower.includes("needs more")) return false;
+      return part.split(/\s+/).length >= 45;
+    });
+  const candidate = paragraphs[paragraphs.length - 1] ?? cleaned.replace(/\s+/g, " ").trim();
+  return trimToCompleteSentence(candidate).slice(0, 1800);
+}
+
+function trimToCompleteSentence(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const match = normalized.match(/^([\s\S]*[.!?])(?:\s|$)/);
+  if (match?.[1] && match[1].split(/\s+/).length >= 55) return match[1].trim();
+  return normalized.replace(/[,:;–—-]\s*$/, "").trim();
 }
 
 // ─── Gemini Native Image Generation ──────────────────────────────────────────

@@ -202,9 +202,13 @@ export function segmentScenesOnePerChapter(
 export function segmentScenesForSemanticMap(
   scenes: IdentifiedScene[],
   chapters: Chapter[],
-  semanticMap?: Pick<SemanticMap, "analysisProtocol"> | null
+  semanticMap?: Pick<SemanticMap, "analysisProtocol" | "bookProfile"> | null
 ): IdentifiedScene[] {
-  return segmentScenesOnePerSlot(scenes, chapters, { protocol: semanticMap?.analysisProtocol });
+  const segmented = segmentScenesOnePerSlot(scenes, chapters, { protocol: semanticMap?.analysisProtocol });
+  const floor = semanticMap?.bookProfile?.positions.frontMatterEndWordPos ?? 0;
+  if (floor <= 0 || segmented.length <= 1) return segmented;
+  const storyScenes = segmented.filter((scene) => computeSceneWordPosition(scene, chapters) >= floor);
+  return storyScenes.length > 0 ? storyScenes : segmented;
 }
 
 export function dedupeScenesForStructure(

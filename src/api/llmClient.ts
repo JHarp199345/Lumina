@@ -190,6 +190,13 @@ export interface LLMGenerateOptions {
   jsonMode?: boolean;
   /** Override the Gemini model (Gemini mode only). */
   model?: string;
+  /**
+   * Odysseus only: explicit thinking control for native Ollama thinking models
+   * (gemma4/qwen3). Set false for short structured outputs so the model answers
+   * directly (~4s) instead of returning empty after a long hidden-reasoning pass.
+   * Ignored by the Gemini path.
+   */
+  think?: boolean;
 }
 
 /**
@@ -306,6 +313,7 @@ async function _callOdysseus(
   };
   if (options.temperature !== undefined) body.temperature = options.temperature;
   if (options.maxTokens !== undefined) body.max_tokens = options.maxTokens;
+  if (options.think !== undefined) body.think = options.think;
 
   // POST to queue endpoint — returns job_id immediately, avoids Cloudflare 100s timeout
   const startRes = await fetch(

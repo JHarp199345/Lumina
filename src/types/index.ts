@@ -219,6 +219,8 @@ export interface IdentifiedScene {
   threadMotif?: string;
   /** Label of the thread, for prompts and diagnostics. */
   threadLabel?: string;
+  /** Saved local composition used as the exact image-generation recipe. */
+  visualComposition?: VisualCompositionArtifact;
 }
 
 export interface SemanticMap {
@@ -236,6 +238,101 @@ export interface SemanticMap {
   storyboard?: VisualStoryboard;
   visualLore?: VisualLoreDossier;
   narrativeBlueprint?: NarrativeBlueprint;
+  /** Binder artifact that groups SIP, semantic map, visual lore, and position spine. */
+  bookProfile?: BookProfile;
+}
+
+// ─── Book Profile (PLANxv) ───────────────────────────────────────────────────
+
+export interface PassageBoundary {
+  id: string;
+  chapterId: string;
+  sectionId?: string;
+  title: string;
+  startWord: number;
+  endWord: number;
+  wordCount: number;
+  source: "chapter" | "section" | "scene" | "story-start";
+  tags: string[];
+}
+
+export interface BookProfileItem {
+  id: string;
+  kind:
+    | "section"
+    | "theme"
+    | "entity"
+    | "relationship"
+    | "visual_lore"
+    | "thread"
+    | "scene"
+    | "source_profile";
+  title: string;
+  summary: string;
+  tags: string[];
+  sourceIds: string[];
+  startWord?: number;
+  endWord?: number;
+  weight: number;
+}
+
+export interface BookProfile {
+  bookId: string;
+  builtAt: string;
+  version: number;
+  identity: {
+    title: string;
+    author: string;
+    workType?: WorkType;
+    analysisProtocol?: AnalysisProtocol;
+    expositoryDomain?: ExpositoryDomain;
+  };
+  positions: {
+    totalWords: number;
+    frontMatterEndWordPos: number;
+    passageBoundaries: PassageBoundary[];
+  };
+  artifactIds: {
+    semanticMap: string;
+    sourceProfile?: string;
+    visualLore?: string;
+    narrativeBlueprint?: string;
+    storyboard?: string;
+  };
+  storyCraft: {
+    arcShape: ArcShape;
+    inflectionPoints: InflectionPoint[];
+    visualBeatCount: number;
+    pathwaySummary?: string;
+    threadLabels: string[];
+  };
+  intelligence: {
+    themes: string[];
+    motifs: string[];
+    tone: string[];
+    keyTerms: string[];
+    questions: string[];
+  };
+  items: BookProfileItem[];
+}
+
+export interface VisualCompositionArtifact {
+  id: string;
+  bookId: string;
+  sceneId: string;
+  visualSlotKey?: string;
+  startWord: number;
+  endWord: number;
+  wordPosition: number;
+  provider: "odysseus" | "gemini" | "manual";
+  modelHint?: string;
+  textHash: string;
+  composition: string;
+  sourceItemIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  status: "ready" | "failed";
+  error?: string;
 }
 
 // ─── Indexed Blackboard Artifacts ────────────────────────────────────────────
@@ -664,6 +761,9 @@ export interface CachedImage {
   visualSlotKey?: string;
   filePath: string;
   descriptionUsed: string;
+  /** Saved local composition that led to this image, when available. */
+  visualCompositionId?: string;
+  visualComposition?: string;
   styleSeed: StyleSeedId;
   generatedAt: string;
   generationApi: "imagen3" | "gemini-image" | "flux" | "comfyui";

@@ -28,6 +28,7 @@ import { storage } from "@/storage";
 import { getProvider } from "@/api/llmClient";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+import { buildBookProfile } from "@/utils/bookProfile";
 import { sanitizeMapForBook } from "@/utils/bookIsolation";
 import {
   findImageAtPosition,
@@ -51,6 +52,7 @@ import type {
   IdentifiedScene,
   CachedImage,
   SemanticMap,
+  SourceIntelligenceProfile,
 } from "@/types";
 import { useReaderStore } from "@/store/readerStore";
 import { useNotificationStore } from "@/store/notificationStore";
@@ -501,6 +503,7 @@ export function useBookOrchestration() {
         );
 
         const isExpository = baseSemanticMap.analysisProtocol === "expository";
+        let sourceProfileForBookProfile: SourceIntelligenceProfile | null = null;
 
         // Step 2 — source profile (early — before visual pipeline; uses semantic map only)
         try {
@@ -508,8 +511,9 @@ export function useBookOrchestration() {
           const canBuild = apiKey || getProvider() === "odysseus";
           const bookId = String(baseSemanticMap.bookId);
           const existing = await storage.loadSourceProfile(bookId).catch(() => null);
+          sourceProfileForBookProfile = existing;
           if (canBuild && !existing) {
-            await trackStep(
+            sourceProfileForBookProfile = await trackStep(
               wfId,
               {
                 name: "source-profile",
@@ -611,7 +615,15 @@ export function useBookOrchestration() {
         // Sanitize before persisting — guarantees the saved map only carries
         // lore built for this book, so a contaminated map can never be written.
         const semanticMap = sanitizeMapForBook(
-          { ...loreSemanticMap, scenes: directedScenes },
+          {
+            ...loreSemanticMap,
+            scenes: directedScenes,
+            bookProfile: buildBookProfile({
+              structure,
+              semanticMap: { ...loreSemanticMap, scenes: directedScenes },
+              sourceProfile: sourceProfileForBookProfile,
+            }),
+          },
           baseSemanticMap.bookId
         );
 
@@ -856,6 +868,8 @@ export function useBookOrchestration() {
           visualSlotKey: slotKey ?? undefined,
           googleApiKey: googleKey ?? "",
           falApiKey: falKey ?? undefined,
+          bookStructure: useBookStore.getState().activeStructure ?? undefined,
+          bookProfile: semanticMap?.bookProfile ?? null,
           onComplete: async (img) => {
             addToCache(img);
             await appendBlackboardImageNote(img, semanticBookId);
@@ -915,7 +929,13 @@ export function useBookOrchestration() {
   // governing-section trigger. Generating must not force a future image on screen.
   const _ensureOpeningImage = useCallback(
     async (semanticMap: { scenes: IdentifiedScene[] }, styleSeedId: StyleSeedId, semanticBookId: string) => {
-      return _ensureSceneImage(semanticMap.scenes[0], styleSeedId, semanticBookId, { display: false });
+      const chapters = useBookStore.getState().activeStructure?.chapters ?? [];
+      const fullMap = useBookStore.getState().activeSemanticMap;
+      const floor = fullMap?.bookProfile?.positions.frontMatterEndWordPos ?? 0;
+      const openingScene =
+        semanticMap.scenes.find((scene) => computeSceneWordPosition(scene, chapters) >= floor) ??
+        semanticMap.scenes[0];
+      return _ensureSceneImage(openingScene, styleSeedId, semanticBookId, { display: false });
     },
     [_ensureSceneImage]
   );
