@@ -93,6 +93,14 @@ function detectImageMimeType(data: Uint8Array): string {
   return "image/png";
 }
 
+function imageBlobKey(imageId: string): string {
+  return `image:${imageId}`;
+}
+
+function scopedSceneBlobKey(bookId: string, sceneId: string): string {
+  return `${bookId}::${sceneId}`;
+}
+
 function makeAudioBlobUrl(data: Uint8Array, mimeType: string): string {
   const blob = new Blob([data], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -433,14 +441,14 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async saveImage(meta: Omit<CachedImage, "filePath">, data: Uint8Array): Promise<string> {
     // Persist blob in IndexedDB
-    await dbPut(STORES.IMAGE_BLOBS, data, meta.sceneId);
+    await dbPut(STORES.IMAGE_BLOBS, data, imageBlobKey(meta.id));
 
     // Use a data URL for immediate display in the PWA. It is larger than a
     // blob URL, but avoids mobile browser blob lifecycle edge cases.
     const displayUrl = makeDataUrl(data, detectImageMimeType(data));
 
     // Persist metadata (with placeholder — real URL recreated on load)
-    const fullMeta: CachedImage = { ...meta, filePath: `idb-img://${meta.sceneId}` };
+    const fullMeta: CachedImage = { ...meta, filePath: `idb-img://${meta.id}` };
     await dbPut(STORES.IMAGE_META, fullMeta);
 
     return displayUrl;
@@ -469,6 +477,8 @@ export class WebStorageAdapter implements StorageAdapter {
     await Promise.all(
       toDelete.map(async (m) => {
         await dbDelete(STORES.IMAGE_META, m.id);
+        await dbDelete(STORES.IMAGE_BLOBS, imageBlobKey(m.id)).catch(() => {});
+        await dbDelete(STORES.IMAGE_BLOBS, scopedSceneBlobKey(m.bookId, m.sceneId)).catch(() => {});
         await dbDelete(STORES.IMAGE_BLOBS, m.sceneId).catch(() => {});
       })
     );
@@ -693,6 +703,8 @@ export class WebStorageAdapter implements StorageAdapter {
     const meta = await dbGet<CachedImage>(STORES.IMAGE_META, imageId);
     if (!meta) return;
     await dbDelete(STORES.IMAGE_META, imageId);
+    await dbDelete(STORES.IMAGE_BLOBS, imageBlobKey(meta.id)).catch(() => {});
+    await dbDelete(STORES.IMAGE_BLOBS, scopedSceneBlobKey(meta.bookId, meta.sceneId)).catch(() => {});
     await dbDelete(STORES.IMAGE_BLOBS, sceneId).catch(() => {});
     await this.syncArchiveEntry(meta.bookId);
   }
@@ -758,7 +770,10 @@ export class WebStorageAdapter implements StorageAdapter {
   private async _resolveImageUrls(metas: CachedImage[]): Promise<CachedImage[]> {
     return Promise.all(
       metas.map(async (meta) => {
-        const data = await dbGet<Uint8Array>(STORES.IMAGE_BLOBS, meta.sceneId);
+        const data =
+          (await dbGet<Uint8Array>(STORES.IMAGE_BLOBS, imageBlobKey(meta.id))) ??
+          (await dbGet<Uint8Array>(STORES.IMAGE_BLOBS, scopedSceneBlobKey(meta.bookId, meta.sceneId))) ??
+          (await dbGet<Uint8Array>(STORES.IMAGE_BLOBS, meta.sceneId));
         if (!data) return meta; // no blob — filePath stays as placeholder
         return { ...meta, filePath: makeDataUrl(data, detectImageMimeType(data)) };
       })

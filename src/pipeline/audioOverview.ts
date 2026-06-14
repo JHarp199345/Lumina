@@ -873,7 +873,7 @@ function truncateWords(text: string, maxWords: number): string {
 
 /** Split text into chunks under maxChars, preferring sentence boundaries. */
 function chunkText(text: string, maxChars: number): string[] {
-  const sentences = text.match(/[^.!?]+[.!?]+|\s*\S+\s*$/g) ?? [text];
+  const sentences = text.match(/(?:[^.!?]+[.!?]+)|(?:\s*\S+\s*$)/g) ?? [text];
   const chunks: string[] = [];
   let current = "";
   for (const s of sentences) {

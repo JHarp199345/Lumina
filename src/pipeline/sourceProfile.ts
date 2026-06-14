@@ -208,9 +208,7 @@ function normalize(
     name: e.name?.trim() || "?",
     type: (["character", "person", "org", "place", "concept"].includes(e.type ?? "")
       ? e.type
-      : protocol === "expository"
-        ? "concept"
-        : "concept") as "character" | "person" | "org" | "place" | "concept",
+      : "concept") as "character" | "person" | "org" | "place" | "concept",
     role: e.role?.trim() || "",
     relationships: (e.relationships ?? []).slice(0, 8).map((r) => ({
       to: r.to?.trim() || "",

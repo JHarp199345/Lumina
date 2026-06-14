@@ -126,6 +126,7 @@ async function initSchema(db: Database): Promise<void> {
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN visual_lore TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN narrative_blueprint TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE image_cache ADD COLUMN word_position INTEGER`).catch(() => {});
+  await db.execute(`ALTER TABLE image_cache ADD COLUMN visual_slot_key TEXT`).catch(() => {});
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS source_profiles (
@@ -194,6 +195,8 @@ async function initSchema(db: Database): Promise<void> {
       id TEXT PRIMARY KEY,
       book_id TEXT NOT NULL,
       scene_id TEXT NOT NULL,
+      visual_slot_key TEXT,
+      word_position INTEGER,
       file_path TEXT NOT NULL,
       description_used TEXT NOT NULL,
       style_seed TEXT NOT NULL,
@@ -824,12 +827,13 @@ export async function dbSaveImageCache(image: CachedImage): Promise<void> {
   const db = await getDb();
   await db.execute(
     `INSERT OR REPLACE INTO image_cache
-     (id, book_id, scene_id, word_position, file_path, description_used, style_seed, generated_at, generation_api, emotional_themes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+     (id, book_id, scene_id, visual_slot_key, word_position, file_path, description_used, style_seed, generated_at, generation_api, emotional_themes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       image.id,
       image.bookId,
       image.sceneId,
+      image.visualSlotKey ?? null,
       typeof image.wordPosition === "number" ? image.wordPosition : null,
       image.filePath,
       image.descriptionUsed,
@@ -873,6 +877,7 @@ function rowToCachedImage(row: Record<string, unknown>): CachedImage {
     bookId: String(row.book_id),
     sceneId: String(row.scene_id),
     ...(typeof wordPosition === "number" && !Number.isNaN(wordPosition) ? { wordPosition } : {}),
+    ...(row.visual_slot_key ? { visualSlotKey: String(row.visual_slot_key) } : {}),
     filePath: String(row.file_path),
     descriptionUsed: String(row.description_used),
     styleSeed: String(row.style_seed) as StyleSeedId,

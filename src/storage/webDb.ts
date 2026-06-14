@@ -24,7 +24,7 @@ export const STORES = {
   STUDY_BADGES:  "study_badges",     // StudyBadgeAward, keyed by id, indexed by bookId
   STUDY_FLASHCARDS: "study_flashcards", // StudyFlashcard, keyed by id, indexed by bookId
   IMAGE_META:    "image_meta",      // CachedImage metadata, keyed by id, indexed by bookId
-  IMAGE_BLOBS:   "image_blobs",     // Uint8Array image data, keyed by sceneId
+  IMAGE_BLOBS:   "image_blobs",     // Uint8Array image data, keyed by `image:${imageId}`
   AUDIO_META:    "audio_meta",      // AudioArtifact metadata, keyed by id, indexed by bookId
   AUDIO_BLOBS:   "audio_blobs",     // Uint8Array audio data, keyed by audio artifact id
   PRESENTATIONS: "presentations",   // PresentationDeck, keyed by id, indexed by bookId
@@ -112,6 +112,11 @@ if (import.meta.env?.DEV) {
 
 let _db: IDBDatabase | null = null;
 
+function dbError(error: DOMException | null, fallback: string): Error {
+  if (error instanceof Error) return error;
+  return new Error(fallback);
+}
+
 export function openDb(): Promise<IDBDatabase> {
   if (_db) return Promise.resolve(_db);
 
@@ -156,7 +161,7 @@ export function openDb(): Promise<IDBDatabase> {
     const openExisting = () => {
       const req = indexedDB.open(DB_NAME);
       req.onsuccess = () => attach(req.result);
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(dbError(req.error, "Failed to open existing Lumina database"));
       req.onblocked = () => console.warn("[webDb] open blocked by another tab");
     };
 
@@ -174,7 +179,7 @@ export function openDb(): Promise<IDBDatabase> {
         );
         openExisting();
       } else {
-        reject(request.error);
+        reject(dbError(request.error, "Failed to open Lumina database"));
       }
     };
   });
@@ -197,7 +202,7 @@ export function dbGet<T>(store: string, key: IDBValidKey): Promise<T | undefined
         if (!hasStore(db, store)) return resolve(undefined);
         const req = db.transaction(store, "readonly").objectStore(store).get(key);
         req.onsuccess = () => resolve(req.result as T);
-        req.onerror = () => reject(req.error);
+        req.onerror = () => reject(dbError(req.error, `Failed to read from ${store}`));
       })
   );
 }
@@ -211,7 +216,7 @@ export function dbPut(store: string, value: unknown, key?: IDBValidKey): Promise
             ? db.transaction(store, "readwrite").objectStore(store).put(value, key)
             : db.transaction(store, "readwrite").objectStore(store).put(value);
         req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
+        req.onerror = () => reject(dbError(req.error, `Failed to write to ${store}`));
       })
   );
 }
@@ -223,7 +228,7 @@ export function dbDelete(store: string, key: IDBValidKey): Promise<void> {
         if (!hasStore(db, store)) return resolve();
         const req = db.transaction(store, "readwrite").objectStore(store).delete(key);
         req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
+        req.onerror = () => reject(dbError(req.error, `Failed to delete from ${store}`));
       })
   );
 }
@@ -235,7 +240,7 @@ export function dbGetAll<T>(store: string): Promise<T[]> {
         if (!hasStore(db, store)) return resolve([]);
         const req = db.transaction(store, "readonly").objectStore(store).getAll();
         req.onsuccess = () => resolve(req.result as T[]);
-        req.onerror = () => reject(req.error);
+        req.onerror = () => reject(dbError(req.error, `Failed to read all from ${store}`));
       })
   );
 }
@@ -255,7 +260,7 @@ export function dbGetByIndex<T>(
           .index(indexName)
           .getAll(key);
         req.onsuccess = () => resolve(req.result as T[]);
-        req.onerror = () => reject(req.error);
+        req.onerror = () => reject(dbError(req.error, `Failed to read ${store}.${indexName}`));
       })
   );
 }
@@ -281,10 +286,10 @@ export function dbDeleteByIndex(
           for (const k of keys) {
             const del = objStore.delete(k);
             del.onsuccess = () => { if (--remaining === 0) resolve(); };
-            del.onerror = () => reject(del.error);
+            del.onerror = () => reject(dbError(del.error, `Failed to delete indexed record from ${store}`));
           }
         };
-        keyReq.onerror = () => reject(keyReq.error);
+        keyReq.onerror = () => reject(dbError(keyReq.error, `Failed to read keys from ${store}.${indexName}`));
       })
   );
 }
@@ -307,10 +312,10 @@ export function dbDeleteByPrefix(store: string, indexName: string, prefix: strin
           for (const k of keys) {
             const del = objStore.delete(k);
             del.onsuccess = () => { if (--remaining === 0) resolve(); };
-            del.onerror = () => reject(del.error);
+            del.onerror = () => reject(dbError(del.error, `Failed to delete prefixed record from ${store}`));
           }
         };
-        keyReq.onerror = () => reject(keyReq.error);
+        keyReq.onerror = () => reject(dbError(keyReq.error, `Failed to read prefixed keys from ${store}.${indexName}`));
       })
   );
 }

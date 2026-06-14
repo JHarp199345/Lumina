@@ -133,10 +133,12 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
   }
 
   if (!imageData) throw new Error("No image data returned");
+  assertSupportedImageData(imageData);
 
   // Metadata without filePath — saveImage fills that in
+  const imageIdentity = safeImageIdentity(bookId, visualSlotKey ?? scene.id);
   const meta = {
-    id: `img_${scene.id}`,
+    id: `img_${imageIdentity}`,
     bookId,
     sceneId: scene.id,
     wordPosition,
@@ -156,6 +158,7 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
   saveStyleThumbnail(styleSeed.id, filePath).catch(() => {});
 
   const cachedImage: CachedImage = { ...meta, filePath };
+  await verifyImagePersisted(cachedImage);
 
   options.onComplete?.(cachedImage);
   return cachedImage;
@@ -297,6 +300,13 @@ function buildFallbackDescription(scene: IdentifiedScene): string {
   const emotions = scene.emotionalVector.slice(0, 2).join(" and ");
   const motifs = scene.symbolicMotifs.slice(0, 3).join(", ");
   return `Depictive cinematic book illustration evoking ${emotions}, with readable scene action and visual motifs of ${motifs}`;
+}
+
+function safeImageIdentity(...parts: string[]): string {
+  return parts
+    .join("__")
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .slice(0, 180);
 }
 
 // Extract palette context to pass to next generation
@@ -486,8 +496,9 @@ async function pollComfyUIJob(
     if (!pollRes.ok) continue;
     const job = await pollRes.json() as { status: string; image_url?: string; error?: string };
     if (job.status === "done" && job.image_url) {
+      const imageUrl = resolveRemoteImageUrl(base, job.image_url);
       const imgRes = await fetchWithTimeout(
-        `${base}${job.image_url}`,
+        imageUrl,
         { headers: authHeaders },
         LUMINA_CONFIG.LOCAL_IMAGE_FETCH_TIMEOUT_MS
       );
@@ -542,6 +553,65 @@ function base64ToUint8Array(base64: string): Uint8Array {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveRemoteImageUrl(base: string, imageUrl: string): string {
+  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  return new URL(imageUrl, `${base.replace(/\/+$/, "")}/`).toString();
+}
+
+function imageMimeType(data: Uint8Array): "image/png" | "image/jpeg" | "image/webp" | null {
+  if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) {
+    return "image/png";
+  }
+  if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    data[0] === 0x52 &&
+    data[1] === 0x49 &&
+    data[2] === 0x46 &&
+    data[3] === 0x46 &&
+    data[8] === 0x57 &&
+    data[9] === 0x45 &&
+    data[10] === 0x42 &&
+    data[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return null;
+}
+
+function assertSupportedImageData(data: Uint8Array): void {
+  if (data.length < 16) {
+    throw new Error(`Image engine returned too few bytes (${data.length})`);
+  }
+  if (imageMimeType(data)) return;
+  const preview = new TextDecoder()
+    .decode(data.slice(0, Math.min(data.length, 160)))
+    .replace(/\s+/g, " ")
+    .trim();
+  throw new Error(`Image engine returned non-image data${preview ? `: ${preview.slice(0, 120)}` : ""}`);
+}
+
+async function verifyImagePersisted(image: CachedImage): Promise<void> {
+  const saved = await storage.loadImages(image.bookId);
+  const match = saved.find(
+    (candidate) =>
+      candidate.id === image.id ||
+      (!!image.visualSlotKey && candidate.visualSlotKey === image.visualSlotKey) ||
+      candidate.sceneId === image.sceneId
+  );
+  if (!match) {
+    throw new Error(
+      `Image was generated but not found in Lumina storage after save (book=${image.bookId}, scene=${image.sceneId}, slot=${image.visualSlotKey ?? "none"})`
+    );
+  }
+  if (image.visualSlotKey && match.visualSlotKey && match.visualSlotKey !== image.visualSlotKey) {
+    throw new Error(
+      `Image saved under the wrong visual slot (${match.visualSlotKey}); expected ${image.visualSlotKey}`
+    );
+  }
 }
 
 async function fetchWithTimeout(

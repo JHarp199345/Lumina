@@ -78,8 +78,11 @@ export function pickBestScenePerSlot(
 
   const bySlot = new Map<string, IdentifiedScene>();
   for (const [slot, group] of groups) {
-    const best = group.reduce((incumbent, candidate) =>
-      shouldPreferScene(candidate, incumbent) ? candidate : incumbent
+    const [first, ...rest] = group;
+    if (!first) continue;
+    const best = rest.reduce(
+      (incumbent, candidate) => (shouldPreferScene(candidate, incumbent) ? candidate : incumbent),
+      first
     );
     bySlot.set(slot, best);
   }
