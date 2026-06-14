@@ -199,15 +199,55 @@ export default function HighlightLayer() {
       setActiveSemanticMap(nextMap);
       await storage.saveSemanticMap(nextMap);
 
-      const image = await generateImage({
-        scene: directedScene,
-        styleSeed,
-        bookId: activeSemanticMap.bookId,
-        wordPosition: computeSceneWordPosition(directedScene, activeStructure.chapters),
-        googleApiKey: googleKey ?? "",
-        falApiKey: falKey ?? undefined,
-        bookStructure: activeStructure,
-        bookProfile: nextMap.bookProfile ?? activeSemanticMap.bookProfile ?? null,
+      // Track this reader-requested (highlight-to-image) generation as its own job
+      // so every AI image event appears in the workflow log, not just gallery/auto
+      // generations. (No-op off Odysseus; startWorkflow returns null.)
+      const { startWorkflow, trackStep, completeWorkflow } = await import("@/services/workflowTracker");
+      const wfBookTitle = activeBook?.title ?? "Book";
+      const wfId = await startWorkflow(
+        "reader-image-generation",
+        `${wfBookTitle} — highlight image`,
+        {
+          book_id: activeSemanticMap.bookId,
+          book_title: wfBookTitle,
+          scene_id: directedScene.id,
+          word_position: computeSceneWordPosition(directedScene, activeStructure.chapters),
+        },
+        "Generate a reader-requested image from a highlighted passage"
+      );
+
+      const image = await trackStep(
+        wfId,
+        {
+          name: "highlight-scene-image",
+          goal: "Generate and persist the reader's highlighted-passage image",
+          agent: "image_director",
+          skill: "scene-image-generation",
+        },
+        () =>
+          generateImage({
+            scene: directedScene,
+            styleSeed,
+            bookId: activeSemanticMap.bookId,
+            wordPosition: computeSceneWordPosition(directedScene, activeStructure.chapters),
+            googleApiKey: googleKey ?? "",
+            falApiKey: falKey ?? undefined,
+            bookStructure: activeStructure,
+            bookProfile: nextMap.bookProfile ?? activeSemanticMap.bookProfile ?? null,
+          }),
+        (img) => ({
+          metrics: { scene_id: directedScene.id, image_id: img.id },
+          goal_achieved: 1,
+          unblocked_next: true,
+        }),
+        (err) => ({
+          metrics: { scene_id: directedScene.id, error: err instanceof Error ? err.message : String(err) },
+          goal_achieved: 0,
+          unblocked_next: true,
+        })
+      );
+      await completeWorkflow(wfId, {
+        outcome_metrics: { scene_id: directedScene.id, ok: true },
       });
       addToCache(image);
       setCurrentImage(image);
