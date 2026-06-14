@@ -610,37 +610,36 @@ function briefUsesLoreEntity(raw: Partial<VisualDirectorBrief>, entityName: stri
  * ~150 words so the local tokenizer doesn't dilute early content.
  */
 export function buildComfyUIPrompt(brief: VisualDirectorBrief, styleSeed: StyleSeed): string {
-  // Use the director's written scene description as the narrative lead.
-  // It's 90–150 words of actual visual content — exactly what the model needs first.
+  // Flux reads NATURAL LANGUAGE through its T5 encoder — it is NOT SDXL and does
+  // NOT want comma-separated tag soup. Verified on-device: a dense ~180-220 word
+  // evocative paragraph yields far more focused, detailed images than prose + a
+  // tag tail, and Flux schnell is trained at ~256 tokens so going longer is wasted.
+  // So we weave the director's scene prose, the richest element depictions, and
+  // the style/light/palette/mood into ONE flowing paragraph — no tag dump, and no
+  // "no text"/"no watermark" (those are negatives, which guidance-distilled schnell
+  // ignores, and naming them in the positive can backfire).
   const lead = (brief.finalPrompt?.length ?? 0) > 80 ? brief.finalPrompt : brief.composition;
 
-  // Pull the highest-priority visible elements — their depiction field is the
-  // richest per-element visual description the director produced.
   const topElements = [...brief.blocking.elements]
     .sort((a, b) => b.visualPriority - a.visualPriority)
     .slice(0, 3)
-    .map((el) => el.depiction)
+    .map((el) => el.depiction.trim())
     .filter(Boolean);
 
-  // Compact tag list: mood → anchors → lore → palette → light → style
-  const tags = [
-    brief.dominantEmotion,
-    ...brief.emotionalTone.slice(0, 2),
-    ...brief.concreteAnchors.slice(0, 4),
-    ...brief.loreDescriptorsUsed.slice(0, 4),
-    ...brief.symbolicAnchors.slice(0, 2),
-    ...brief.palette.slice(0, 4),
-    brief.lighting,
-    humanize(brief.perspective),
-    humanize(brief.motionLevel),
-    styleSeed.promptFragment,
-    "fine art quality",
-    "no text",
-    "no watermark",
-  ].filter(Boolean);
+  const sentences: string[] = [lead.trim(), ...topElements];
 
-  const parts = [lead, ...topElements, tags.join(", ")].filter(Boolean);
-  return parts.join(". ");
+  const mood = [brief.dominantEmotion, ...brief.emotionalTone.slice(0, 2)].filter(Boolean);
+  if (mood.length) sentences.push(`The mood is ${mood.join(", ")}.`);
+  if (brief.lighting) sentences.push(`Lit by ${brief.lighting.trim()}.`);
+  if (brief.palette?.length) sentences.push(`A palette of ${brief.palette.slice(0, 4).join(", ")}.`);
+  if (styleSeed.promptFragment) sentences.push(`Rendered as ${styleSeed.promptFragment.trim()}.`);
+
+  // Join as flowing prose; ensure each fragment ends with a period.
+  return sentences
+    .map((s) => (/[.!?]$/.test(s) ? s : `${s}.`))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function buildFinalImagePrompt(brief: VisualDirectorBrief, styleSeed: StyleSeed): string {

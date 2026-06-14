@@ -451,8 +451,10 @@ async function generateWithComfyUIIterative(
     pass2_prompt: refine ? (passPlan?.pass2 ?? null) : null,
     pass3_prompt: refine ? (passPlan?.pass3 ?? null) : null,
     negative_prompt: negativePrompt,
-    width: 1024,
-    height: 576,
+    // ~1 MP (16:9, both divisible by 16) — Flux's detail sweet spot. Verified on
+    // MPS: 1280x720 keeps fine metal/wood/paper detail at ~80s single pass.
+    width: 1280,
+    height: 720,
     eval_spec: refine ? evalSpec : null,
     max_correction_passes: refine ? 2 : 0,
   };
