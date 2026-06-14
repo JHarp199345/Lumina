@@ -100,7 +100,11 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
   if (getProvider() === "odysseus") {
     // Local path: iterative multi-pass refinement via Odysseus → ComfyUI.
     // Falls back to single-pass if the iterative endpoint isn't available.
-    imageData = await generateWithComfyUIIterative(options.scene, options.styleSeed, prompt, negativePrompt);
+    try {
+      imageData = await generateWithComfyUIIterative(options.scene, options.styleSeed, prompt, negativePrompt);
+    } catch (err) {
+      throw new Error(describeOdysseusImageError(err));
+    }
     apiUsed = "comfyui";
   } else {
     // Cloud path: Imagen 3 → Gemini image → fal.ai Flux
@@ -592,6 +596,19 @@ function assertSupportedImageData(data: Uint8Array): void {
     .replace(/\s+/g, " ")
     .trim();
   throw new Error(`Image engine returned non-image data${preview ? `: ${preview.slice(0, 120)}` : ""}`);
+}
+
+function describeOdysseusImageError(err: unknown): string {
+  const base = getOdysseusUrl();
+  const message = describeError(err);
+  if (/failed to fetch|networkerror|load failed/i.test(message)) {
+    return (
+      `Odysseus image request could not reach ${base}. ` +
+      "If Lumina is running from GitHub Pages or a phone/tablet, the local Odysseus server must allow browser private-network requests. " +
+      `Original error: ${message}`
+    );
+  }
+  return message;
 }
 
 async function verifyImagePersisted(image: CachedImage): Promise<void> {
