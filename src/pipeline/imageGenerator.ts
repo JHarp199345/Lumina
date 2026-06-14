@@ -440,15 +440,21 @@ async function generateWithComfyUIIterative(
       : "",
   };
 
+  // Default to a single fast Flux pass. Multi-pass img2img + vision correction is
+  // opt-in (LOCAL_ITERATIVE_REFINEMENT): on MPS it evicts Flux from memory and can
+  // balloon one image to many minutes, which reads as "hung" on mobile. The server
+  // also enforces this (single-pass when no pass2/3/eval is sent), so both old and
+  // new clients stay reliable.
+  const refine = LUMINA_CONFIG.LOCAL_ITERATIVE_REFINEMENT;
   const body = {
     pass1_prompt: passPlan?.pass1 ?? fallbackPrompt,
-    pass2_prompt: passPlan?.pass2 ?? null,
-    pass3_prompt: passPlan?.pass3 ?? null,
+    pass2_prompt: refine ? (passPlan?.pass2 ?? null) : null,
+    pass3_prompt: refine ? (passPlan?.pass3 ?? null) : null,
     negative_prompt: negativePrompt,
     width: 1024,
     height: 576,
-    eval_spec: evalSpec,
-    max_correction_passes: 2,
+    eval_spec: refine ? evalSpec : null,
+    max_correction_passes: refine ? 2 : 0,
   };
 
   try {

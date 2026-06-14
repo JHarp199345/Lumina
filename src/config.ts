@@ -32,6 +32,14 @@ export const LUMINA_CONFIG = {
   LOCAL_IMAGE_FETCH_TIMEOUT_MS: 15 * 60 * 1000,
   /** Total local image job budget before Lumina marks the job failed. */
   LOCAL_IMAGE_JOB_TIMEOUT_MS: 30 * 60 * 1000,
+  /**
+   * Multi-pass img2img refinement + vision correction for local (ComfyUI) images.
+   * OFF by default: a single Flux pass is fast (~75s) and reliable on Apple-Silicon
+   * MPS, where the vision model evicts Flux from memory and multi-pass refinement
+   * can balloon a single image to many minutes (brutal on mobile). Turn on only on
+   * hardware where you've confirmed refinement stays fast.
+   */
+  LOCAL_ITERATIVE_REFINEMENT: false,
 
   // Golden number caps by book length
   MAX_IMAGES_SHORT_BOOK: 5,    // < 50k words
