@@ -1204,3 +1204,106 @@ export interface LuminaNotification {
   read: boolean;
   createdAt: string;
 }
+
+// ─── PLAN IX v2 — Project Studio (relational network + Writer) ─────────────────
+// A Project gathers several books into one cross-book, project-scoped working
+// memory (the "Writer bucket") that the Writer view draws from. This is the ONLY
+// place cross-book mixing is allowed; it never writes back into a book's reader
+// (per-book isolated) memory. See PLANix-v2.md.
+
+/** The project's intent — the "source of truth" that biases retrieval. */
+export interface ProjectIntent {
+  assignmentPrompt?: string;   // the essay/assignment prompt, if any
+  thesis?: string;
+  workingTitle?: string;
+  goal?: string;               // what the writer is trying to produce
+  audience?: string;
+  keyQuestions?: string[];
+  userInstructions?: string;
+  currentSection?: string;     // updated as the writer moves between headings
+}
+
+/** Per-source snapshot bookkeeping for idempotent mount (PLANix-v2 §4.3). */
+export interface ProjectSourceSnapshot {
+  analysisVersion: number;     // source's analysis/visual-plan version when copied
+  hash: string;                // content hash of the copied bundle
+  copiedAt: string;
+}
+
+export type ProjectAnalysisStatus =
+  | "empty"        // no sources analyzed yet
+  | "queued"
+  | "running"
+  | "partial"      // some sources copied/analyzed, others pending or failed
+  | "complete"
+  | "failed";
+
+export interface Project {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  sourceBookIds: string[];     // attached sources (book ids)
+  intent: ProjectIntent;
+  sourceSnapshots: Record<string, ProjectSourceSnapshot>; // keyed by bookId
+  analysisStatus: ProjectAnalysisStatus;
+  analysisPhase?: string;      // human-readable current phase, for the status surface
+  networkBuiltAt?: string;     // when the relational analysis last completed
+}
+
+export type ProjectArtifactType =
+  | "passage" | "note" | "summary" | "audio" | "image" | "composition"
+  | "theme" | "claim" | "character" | "concept";
+
+/**
+ * One node in the project network — a COPY (snapshot) pulled from a source book's
+ * reader memory at copy-over time. Never holds full book text (passages are pulled
+ * live by absolute position from the source).
+ */
+export interface ProjectArtifact {
+  id: string;
+  projectId: string;
+  sourceBookId: string;
+  type: ProjectArtifactType;
+  title: string;
+  /**
+   * Self-describing header — like a filename that announces its contents
+   * (subject + key entities + themes + type). The cheap pre-filter key for the
+   * Tier-1 "tag gate" in recall (PLANix-v2 §7.1).
+   */
+  descriptor: string;
+  summary: string;             // compact, embeddable text (NOT full book text)
+  storageRef?: string;         // where the real asset lives (image/audio), if any
+  startWord?: number;          // absolute position for "return to source"
+  endWord?: number;
+  locator?: string;            // lumina:// anchor for navigation
+  visibleTags: string[];
+  hiddenTags: string[];        // search-only tags for retrieval
+  embedding?: number[];        // cached, for fast cosine recall
+  embeddingModel?: string;     // model id, so stale embeddings can be recomputed
+  weight: number;              // importance 0..1
+}
+
+export type ProjectRelationType =
+  | "supports" | "contradicts" | "defines" | "expands"
+  | "example_of" | "cites" | "theme_link" | "cause_effect";
+
+/** A typed edge between two project artifacts (Stage 4 — see PLANix-v2 §8). */
+export interface ProjectRelation {
+  id: string;
+  projectId: string;
+  fromArtifactId: string;
+  toArtifactId: string;
+  relationType: ProjectRelationType;
+  confidence: number;
+  explanation?: string;
+}
+
+/** The document being written inside a project. */
+export interface ProjectDocument {
+  id: string;
+  projectId: string;
+  title: string;
+  body: string;                // markdown
+  updatedAt: string;
+}

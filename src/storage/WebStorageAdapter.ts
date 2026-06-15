@@ -33,6 +33,10 @@ import type {
   ArchiveBook,
   LuminaNotification,
   BlackboardNote,
+  Project,
+  ProjectArtifact,
+  ProjectRelation,
+  ProjectDocument,
 } from "@/types";
 import {
   STORES,
@@ -772,6 +776,65 @@ export class WebStorageAdapter implements StorageAdapter {
       dbDeleteByIndex(STORES.STUDY_FLASHCARDS, "bookId", bookId),
       dbDelete(STORES.BOOK_SETTINGS, bookId),
     ]);
+  }
+
+  // ── Project Studio (PLAN IX v2) ─────────────────────────────────────────────
+
+  async saveProject(project: Project): Promise<void> {
+    await dbPut(STORES.PROJECTS, project);
+  }
+
+  async loadProjects(): Promise<Project[]> {
+    const projects = await dbGetAll<Project>(STORES.PROJECTS);
+    return projects.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  }
+
+  async loadProject(projectId: string): Promise<Project | null> {
+    return (await dbGet<Project>(STORES.PROJECTS, projectId)) ?? null;
+  }
+
+  async deleteProject(projectId: string): Promise<void> {
+    await Promise.all([
+      dbDelete(STORES.PROJECTS, projectId),
+      dbDeleteByIndex(STORES.PROJECT_ARTIFACTS, "projectId", projectId),
+      dbDeleteByIndex(STORES.PROJECT_RELATIONS, "projectId", projectId),
+      dbDeleteByIndex(STORES.PROJECT_DOCUMENTS, "projectId", projectId),
+    ]);
+  }
+
+  async saveProjectArtifacts(artifacts: ProjectArtifact[]): Promise<void> {
+    await Promise.all(artifacts.map((a) => dbPut(STORES.PROJECT_ARTIFACTS, a)));
+  }
+
+  async loadProjectArtifacts(projectId: string): Promise<ProjectArtifact[]> {
+    return dbGetByIndex<ProjectArtifact>(STORES.PROJECT_ARTIFACTS, "projectId", projectId);
+  }
+
+  async deleteProjectArtifactsForSource(projectId: string, sourceBookId: string): Promise<void> {
+    const all = await dbGetByIndex<ProjectArtifact>(STORES.PROJECT_ARTIFACTS, "projectId", projectId);
+    await Promise.all(
+      all.filter((a) => a.sourceBookId === sourceBookId).map((a) => dbDelete(STORES.PROJECT_ARTIFACTS, a.id))
+    );
+  }
+
+  async saveProjectRelations(relations: ProjectRelation[]): Promise<void> {
+    await Promise.all(relations.map((r) => dbPut(STORES.PROJECT_RELATIONS, r)));
+  }
+
+  async loadProjectRelations(projectId: string): Promise<ProjectRelation[]> {
+    return dbGetByIndex<ProjectRelation>(STORES.PROJECT_RELATIONS, "projectId", projectId);
+  }
+
+  async saveProjectDocument(doc: ProjectDocument): Promise<void> {
+    await dbPut(STORES.PROJECT_DOCUMENTS, doc);
+  }
+
+  async loadProjectDocuments(projectId: string): Promise<ProjectDocument[]> {
+    return dbGetByIndex<ProjectDocument>(STORES.PROJECT_DOCUMENTS, "projectId", projectId);
+  }
+
+  async deleteProjectDocument(docId: string): Promise<void> {
+    await dbDelete(STORES.PROJECT_DOCUMENTS, docId);
   }
 
   // ── Internal helpers ─────────────────────────────────────────────────────

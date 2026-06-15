@@ -31,11 +31,16 @@ import type {
   ArchiveBook,
   LuminaNotification,
   BlackboardNote,
+  Project,
+  ProjectArtifact,
+  ProjectRelation,
+  ProjectDocument,
 } from "@/types";
 import {
   openEpubDialog,
   readFileBytes,
   writeFileBytes,
+  fileExists,
   copyFileToAppData,
   getAppDataDir,
   storeApiKey,
@@ -600,5 +605,121 @@ export class TauriStorageAdapter implements StorageAdapter {
     if (appDataDir) {
       await deleteDirectory(`${appDataDir}/books/${bookId}`).catch(() => {});
     }
+  }
+
+  // ── Project Studio (PLAN IX v2) ─────────────────────────────────────────────
+  // Desktop runtime is secondary; project data is small, so it lives in one JSON
+  // bundle file under appDataDir. Web (the primary runtime) uses IndexedDB stores.
+
+  private async _projectStorePath(): Promise<string> {
+    const dir = await getAppDataDir();
+    return `${dir}/projects.json`;
+  }
+
+  private async _loadProjectStore(): Promise<{
+    projects: Project[];
+    artifacts: ProjectArtifact[];
+    relations: ProjectRelation[];
+    documents: ProjectDocument[];
+  }> {
+    const empty = { projects: [], artifacts: [], relations: [], documents: [] };
+    try {
+      const path = await this._projectStorePath();
+      if (!(await fileExists(path))) return empty;
+      const bytes = await readFileBytes(path);
+      const parsed = JSON.parse(new TextDecoder().decode(bytes));
+      return {
+        projects: parsed.projects ?? [],
+        artifacts: parsed.artifacts ?? [],
+        relations: parsed.relations ?? [],
+        documents: parsed.documents ?? [],
+      };
+    } catch {
+      return empty;
+    }
+  }
+
+  private async _saveProjectStore(store: {
+    projects: Project[];
+    artifacts: ProjectArtifact[];
+    relations: ProjectRelation[];
+    documents: ProjectDocument[];
+  }): Promise<void> {
+    const path = await this._projectStorePath();
+    await writeFileBytes(path, new TextEncoder().encode(JSON.stringify(store)));
+  }
+
+  async saveProject(project: Project): Promise<void> {
+    const s = await this._loadProjectStore();
+    s.projects = [...s.projects.filter((p) => p.id !== project.id), project];
+    await this._saveProjectStore(s);
+  }
+
+  async loadProjects(): Promise<Project[]> {
+    const s = await this._loadProjectStore();
+    return s.projects.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  }
+
+  async loadProject(projectId: string): Promise<Project | null> {
+    const s = await this._loadProjectStore();
+    return s.projects.find((p) => p.id === projectId) ?? null;
+  }
+
+  async deleteProject(projectId: string): Promise<void> {
+    const s = await this._loadProjectStore();
+    s.projects = s.projects.filter((p) => p.id !== projectId);
+    s.artifacts = s.artifacts.filter((a) => a.projectId !== projectId);
+    s.relations = s.relations.filter((r) => r.projectId !== projectId);
+    s.documents = s.documents.filter((d) => d.projectId !== projectId);
+    await this._saveProjectStore(s);
+  }
+
+  async saveProjectArtifacts(artifacts: ProjectArtifact[]): Promise<void> {
+    if (!artifacts.length) return;
+    const s = await this._loadProjectStore();
+    const incoming = new Set(artifacts.map((a) => a.id));
+    s.artifacts = [...s.artifacts.filter((a) => !incoming.has(a.id)), ...artifacts];
+    await this._saveProjectStore(s);
+  }
+
+  async loadProjectArtifacts(projectId: string): Promise<ProjectArtifact[]> {
+    const s = await this._loadProjectStore();
+    return s.artifacts.filter((a) => a.projectId === projectId);
+  }
+
+  async deleteProjectArtifactsForSource(projectId: string, sourceBookId: string): Promise<void> {
+    const s = await this._loadProjectStore();
+    s.artifacts = s.artifacts.filter((a) => !(a.projectId === projectId && a.sourceBookId === sourceBookId));
+    await this._saveProjectStore(s);
+  }
+
+  async saveProjectRelations(relations: ProjectRelation[]): Promise<void> {
+    if (!relations.length) return;
+    const s = await this._loadProjectStore();
+    const incoming = new Set(relations.map((r) => r.id));
+    s.relations = [...s.relations.filter((r) => !incoming.has(r.id)), ...relations];
+    await this._saveProjectStore(s);
+  }
+
+  async loadProjectRelations(projectId: string): Promise<ProjectRelation[]> {
+    const s = await this._loadProjectStore();
+    return s.relations.filter((r) => r.projectId === projectId);
+  }
+
+  async saveProjectDocument(doc: ProjectDocument): Promise<void> {
+    const s = await this._loadProjectStore();
+    s.documents = [...s.documents.filter((d) => d.id !== doc.id), doc];
+    await this._saveProjectStore(s);
+  }
+
+  async loadProjectDocuments(projectId: string): Promise<ProjectDocument[]> {
+    const s = await this._loadProjectStore();
+    return s.documents.filter((d) => d.projectId === projectId);
+  }
+
+  async deleteProjectDocument(docId: string): Promise<void> {
+    const s = await this._loadProjectStore();
+    s.documents = s.documents.filter((d) => d.id !== docId);
+    await this._saveProjectStore(s);
   }
 }

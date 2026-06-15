@@ -32,6 +32,10 @@ import type {
   ArchiveBook,
   LuminaNotification,
   BlackboardNote,
+  Project,
+  ProjectArtifact,
+  ProjectRelation,
+  ProjectDocument,
 } from "@/types";
 
 export interface StorageAdapter {
@@ -197,6 +201,24 @@ export interface StorageAdapter {
   deleteArchivedNote(noteId: string): Promise<void>;
   deleteArchivedPresentation(deckId: string): Promise<void>;
   deleteArchivedBadge(badgeId: string): Promise<void>;
+
+  // ── Project Studio (PLAN IX v2) ─────────────────────────────────────────────
+
+  saveProject(project: Project): Promise<void>;
+  loadProjects(): Promise<Project[]>;
+  loadProject(projectId: string): Promise<Project | null>;
+  deleteProject(projectId: string): Promise<void>;
+
+  saveProjectArtifacts(artifacts: ProjectArtifact[]): Promise<void>;
+  loadProjectArtifacts(projectId: string): Promise<ProjectArtifact[]>;
+  deleteProjectArtifactsForSource(projectId: string, sourceBookId: string): Promise<void>;
+
+  saveProjectRelations(relations: ProjectRelation[]): Promise<void>;
+  loadProjectRelations(projectId: string): Promise<ProjectRelation[]>;
+
+  saveProjectDocument(doc: ProjectDocument): Promise<void>;
+  loadProjectDocuments(projectId: string): Promise<ProjectDocument[]>;
+  deleteProjectDocument(docId: string): Promise<void>;
 
   // ── Bulk delete ───────────────────────────────────────────────────────────
 

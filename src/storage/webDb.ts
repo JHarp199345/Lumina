@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 13;
+const DB_VERSION = 14;
 
 export const STORES = {
   SOURCE_PROFILES: "source_profiles", // SourceIntelligenceProfile, keyed by bookId
@@ -33,6 +33,11 @@ export const STORES = {
   API_KEYS:      "api_keys",        // string values, keyed by key name
   DOWNLOAD_LEDGER: "download_ledger", // Open Shelf download ledger, keyed by gutenbergId
   NOTIFICATIONS: "notifications",   // LuminaNotification, keyed by id, indexed by bookId
+  // PLAN IX v2 — Project Studio
+  PROJECTS:      "projects",        // Project, keyed by id
+  PROJECT_ARTIFACTS: "project_artifacts", // ProjectArtifact, keyed by id, indexed by projectId
+  PROJECT_RELATIONS: "project_relations", // ProjectRelation, keyed by id, indexed by projectId
+  PROJECT_DOCUMENTS: "project_documents", // ProjectDocument, keyed by id, indexed by projectId
 } as const;
 
 // ─── Store registry + lifecycle classes (PLANx) ────────────────────────────────
@@ -63,6 +68,7 @@ interface StoreDef {
 }
 
 const BOOK_INDEX = [{ name: "bookId", keyPath: "bookId" }];
+const PROJECT_INDEX = [{ name: "projectId", keyPath: "projectId" }];
 
 export const STORE_REGISTRY: StoreDef[] = [
   { name: STORES.BOOKS,           lifecycle: "userData",  keyPath: "id" },
@@ -90,6 +96,13 @@ export const STORE_REGISTRY: StoreDef[] = [
   { name: STORES.AUDIO_BLOBS,     lifecycle: "generated" },
   { name: STORES.PRESENTATIONS,   lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },
   { name: STORES.ARCHIVE_BOOKS,   lifecycle: "generated" },
+
+  // PLAN IX v2 — Project Studio. Projects + the written document are the reader's
+  // own irreplaceable work (userData); artifacts + relations are derived (generated).
+  { name: STORES.PROJECTS,          lifecycle: "userData",  keyPath: "id" },
+  { name: STORES.PROJECT_DOCUMENTS, lifecycle: "userData",  keyPath: "id", indexes: PROJECT_INDEX },
+  { name: STORES.PROJECT_ARTIFACTS, lifecycle: "generated", keyPath: "id", indexes: PROJECT_INDEX },
+  { name: STORES.PROJECT_RELATIONS, lifecycle: "generated", keyPath: "id", indexes: PROJECT_INDEX },
 ];
 
 /** All store names of a given lifecycle class. */
