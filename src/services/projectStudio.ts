@@ -15,8 +15,14 @@
  * memory and copies SNAPSHOTS in. It must never write back into reader memory.
  */
 
-import { storage } from "@/storage";
+import { storage as _defaultStorage } from "@/storage";
+import type { StorageAdapter } from "@/storage/StorageAdapter";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
+
+// Storage is referenced through a swappable binding so storage-level behavior
+// (copy-over, cross-project isolation) can be tested with an in-memory adapter.
+let storage: StorageAdapter = _defaultStorage;
+export function _setProjectStudioStorage(s: StorageAdapter): void { storage = s; }
 import type {
   Book,
   Project,
@@ -36,7 +42,7 @@ import type {
 const PROJECT_ANALYSIS_VERSION = 1;
 // Bump when the copy-over artifact shape/extraction changes, so existing projects
 // recognize their copies as stale and rebuild. Part of the source signature (#5).
-const COPY_SCHEMA_VERSION = 2;
+const COPY_SCHEMA_VERSION = 3;
 
 function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -70,31 +76,39 @@ export async function sourceSignature(bookId: string): Promise<{ version: number
   // Gather cheap staleness signals from EVERY store copy-over reads, not just the
   // semantic map — otherwise editing notes/highlights or rebuilding the profile
   // leaves the project showing a stale copy. (Codex review #5.)
-  const [map, profile, notes, highlights, images] = await Promise.all([
+  const [map, profile, notes, highlights, images, audio] = await Promise.all([
     storage.loadSemanticMap(bookId).catch(() => null),
     storage.loadSourceProfile(bookId).catch(() => null),
     storage.loadNotes(bookId).catch(() => []),
     storage.loadHighlights(bookId).catch(() => []),
     storage.loadImages(bookId).catch(() => []),
+    storage.loadAudioArtifacts(bookId).catch(() => []),
   ]);
   // Nothing to copy from at all → no signature (caller treats as "no source data").
-  if (!map && !profile && notes.length === 0 && highlights.length === 0 && images.length === 0) {
+  if (!map && !profile && notes.length === 0 && highlights.length === 0 && images.length === 0 && audio.length === 0) {
     return null;
   }
   const version = COPY_SCHEMA_VERSION;
-  const latest = (items: Array<{ updatedAt?: string; createdAt?: string }>): string =>
+  const latest = (items: Array<{ updatedAt?: string; createdAt?: string; generatedAt?: string }>): string =>
     items.reduce((m, n) => {
-      const t = n.updatedAt || n.createdAt || "";
+      const t = n.updatedAt || n.generatedAt || n.createdAt || "";
       return t > m ? t : m;
     }, "");
+  // Content-aware fingerprints, not just counts — so editing a highlight's color
+  // or regenerating an image without changing the count still stales the copy.
+  const hlFingerprint = highlights
+    .map((h) => `${h.id}:${h.color}`)
+    .sort()
+    .join(",");
   const parts = [
     `schema:${COPY_SCHEMA_VERSION}`,
     `map:${map?.visualPlanVersion ?? 0}:${map?.analyzedAt ?? ""}:${map?.scenes?.length ?? 0}`,
     `profile:${profile?.builtAt ?? ""}`,
     `bookProfile:${map?.bookProfile?.builtAt ?? ""}`,
     `notes:${notes.length}:${latest(notes)}`,
-    `highlights:${highlights.length}`,
-    `images:${images.length}`,
+    `highlights:${highlights.length}:${hlFingerprint.length}:${hlFingerprint.slice(0, 200)}`,
+    `images:${images.length}:${latest(images)}`,
+    `audio:${audio.length}:${latest(audio)}`,
   ];
   return { version, hash: parts.join("|") };
 }
@@ -200,7 +214,9 @@ function buildSourceArtifacts(params: {
     if (!t) return;
     const visibleTags = uniq(tags);
     out.push({
-      id: `pa_${stableId(`${bookId}:${type}:${key ?? t}`)}`,
+      // projectId MUST be in the id — storage keys artifacts globally by id, so
+      // without it two projects sharing a book collide and overwrite each other.
+      id: `pa_${stableId(`${projectId}:${bookId}:${type}:${key ?? t}`)}`,
       projectId,
       sourceBookId: bookId,
       type,
