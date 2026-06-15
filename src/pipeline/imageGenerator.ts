@@ -635,10 +635,11 @@ async function generateWithComfyUIIterative(
     pass2_prompt: refine ? (passPlan?.pass2 ?? null) : null,
     pass3_prompt: refine ? (passPlan?.pass3 ?? null) : null,
     negative_prompt: negativePrompt,
-    // ~1 MP (16:9, both divisible by 16) — Flux's detail sweet spot. Verified on
-    // MPS: 1280x720 keeps fine metal/wood/paper detail at ~80s single pass.
-    width: 1280,
-    height: 720,
+    // Keep local generation light. 1024x576 is still 16:9 and detailed enough
+    // for the reader pane/gallery, while avoiding the 1280x720 cost on older
+    // Macs where a single Flux pass can drift past several minutes.
+    width: 1024,
+    height: 576,
     eval_spec: refine ? evalSpec : null,
     max_correction_passes: refine ? 2 : 0,
   };

@@ -114,14 +114,6 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
     return { ok: false, reason: "cached" };
   }
 
-  if (req.replaceExisting) {
-    const obsolete = [cached, persistedHit].filter((image): image is CachedImage => Boolean(image));
-    await Promise.all(
-      obsolete.map((image) => storage.deleteImage(image.id, image.sceneId).catch(() => {}))
-    );
-    store.removeCachedImagesForSlot(slotKey);
-  }
-
   if (req.force) {
     store.clearQueueForSlot(slotKey);
   } else if (store.isSlotBusy(slotKey)) {
