@@ -212,6 +212,7 @@ export interface StorageAdapter {
   saveProjectArtifacts(artifacts: ProjectArtifact[]): Promise<void>;
   loadProjectArtifacts(projectId: string): Promise<ProjectArtifact[]>;
   deleteProjectArtifactsForSource(projectId: string, sourceBookId: string): Promise<void>;
+  deleteProjectArtifactsByIds(ids: string[]): Promise<void>;
 
   saveProjectRelations(relations: ProjectRelation[]): Promise<void>;
   loadProjectRelations(projectId: string): Promise<ProjectRelation[]>;

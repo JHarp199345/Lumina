@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "web:dev": "vite --host 0.0.0.0 --port 5175",
     "web:build": "tsc && vite build",
-    "web:preview": "vite preview --host 0.0.0.0 --port 5175"
+    "web:preview": "vite preview --host 0.0.0.0 --port 5175",
+    "test:recall": "esbuild src/services/projectRecall.test.ts --bundle --platform=node --format=esm | node --input-type=module"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",

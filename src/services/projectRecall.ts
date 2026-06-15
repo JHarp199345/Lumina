@@ -50,6 +50,7 @@ export function cosine(a: number[], b: number[]): number {
 // ── Query + result shapes ──────────────────────────────────────────────────────
 
 export interface RecallQuery {
+  projectId: string;            // the project this query belongs to (isolation guard)
   text: string;                 // the current paragraph/section, or the explicit ask
   intent?: ProjectIntent;       // biases ranking toward the project goal
   embedding?: number[];         // optional; enables Tier-2 cosine
@@ -68,6 +69,7 @@ export interface RecallRow {
 
 export interface RecallResult {
   seq: number;
+  projectId: string;            // which project this result is for (never render cross-project)
   priority: "ambient" | "explicit";
   rows: RecallRow[];
 }
@@ -159,12 +161,14 @@ export function runRecall(artifacts: ProjectArtifact[], query: RecallQuery): Rec
 export type RecallPriority = "ambient" | "explicit";
 
 interface SchedulerOpts {
+  /** The project this scheduler serves — results for any other project are dropped. */
+  projectId: string;
   /** Live accessor for the current project artifacts (re-read each run). */
   getArtifacts: () => ProjectArtifact[];
-  /** Called with the latest honored result; stale results are never delivered. */
+  /** Called with the latest honored result; stale/cross-project results never delivered. */
   onResult: (result: RecallResult) => void;
   /** Optional async stage (e.g. a future Tier-4 reranker on explicit asks). */
-  rerank?: (rows: RecallRow[], query: RecallQuery) => Promise<RecallRow[]>;
+  rerank?: (rows: RecallRow[], query: RecallQuery, signal: { aborted: boolean }) => Promise<RecallRow[]>;
   ambientDebounceMs?: number;   // coalesce window for ambient triggers (default 400)
   explicitStickyMs?: number;    // suppress ambient after an explicit ask (default 6000)
 }
@@ -198,27 +202,38 @@ export class RecallScheduler {
     void this.drain(true);
   }
 
+  private currentSignal: { aborted: boolean } | null = null;
+
   private async drain(preempt = false): Promise<void> {
     if (this.disposed) return;
     if (this.running && !preempt) return;                 // single-flight
+    // Preempting an in-flight run: abort it so an async rerank can bail instead of
+    // racing the new run to deliver (true single-flight for the async path).
+    if (this.running && preempt && this.currentSignal) this.currentSignal.aborted = true;
     const next = this.pending;
     if (!next) return;
     this.pending = null;
 
     const mySeq = ++this.seq;
     this.honoredSeq = mySeq;                              // supersedes any in-flight result
+    const signal = { aborted: false };
+    this.currentSignal = signal;
     this.running = true;
     try {
       const query = next.getQuery();                     // rebuild from current context NOW
+      // Isolation guard: never compute/deliver a result for a different project.
+      if (query.projectId !== this.opts.projectId) return;
       let rows = runRecall(this.opts.getArtifacts(), query);
       if (next.priority === "explicit" && this.opts.rerank) {
-        rows = await this.opts.rerank(rows, query);       // Tier-4, explicit-only (future)
+        rows = await this.opts.rerank(rows, query, signal); // Tier-4, explicit-only (future)
       }
-      if (mySeq !== this.honoredSeq || this.disposed) return; // superseded → discard
-      this.opts.onResult({ seq: mySeq, priority: next.priority, rows });
+      // Discard if superseded, aborted, disposed, or somehow cross-project.
+      if (mySeq !== this.honoredSeq || signal.aborted || this.disposed) return;
+      if (query.projectId !== this.opts.projectId) return;
+      this.opts.onResult({ seq: mySeq, projectId: query.projectId, priority: next.priority, rows });
     } finally {
-      this.running = false;
-      if (this.pending) void this.drain();                // run any newer pending request
+      if (this.currentSignal === signal) { this.running = false; this.currentSignal = null; }
+      if (this.pending && !this.running) void this.drain(); // run any newer pending request
     }
   }
 

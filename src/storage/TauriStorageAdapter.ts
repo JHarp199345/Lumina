@@ -693,6 +693,14 @@ export class TauriStorageAdapter implements StorageAdapter {
     await this._saveProjectStore(s);
   }
 
+  async deleteProjectArtifactsByIds(ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    const set = new Set(ids);
+    const s = await this._loadProjectStore();
+    s.artifacts = s.artifacts.filter((a) => !set.has(a.id));
+    await this._saveProjectStore(s);
+  }
+
   async saveProjectRelations(relations: ProjectRelation[]): Promise<void> {
     if (!relations.length) return;
     const s = await this._loadProjectStore();

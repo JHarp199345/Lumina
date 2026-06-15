@@ -817,6 +817,10 @@ export class WebStorageAdapter implements StorageAdapter {
     );
   }
 
+  async deleteProjectArtifactsByIds(ids: string[]): Promise<void> {
+    await Promise.all(ids.map((id) => dbDelete(STORES.PROJECT_ARTIFACTS, id)));
+  }
+
   async saveProjectRelations(relations: ProjectRelation[]): Promise<void> {
     await Promise.all(relations.map((r) => dbPut(STORES.PROJECT_RELATIONS, r)));
   }
