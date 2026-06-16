@@ -179,6 +179,101 @@ export async function runOdysseusParallel(
   return (await res.json()) as OdysseusParallelResult;
 }
 
+// ── Odysseus sequential (single-file line) ──────────────────────────────────────
+
+export interface SequentialStepProgress {
+  completed: number;
+  total: number;
+  taskId: string;
+  status: "done" | "error";
+}
+
+/** Run an async op, retrying exactly once on failure (two attempts total). */
+async function attemptWithOneRetry<T>(op: () => Promise<T>): Promise<T> {
+  try {
+    return await op();
+  } catch {
+    return await op();
+  }
+}
+
+/**
+ * Sequential drop-in for {@link runOdysseusParallel}.
+ *
+ * Accepts the same request and returns the same result shape, but runs each task
+ * **one at a time** through the normal single-job path ({@link llmGenerate} →
+ * `/api/agents/{agent}/queue` → poll), so the backend never sees competing
+ * requests. This is the "single-file line": one in-flight step at a time, each
+ * retried exactly once, the whole phase ordered. `max_concurrency` is ignored.
+ *
+ * A failing step (after its one retry) is recorded as `status: "error"` and the
+ * run continues — callers already handle per-task errors with their own
+ * fallbacks. If `merge_agent`/`merge_prompt` are provided, a final reconciliation
+ * step runs sequentially (also retry-once) and populates `merge`, mirroring the
+ * server's merge so callers that read `merge` keep working.
+ */
+export async function runOdysseusSequential(
+  request: OdysseusParallelRequest,
+  onStep?: (progress: SequentialStepProgress) => void
+): Promise<OdysseusParallelResult> {
+  const results: OdysseusParallelResult["results"] = [];
+  const errors: Record<string, string> = {};
+  const total = request.tasks.length;
+
+  // Tasks here are independent (no depends_on in any caller), so input order is
+  // the execution order. Each await fully resolves before the next begins.
+  for (let i = 0; i < request.tasks.length; i++) {
+    const task = request.tasks[i];
+    const prompt = task.prompt ?? task.goal ?? "";
+    const started = Date.now();
+    try {
+      const content = await attemptWithOneRetry(() =>
+        llmGenerate(task.agent, prompt, {
+          temperature: task.temperature,
+          maxTokens: task.max_tokens,
+        })
+      );
+      results.push({ id: task.id, agent: task.agent, status: "done", content, duration_ms: Date.now() - started });
+      onStep?.({ completed: i + 1, total, taskId: task.id, status: "done" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors[task.id] = message;
+      results.push({ id: task.id, agent: task.agent, status: "error", error: message, duration_ms: Date.now() - started });
+      onStep?.({ completed: i + 1, total, taskId: task.id, status: "error" });
+    }
+  }
+
+  // Optional reconciliation — also sequential, also retry-once. The merge prompt
+  // expects the upstream worker outputs to be supplied, so append the successful
+  // task contents. On failure, leave `merge` undefined → caller falls back.
+  let merge: unknown;
+  if (request.merge_agent && request.merge_prompt) {
+    const completed = results.filter((r) => r.status === "done" && r.content);
+    if (completed.length > 0) {
+      const mergeInput =
+        `${request.merge_prompt}\n\nUpstream worker outputs:\n\n` +
+        completed.map((r) => `[worker ${r.id}]\n${r.content}`).join("\n\n");
+      try {
+        merge = await attemptWithOneRetry(() =>
+          llmGenerate(request.merge_agent as string, mergeInput, { temperature: 0.3 })
+        );
+      } catch {
+        /* leave merge undefined — caller reconciles from per-task results */
+      }
+    }
+  }
+
+  return {
+    ok: results.every((r) => r.status === "done"),
+    workflow_id: null,
+    phases: [],
+    packets: {},
+    results,
+    merge,
+    errors,
+  };
+}
+
 // ── Generate ───────────────────────────────────────────────────────────────────
 
 export interface LLMGenerateOptions {

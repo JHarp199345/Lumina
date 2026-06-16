@@ -31,7 +31,7 @@ import {
   llmGenerate,
   llmGenerateJSON,
   getProvider,
-  runOdysseusParallel,
+  runOdysseusSequential,
   type OdysseusParallelTask,
 } from "@/api/llmClient";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
@@ -476,13 +476,13 @@ JSON response:
 
   onProgress?.({
     phase: "scenes",
-    message: `Dispatching ${tasks.length} scene analyses in parallel…`,
+    message: `Analyzing ${tasks.length} scenes one at a time…`,
     percent: 45,
     current: 0,
     total: tasks.length,
   });
 
-  const parallelResult = await runOdysseusParallel({
+  const parallelResult = await runOdysseusSequential({
     workflow: {
       type: "scene-analysis",
       label: `Scene identification — ${structure.title}`,
@@ -494,7 +494,14 @@ JSON response:
       },
     },
     tasks,
-    max_concurrency: 6,
+  }, ({ completed, total }) => {
+    onProgress?.({
+      phase: "scenes",
+      message: `Analyzing scenes — ${completed}/${total}…`,
+      percent: 45 + Math.round((completed / Math.max(1, total)) * 20),
+      current: completed,
+      total,
+    });
   });
 
   onProgress?.({
@@ -824,13 +831,13 @@ Respond with ONLY the prompt text, no JSON, no quotes, no explanation.`,
 
   onProgress?.({
     phase: "prompts",
-    message: `Writing ${scenes.length} visual briefs in parallel…`,
+    message: `Writing ${scenes.length} visual briefs one at a time…`,
     percent: 68,
     current: 0,
     total: scenes.length,
   });
 
-  const parallelResult = await runOdysseusParallel({
+  const parallelResult = await runOdysseusSequential({
     workflow: {
       type: "visual-briefs",
       label: `Visual briefs — ${bookTitle}`,
@@ -838,7 +845,14 @@ Respond with ONLY the prompt text, no JSON, no quotes, no explanation.`,
       context: { book_title: bookTitle, scene_count: scenes.length },
     },
     tasks,
-    max_concurrency: 6,
+  }, ({ completed, total }) => {
+    onProgress?.({
+      phase: "prompts",
+      message: `Writing visual briefs — ${completed}/${total}…`,
+      percent: 68 + Math.round((completed / Math.max(1, total)) * 17),
+      current: completed,
+      total,
+    });
   });
 
   onProgress?.({

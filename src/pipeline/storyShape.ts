@@ -16,7 +16,7 @@ import type { AnalysisProgressReporter, ArcShape, InflectionPoint } from "@/type
 import {
   llmGenerateJSON,
   getProvider,
-  runOdysseusParallel,
+  runOdysseusSequential,
   type OdysseusParallelTask,
 } from "@/api/llmClient";
 import { diagnosticInfo, diagnosticWarn } from "@/utils/diagnostics";
@@ -451,23 +451,30 @@ async function scoreChaptersParallel(
 
   onProgress?.({
     phase: "scoring",
-    message: `Scoring all ${chapters.length} chapters in parallel (${batches.length} batches)…`,
+    message: `Scoring all ${chapters.length} chapters one batch at a time (${batches.length} batches)…`,
     percent: 8,
     current: 0,
     total: chapters.length,
   });
 
-  const result = await runOdysseusParallel({
+  const result = await runOdysseusSequential({
     workflow: {
       type: "chapter-scoring",
       label: `Emotional arc scoring — ${bookTitle}`,
-      task_goal: `Score ${chapters.length} chapters for sentiment across ${batches.length} parallel batches`,
+      task_goal: `Score ${chapters.length} chapters for sentiment across ${batches.length} sequential batches`,
       context: { book_title: bookTitle, chapter_count: chapters.length, batch_count: batches.length },
     },
     tasks,
-    max_concurrency: 8,
     merge_agent: "reading",
     merge_prompt: buildArcMergePrompt(bookTitle, chapters),
+  }, ({ completed, total }) => {
+    onProgress?.({
+      phase: "scoring",
+      message: `Scoring chapters — batch ${completed}/${total}…`,
+      percent: 8 + Math.round((completed / Math.max(1, total)) * 25),
+      current: completed,
+      total,
+    });
   });
 
   onProgress?.({
