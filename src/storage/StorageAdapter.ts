@@ -16,6 +16,7 @@ import type {
   BookStructure,
   ReadingProgress,
   SemanticMap,
+  BookProfile,
   SourceIntelligenceProfile,
   StyleSeedId,
   Highlight,
@@ -105,6 +106,9 @@ export interface StorageAdapter {
   saveSemanticMap(map: SemanticMap): Promise<void>;
   loadSemanticMap(bookId: string): Promise<SemanticMap | null>;
   deleteSemanticMap(bookId: string): Promise<void>;
+  saveBookProfile(profile: BookProfile): Promise<void>;
+  loadBookProfile(bookId: string): Promise<BookProfile | null>;
+  deleteBookProfile(bookId: string): Promise<void>;
 
   // ── Indexed blackboard artifacts ─────────────────────────────────────────
 

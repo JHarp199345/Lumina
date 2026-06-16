@@ -1,5 +1,6 @@
 import type {
   BookProfile,
+  BookProfileArtifactStamp,
   BookProfileItem,
   BookStructure,
   Chapter,
@@ -36,6 +37,10 @@ function stableId(input: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 96);
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
 }
 
 function chapterStartWords(chapters: Chapter[]): number[] {
@@ -161,8 +166,100 @@ export function buildBookProfile(params: {
   const { structure, semanticMap, sourceProfile } = params;
   const passageBoundaries = buildPassageBoundaries(structure, semanticMap);
   const threadLabels = uniq(semanticMap.narrativeBlueprint?.threads?.map((thread) => thread.label) ?? []);
+  const builtAt = nowIso();
+  const sourceHash = stableId([
+    structure.bookId,
+    structure.totalWords,
+    structure.parserVersion ?? 0,
+    semanticMap.analyzedAt,
+    sourceProfile?.builtAt ?? "",
+    semanticMap.visualPlanVersion ?? 0,
+  ].join(":"));
+  const stampBase = {
+    bookId: structure.bookId,
+    sourceHash,
+    profileVersion: PROFILE_VERSION,
+    createdBy: "lumina-profile-builder",
+    createdAt: builtAt,
+    dependsOn: [] as string[],
+    status: "ready" as const,
+  };
+  const artifactIndex: BookProfileArtifactStamp[] = [
+    {
+      ...stampBase,
+      artifactId: `${structure.bookId}:position-map`,
+      artifactType: "position-map",
+      startPosition: 0,
+      endPosition: structure.totalWords,
+    },
+    {
+      ...stampBase,
+      artifactId: `${structure.bookId}:chapter-map`,
+      artifactType: "chapter-map",
+      startPosition: 0,
+      endPosition: structure.totalWords,
+    },
+    {
+      ...stampBase,
+      artifactId: semanticMap.bookId,
+      artifactType: "semantic-map",
+      startPosition: 0,
+      endPosition: structure.totalWords,
+    },
+  ];
+  if (sourceProfile) {
+    artifactIndex.push({
+      ...stampBase,
+      artifactId: sourceProfile.bookId,
+      artifactType: "source-profile",
+      startPosition: 0,
+      endPosition: structure.totalWords,
+      dependsOn: [semanticMap.bookId],
+    });
+  }
+  if (semanticMap.visualLore) {
+    artifactIndex.push({
+      ...stampBase,
+      artifactId: `${structure.bookId}:visual-lore`,
+      artifactType: "lore-card",
+      startPosition: 0,
+      endPosition: structure.totalWords,
+      dependsOn: [semanticMap.bookId],
+    });
+  }
+  if (semanticMap.narrativeBlueprint) {
+    artifactIndex.push({
+      ...stampBase,
+      artifactId: `${structure.bookId}:story-arc`,
+      artifactType: "story-arc",
+      startPosition: 0,
+      endPosition: structure.totalWords,
+      dependsOn: [semanticMap.bookId],
+    });
+  }
+  if (semanticMap.storyboard) {
+    artifactIndex.push({
+      ...stampBase,
+      artifactId: `${structure.bookId}:storyboard`,
+      artifactType: "visual-slot",
+      startPosition: 0,
+      endPosition: structure.totalWords,
+      dependsOn: [semanticMap.bookId],
+    });
+  }
 
   const items: BookProfileItem[] = [];
+  for (const boundary of passageBoundaries) {
+    artifactIndex.push({
+      ...stampBase,
+      artifactId: boundary.id,
+      artifactType: boundary.source === "chapter" ? "chapter-map" : "section-map",
+      chapterId: boundary.chapterId,
+      startPosition: boundary.startWord,
+      endPosition: boundary.endWord,
+      dependsOn: [`${structure.bookId}:position-map`],
+    });
+  }
   for (const section of sourceProfile?.sections ?? []) {
     items.push({
       id: `source-section:${stableId(section.id)}`,
@@ -221,6 +318,32 @@ export function buildBookProfile(params: {
 
   for (const scene of semanticMap.scenes) {
     const position = computeSceneWordPosition(scene, structure.chapters);
+    const visualSlotId = scene.visualSlotKey ?? visualSlotKeyForScene(scene, structure.chapters) ?? scene.id;
+    artifactIndex.push({
+      ...stampBase,
+      artifactId: visualSlotId,
+      artifactType: "visual-slot",
+      chapterId: scene.chapterId,
+      startPosition: Math.max(0, position - 450),
+      endPosition: Math.min(structure.totalWords, position + 900),
+      dependsOn: [semanticMap.bookId],
+      status: scene.visualComposition?.status === "ready" ? "ready" : "planned",
+    });
+    if (scene.visualComposition) {
+      artifactIndex.push({
+        ...stampBase,
+        artifactId: scene.visualComposition.id,
+        artifactType: "image-composition",
+        chapterId: scene.chapterId,
+        startPosition: scene.visualComposition.startWord,
+        endPosition: scene.visualComposition.endWord,
+        sourceTextHash: scene.visualComposition.textHash,
+        dependsOn: [visualSlotId, ...scene.visualComposition.sourceItemIds],
+        status: scene.visualComposition.status,
+        createdAt: scene.visualComposition.createdAt,
+        createdBy: scene.visualComposition.provider,
+      });
+    }
     items.push({
       id: `scene:${stableId(scene.id)}`,
       kind: "scene",
@@ -248,8 +371,12 @@ export function buildBookProfile(params: {
 
   return {
     bookId: structure.bookId,
-    builtAt: new Date().toISOString(),
+    builtAt,
     version: PROFILE_VERSION,
+    profileId: `profile:${structure.bookId}:${sourceHash}`,
+    sourceHash,
+    profileVersion: PROFILE_VERSION,
+    updatedAt: builtAt,
     identity: {
       title: structure.title,
       author: structure.author,
@@ -269,6 +396,7 @@ export function buildBookProfile(params: {
       narrativeBlueprint: semanticMap.narrativeBlueprint ? `${semanticMap.bookId}:narrative-blueprint` : undefined,
       storyboard: semanticMap.storyboard ? `${semanticMap.bookId}:storyboard` : undefined,
     },
+    artifactIndex,
     storyCraft: {
       arcShape: semanticMap.arcShape,
       inflectionPoints: semanticMap.inflectionPoints,

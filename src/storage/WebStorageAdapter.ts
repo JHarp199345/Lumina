@@ -17,6 +17,7 @@ import type {
   BookStructure,
   ReadingProgress,
   SemanticMap,
+  BookProfile,
   SourceIntelligenceProfile,
   StyleSeedId,
   Highlight,
@@ -281,6 +282,7 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async saveSemanticMap(map: SemanticMap): Promise<void> {
     await dbPut(STORES.SEMANTIC_MAPS, map, map.bookId);
+    if (map.bookProfile) await this.saveBookProfile(map.bookProfile);
   }
 
   async loadSemanticMap(bookId: string): Promise<SemanticMap | null> {
@@ -289,6 +291,22 @@ export class WebStorageAdapter implements StorageAdapter {
 
   async deleteSemanticMap(bookId: string): Promise<void> {
     await dbDelete(STORES.SEMANTIC_MAPS, bookId);
+    await this.deleteBookProfile(bookId);
+  }
+
+  async saveBookProfile(profile: BookProfile): Promise<void> {
+    await dbPut(STORES.BOOK_PROFILES, profile, profile.bookId);
+  }
+
+  async loadBookProfile(bookId: string): Promise<BookProfile | null> {
+    const profile = await dbGet<BookProfile>(STORES.BOOK_PROFILES, bookId);
+    if (profile) return profile;
+    const map = await this.loadSemanticMap(bookId);
+    return map?.bookProfile ?? null;
+  }
+
+  async deleteBookProfile(bookId: string): Promise<void> {
+    await dbDelete(STORES.BOOK_PROFILES, bookId);
   }
 
   // ── Indexed blackboard artifacts ────────────────────────────────────────
@@ -621,6 +639,12 @@ export class WebStorageAdapter implements StorageAdapter {
         .filter((map) => matchesBookScope(map.bookId, bookId))
         .map((map) => dbDelete(STORES.SEMANTIC_MAPS, map.bookId))
     );
+    const bookProfiles = await dbGetAll<BookProfile>(STORES.BOOK_PROFILES);
+    await Promise.all(
+      bookProfiles
+        .filter((profile) => matchesBookScope(profile.bookId, bookId))
+        .map((profile) => dbDelete(STORES.BOOK_PROFILES, profile.bookId))
+    );
 
     const profiles = await dbGetAll<SourceIntelligenceProfile>(STORES.SOURCE_PROFILES);
     await Promise.all(
@@ -752,6 +776,12 @@ export class WebStorageAdapter implements StorageAdapter {
       semanticMaps
         .filter((map) => matchesBookScope(map.bookId, bookId))
         .map((map) => dbDelete(STORES.SEMANTIC_MAPS, map.bookId))
+    );
+    const bookProfiles = await dbGetAll<BookProfile>(STORES.BOOK_PROFILES);
+    await Promise.all(
+      bookProfiles
+        .filter((profile) => matchesBookScope(profile.bookId, bookId))
+        .map((profile) => dbDelete(STORES.BOOK_PROFILES, profile.bookId))
     );
     const profiles = await dbGetAll<SourceIntelligenceProfile>(STORES.SOURCE_PROFILES);
     await Promise.all(

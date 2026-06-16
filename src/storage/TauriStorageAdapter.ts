@@ -15,6 +15,7 @@ import type {
   BookStructure,
   ReadingProgress,
   SemanticMap,
+  BookProfile,
   SourceIntelligenceProfile,
   StyleSeedId,
   Highlight,
@@ -74,6 +75,9 @@ import {
   dbSaveSemanticMap,
   dbLoadSemanticMap,
   dbDeleteSemanticMap,
+  dbSaveBookProfile,
+  dbLoadBookProfile,
+  dbDeleteBookProfile,
   dbDeleteSemanticMapsForBookPrefix,
   dbSaveBlackboardNotes,
   dbLoadBlackboardNotes,
@@ -250,6 +254,18 @@ export class TauriStorageAdapter implements StorageAdapter {
 
   async deleteSemanticMap(bookId: string): Promise<void> {
     await dbDeleteSemanticMap(bookId);
+  }
+
+  async saveBookProfile(profile: BookProfile): Promise<void> {
+    await dbSaveBookProfile(profile);
+  }
+
+  async loadBookProfile(bookId: string): Promise<BookProfile | null> {
+    return dbLoadBookProfile(bookId);
+  }
+
+  async deleteBookProfile(bookId: string): Promise<void> {
+    await dbDeleteBookProfile(bookId);
   }
 
   // ── Indexed blackboard artifacts ────────────────────────────────────────

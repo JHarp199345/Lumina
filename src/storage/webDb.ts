@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = "lumina";
-const DB_VERSION = 14;
+const DB_VERSION = 15;
 
 export const STORES = {
   SOURCE_PROFILES: "source_profiles", // SourceIntelligenceProfile, keyed by bookId
@@ -17,6 +17,7 @@ export const STORES = {
   HIGHLIGHTS:    "highlights",      // Highlight[], keyed by id, indexed by bookId
   NOTES:         "notes",           // Note[], keyed by id, indexed by bookId
   SEMANTIC_MAPS: "semantic_maps",   // SemanticMap, keyed by bookId
+  BOOK_PROFILES: "book_profiles",   // BookProfile, keyed by bookId
   BLACKBOARD_NOTES: "blackboard_notes", // BlackboardNote, keyed by id, indexed by bookId
   STUDY_GUIDES:  "study_guides",    // StudyGuide, keyed by bookId
   STUDY_QUIZZES: "study_quizzes",    // StudyQuiz, keyed by id, indexed by bookId
@@ -85,6 +86,7 @@ export const STORE_REGISTRY: StoreDef[] = [
   { name: STORES.NOTIFICATIONS,   lifecycle: "userData",  keyPath: "id", indexes: BOOK_INDEX },
 
   { name: STORES.SEMANTIC_MAPS,   lifecycle: "generated" },
+  { name: STORES.BOOK_PROFILES,   lifecycle: "generated" },
   { name: STORES.BLACKBOARD_NOTES, lifecycle: "generated", keyPath: "id", indexes: BOOK_INDEX },
   { name: STORES.SOURCE_PROFILES, lifecycle: "generated" },
   { name: STORES.STUDY_GUIDES,    lifecycle: "generated" },

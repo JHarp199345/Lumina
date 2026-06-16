@@ -276,10 +276,55 @@ export interface BookProfileItem {
   weight: number;
 }
 
+export type BookProfileArtifactType =
+  | "position-map"
+  | "chapter-map"
+  | "section-map"
+  | "semantic-map"
+  | "story-arc"
+  | "source-profile"
+  | "lore-card"
+  | "visual-slot"
+  | "visual-brief"
+  | "image-composition"
+  | "generated-image"
+  | "audio-script"
+  | "audio-file"
+  | "audio-timing-map"
+  | "study-segment"
+  | "quiz"
+  | "flashcard-deck"
+  | "note"
+  | "highlight"
+  | "blackboard-note";
+
+export interface BookProfileArtifactStamp {
+  artifactId: string;
+  artifactType: BookProfileArtifactType;
+  bookId: string;
+  sourceHash?: string;
+  profileVersion: number;
+  chapterId?: string;
+  startPosition?: number;
+  endPosition?: number;
+  sourceTextHash?: string;
+  createdBy: string;
+  createdAt: string;
+  dependsOn: string[];
+  status: "planned" | "ready" | "failed" | "archived" | "stale";
+}
+
 export interface BookProfile {
   bookId: string;
   builtAt: string;
   version: number;
+  /** Durable profile id. Kept separate from bookId so future profile revisions can be archived. */
+  profileId?: string;
+  /** Hash of the source structure/profile inputs used to build this profile. */
+  sourceHash?: string;
+  /** Compatibility marker for future additive upgrades. */
+  profileVersion?: number;
+  updatedAt?: string;
   identity: {
     title: string;
     author: string;
@@ -299,6 +344,7 @@ export interface BookProfile {
     narrativeBlueprint?: string;
     storyboard?: string;
   };
+  artifactIndex?: BookProfileArtifactStamp[];
   storyCraft: {
     arcShape: ArcShape;
     inflectionPoints: InflectionPoint[];

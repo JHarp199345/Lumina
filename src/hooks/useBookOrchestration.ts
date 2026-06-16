@@ -44,6 +44,7 @@ import { diagnosticError, diagnosticInfo, diagnosticWarn } from "@/utils/diagnos
 import { LUMINA_CONFIG } from "@/config";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { buildBlackboardImageNote, buildBlackboardNotesForBook } from "@/services/blackboardNotes";
+import { ensureSemanticMapProfileSaved } from "@/services/bookProfileIndex";
 import type {
   AnalysisProgressDetail,
   AnalysisProgressUpdate,
@@ -159,6 +160,9 @@ export function useBookOrchestration() {
       }
 
       if (existingMap) {
+        await ensureSemanticMapProfileSaved(existingMap).catch((e) =>
+          console.warn("[Storage] Failed to materialize book profile:", e)
+        );
         console.log(`[Orchestration] Using cached semantic map for ${slice.label}`);
         diagnosticInfo("orchestration.cached_map", "Using cached semantic map", {
           semanticBookId: slice.semanticBookId,

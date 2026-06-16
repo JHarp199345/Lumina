@@ -14,6 +14,7 @@ import type {
   Highlight,
   Note,
   SemanticMap,
+  BookProfile,
   SourceIntelligenceProfile,
   CachedImage,
   StyleSeedId,
@@ -119,14 +120,25 @@ async function initSchema(db: Database): Promise<void> {
       analyzed_at TEXT NOT NULL,
       storyboard TEXT,
       visual_lore TEXT,
-      narrative_blueprint TEXT
+      narrative_blueprint TEXT,
+      book_profile TEXT
     );
   `);
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN storyboard TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN visual_lore TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE semantic_maps ADD COLUMN narrative_blueprint TEXT`).catch(() => {});
+  await db.execute(`ALTER TABLE semantic_maps ADD COLUMN book_profile TEXT`).catch(() => {});
   await db.execute(`ALTER TABLE image_cache ADD COLUMN word_position INTEGER`).catch(() => {});
   await db.execute(`ALTER TABLE image_cache ADD COLUMN visual_slot_key TEXT`).catch(() => {});
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS book_profiles (
+      book_id TEXT PRIMARY KEY,
+      profile_json TEXT NOT NULL,
+      built_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS source_profiles (
@@ -562,8 +574,8 @@ export async function dbSaveSemanticMap(map: SemanticMap): Promise<void> {
   const db = await getDb();
   await db.execute(
     `INSERT OR REPLACE INTO semantic_maps
-     (book_id, arc_shape, inflection_points, scenes, golden_number, analyzed_at, storyboard, visual_lore, narrative_blueprint)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+     (book_id, arc_shape, inflection_points, scenes, golden_number, analyzed_at, storyboard, visual_lore, narrative_blueprint, book_profile)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       map.bookId,
       map.arcShape,
@@ -574,18 +586,63 @@ export async function dbSaveSemanticMap(map: SemanticMap): Promise<void> {
       JSON.stringify(map.storyboard ?? null),
       JSON.stringify(map.visualLore ?? null),
       JSON.stringify(map.narrativeBlueprint ?? null),
+      JSON.stringify(map.bookProfile ?? null),
     ]
   );
+  if (map.bookProfile) await dbSaveBookProfile(map.bookProfile);
 }
 
 export async function dbDeleteSemanticMap(bookId: string): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1`, [bookId]);
+  await db.execute(`DELETE FROM book_profiles WHERE book_id = $1`, [bookId]);
 }
 
 export async function dbDeleteSemanticMapsForBookPrefix(bookId: string): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, `${bookId}::%`]);
+  await db.execute(`DELETE FROM book_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, `${bookId}::%`]);
+}
+
+export async function dbSaveBookProfile(profile: BookProfile): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT OR REPLACE INTO book_profiles (book_id, profile_json, built_at, updated_at)
+     VALUES ($1, $2, $3, $4)`,
+    [
+      profile.bookId,
+      JSON.stringify(profile),
+      profile.builtAt,
+      profile.updatedAt ?? profile.builtAt,
+    ]
+  );
+}
+
+export async function dbLoadBookProfile(bookId: string): Promise<BookProfile | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT profile_json FROM book_profiles WHERE book_id = $1`,
+    [bookId]
+  );
+  if (rows.length > 0) {
+    try {
+      return JSON.parse(String(rows[0].profile_json)) as BookProfile;
+    } catch {
+      return null;
+    }
+  }
+  const map = await dbLoadSemanticMap(bookId);
+  return map?.bookProfile ?? null;
+}
+
+export async function dbDeleteBookProfile(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM book_profiles WHERE book_id = $1`, [bookId]);
+}
+
+export async function dbDeleteBookProfilesForBookPrefix(bookId: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM book_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, `${bookId}::%`]);
 }
 
 // ─── Indexed Blackboard Artifacts ─────────────────────────────────────────────
@@ -654,6 +711,10 @@ export async function dbLoadSemanticMap(bookId: string): Promise<SemanticMap | n
     narrativeBlueprint:
       row.narrative_blueprint && String(row.narrative_blueprint) !== "null"
         ? JSON.parse(String(row.narrative_blueprint))
+        : undefined,
+    bookProfile:
+      row.book_profile && String(row.book_profile) !== "null"
+        ? JSON.parse(String(row.book_profile))
         : undefined,
   };
 }
@@ -1028,6 +1089,7 @@ export async function dbArchiveAndRemoveBook(bookId: string): Promise<void> {
   await db.execute(`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM highlights WHERE book_id = $1`, [bookId]);
   await db.execute(`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
+  await db.execute(`DELETE FROM book_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM source_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
   await db.execute(`DELETE FROM study_quizzes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]);
@@ -1132,6 +1194,7 @@ export async function dbDeleteAllBookData(bookId: string): Promise<void> {
     [`DELETE FROM reading_progress WHERE book_id = $1`, [bookId]],
     [`DELETE FROM highlights WHERE book_id = $1`, [bookId]],
     [`DELETE FROM semantic_maps WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
+    [`DELETE FROM book_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
     [`DELETE FROM blackboard_notes WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
     [`DELETE FROM source_profiles WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
     [`DELETE FROM study_guides WHERE book_id = $1 OR book_id LIKE $2`, [bookId, segmentPrefix]],
