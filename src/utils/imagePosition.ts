@@ -120,6 +120,14 @@ export function findImageAtPosition(
   return best;
 }
 
+/** Most-recently generated image wins when several map to the same target. */
+function newestImage(candidates: CachedImage[]): CachedImage | undefined {
+  if (candidates.length <= 1) return candidates[0];
+  return candidates.reduce((best, image) =>
+    (image.generatedAt ?? "") > (best.generatedAt ?? "") ? image : best
+  );
+}
+
 export function getImageForScene(
   scene: IdentifiedScene,
   images: Iterable<CachedImage>,
@@ -127,7 +135,10 @@ export function getImageForScene(
   scenes: IdentifiedScene[] = []
 ): CachedImage | undefined {
   const list = Array.from(images);
-  const direct = list.find((image) => image.sceneId === scene.id);
+  // A passage can accumulate more than one cached image (e.g. a regenerate that
+  // appended instead of replacing). Prefer the newest so a fresh image is never
+  // overshadowed by an older, worse one left in the cache.
+  const direct = newestImage(list.filter((image) => image.sceneId === scene.id));
   if (direct) return direct;
 
   if (chapters.length === 0 || scenes.length === 0) return undefined;

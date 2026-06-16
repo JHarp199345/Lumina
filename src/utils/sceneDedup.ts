@@ -95,16 +95,23 @@ export function findImageForVisualSlot(
   scenes: IdentifiedScene[],
   chapters: Chapter[]
 ): CachedImage | undefined {
+  // Collect every image bound to this slot, then return the newest. Returning the
+  // first match meant a stale image could overshadow a freshly generated one when
+  // two ended up on the same passage.
+  const matches: CachedImage[] = [];
   for (const image of images) {
     if (image.visualSlotKey) {
-      if (image.visualSlotKey === slotKey) return image;
+      if (image.visualSlotKey === slotKey) matches.push(image);
       continue;
     }
     const scene = scenes.find((item) => item.id === image.sceneId);
     if (!scene) continue;
-    if (visualSlotKeyForScene(scene, chapters) === slotKey) return image;
+    if (visualSlotKeyForScene(scene, chapters) === slotKey) matches.push(image);
   }
-  return undefined;
+  if (matches.length === 0) return undefined;
+  return matches.reduce((best, image) =>
+    (image.generatedAt ?? "") > (best.generatedAt ?? "") ? image : best
+  );
 }
 
 /**
