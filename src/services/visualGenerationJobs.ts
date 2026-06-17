@@ -46,6 +46,22 @@ export function activeVisualJobsForBook(bookId: string): VisualGenerationJob[] {
   return readJobs().filter((job) => job.bookId === bookId && isFresh(job));
 }
 
+/**
+ * Drop orphaned "running" jobs left over from a previous session.
+ *
+ * Generation is driven by in-memory state (imageStore.isGenerating /
+ * activeVisualJob), which does NOT survive a page reload. So after a refresh any
+ * persisted "running" job has no live process behind it — e.g. a generation
+ * started while logged out whose call never went through. Without this, such a
+ * job stays "fresh" (and shows a stuck progress bar) for the full 45-minute
+ * VISUAL_GENERATION_STALE_MS window. Call once on app init.
+ */
+export function reconcileOrphanedVisualJobs(): void {
+  const jobs = readJobs();
+  const kept = jobs.filter((job) => job.status !== "running");
+  if (kept.length !== jobs.length) writeJobs(kept);
+}
+
 export function startVisualJob(params: {
   bookId: string;
   scene: IdentifiedScene;
