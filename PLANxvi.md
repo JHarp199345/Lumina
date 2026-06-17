@@ -20,6 +20,11 @@ without generating anything new must work out of the box.
 Constraints honored: serverless (GitHub Pages), no always-on server, no recurring
 cost, browser-memory-safe, offline-capable after first view.
 
+The pre-baked library makes the app *useful* with zero setup. **Part Two** below
+makes it *generative* with zero setup too: a keyless user can upload their own text
+and have it processed for free, via a shared best-effort path — so the homeless
+clients (and college students) never have to know what an API key is.
+
 ---
 
 ## WHY THIS IS PRACTICAL (verified, not assumed)
@@ -199,6 +204,84 @@ book; the rest is scale + automation.
 
 ---
 
+## PART TWO — FREE LIVE GENERATION FOR KEYLESS USERS (best-effort)
+
+Pre-baked books make the app useful with no setup. This part lets a keyless user
+upload their *own* text/EPUB and have Lumina process it — free — without ever
+touching an API key.
+
+### Reliability hierarchy (and the UI must say so)
+
+1. **Pre-baked library — guaranteed.** No calls, always works. The floor; the app
+   is valuable even when every live path is down.
+2. **Free live generation — best-effort.** Free hosted models are globally
+   rate-limited and *will* fail under load. We make it resilient (queue + backoff,
+   never crash, eventually succeed), but never promise instant.
+3. **BYO key / Odysseus — reliable upgrade.** A user who adds an OpenRouter/Google
+   key, or the operator's own Odysseus box, gets the dependable path.
+
+Keyless live generation shows a calm "working — the free tier can take a while"
+state, never a spinner that looks hung.
+
+### The free path: a tiny proxy, NOT a key in the client
+
+The instinct is right: one shared OpenRouter key, routed **only to free models**.
+The one correction: **do not embed that key in the client build.** A key shipped to
+the browser is trivially extractable (view-source / devtools / network tab) and
+bots scrape public keys within minutes. Once leaked, strangers run their own traffic
+through it and exhaust the free-tier rate limits so the actual clients get nothing —
+and OpenRouter may disable the key outright. A $0 budget cap prevents money loss but
+not abuse/exhaustion.
+
+Put the key behind a **free serverless proxy** — a single **Cloudflare Worker**
+(free tier ~100k req/day, no card, nothing to maintain). It:
+
+- **holds the key server-side**, never shipped to the client, rotatable without an
+  app redeploy;
+- **restricts to the free-model allowlist** only;
+- **is the shared queue + rate limiter** — the real fix for "everyone piled in,
+  first-come-first-served, I came last." A client-side queue can only order *one
+  phone's* calls; only a shared proxy can fairly serialize across *all* of the
+  operator's users and buffer them against the global free-tier stampede;
+- adds cheap **abuse protection** (per-IP limits, a soft origin/token check).
+
+Same serverless, ~$0, MacBook-out-of-the-path properties as the hardcoded idea —
+without the leak. Honest ceiling: even a perfect proxy can't make OpenRouter's free
+models *reliable*; if they're globally saturated, upstream 429s still happen. The
+proxy + backoff turn "constant timeouts / crashes" into "slower, retried,
+usually-eventually-works," and the pre-baked library covers the rest. That is the
+realistic best a free live path can be — which is why the pre-baked floor matters so
+much for this audience.
+
+### Client retry-queue in `llmClient.ts`
+
+A resilience layer on the client, reusing the single-file-line discipline already in
+`runOdysseusSequential`:
+
+- **Single-flight + bounded queue.** One live request at a time per client; queue
+  depth capped, newest-wins dedup (same policy as the image queue) so an impatient
+  double-tap doesn't pile calls.
+- **Exponential backoff with jitter.** On 429 / timeout / 5xx: wait and retry, not
+  fail. Respect an upstream `Retry-After` when present; jitter so many phones don't
+  retry in lockstep.
+- **Bounded attempts + calm surrender.** After N tries, stop and say "the free tier
+  is busy — try again shortly, or add a key for instant results." Never a crash or a
+  silent hang.
+- **Provider seam.** Add an `"openrouter-free"` `LLMProvider` pointing at the Worker;
+  keep `odysseus` and `gemini` as-is. Keyless → openrouter-free; key present → that
+  provider.
+
+### Mini implementation order (Part Two)
+
+1. Cloudflare Worker proxy: key + free-model allowlist + per-IP limit + queue/limiter
+   (lives outside the app repo; deploy once).
+2. `llmClient.ts`: `"openrouter-free"` provider hitting the Worker; backoff + jitter
+   + bounded queue + `Retry-After` handling.
+3. Keyless UX: default keyless users to the free path; "working on the free tier"
+   state; "add a key for instant results" upsell for students/power users.
+
+---
+
 ## OPEN QUESTIONS
 
 1. **Which 3 starter books?** Suggest range over genre so the shelf shows breadth
@@ -210,3 +293,9 @@ book; the rest is scale + automation.
    a metered-data audience; confirm.
 4. **Offline default** — auto-cache a starter book's media on first open, or only on
    explicit "save offline"? (Auto is friendlier; costs more of the device's quota.)
+5. **Free-model allowlist (Part Two)** — which OpenRouter free model(s), and a
+   fallback order among them when one is saturated?
+6. **Proxy abuse protection** — per-IP rate limit only, or also a lightweight signed
+   app token so the Worker isn't trivially scriptable by outsiders?
+7. **Keyless default** — silently use the free proxy, or ask once ("use the free
+   shared service? it can be slow at peak") so users understand it's shared?
