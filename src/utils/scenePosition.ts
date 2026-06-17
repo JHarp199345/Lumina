@@ -21,10 +21,14 @@ export function computeSceneWordPosition(
   const anchor = scene.anchor;
 
   if (anchor) {
-    // Prefer spineIndex match — most reliable
+    // Match by chapterId FIRST — it is unique per reading chapter. spineIndex is
+    // NOT unique: subdividing a long chapter produces several reading chapters that
+    // all inherit the parent's spineIndex, so a spineIndex-first lookup collapses
+    // every scene in that chapter onto the first part and computes the wrong base
+    // word position (later slots land too early and get skipped on display).
     const chapter =
-      chapters.find((ch) => ch.spineIndex === anchor.spineIndex) ??
-      chapters.find((ch) => ch.id === scene.chapterId);
+      chapters.find((ch) => ch.id === scene.chapterId) ??
+      chapters.find((ch) => ch.spineIndex === anchor.spineIndex);
 
     if (!chapter) return 0;
 
