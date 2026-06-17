@@ -7,6 +7,7 @@ import { useBookOrchestration } from "@/hooks/useBookOrchestration";
 import ImageTriggerHost from "@/components/visual/ImageTriggerHost";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { storage } from "@/storage";
+import { reconcileOrphanedVisualJobs } from "@/services/visualGenerationJobs";
 import { parseEpub } from "@/pipeline/epubParser";
 import { diagnosticError, diagnosticInfo } from "@/utils/diagnostics";
 import TopNav from "@/components/layout/TopNav";
@@ -55,6 +56,13 @@ function App() {
   } = useBookStore();
   const [showOnboarding, setShowOnboarding] = useState(!hasCompletedOnboarding);
   const { importEpub, importEpubFile, loadLibrary, openBook } = useEpubImport();
+
+  // Clear any generation job orphaned by a previous session (e.g. a generation
+  // started while logged out that never completed) so a stuck progress bar can't
+  // survive a page refresh. Runs once on mount.
+  useEffect(() => {
+    reconcileOrphanedVisualJobs();
+  }, []);
 
   // Dev-only: ?test=1 auto-loads a bundled test EPUB and skips onboarding so the
   // reader (and highlight selection) can be exercised in preview without a picker.

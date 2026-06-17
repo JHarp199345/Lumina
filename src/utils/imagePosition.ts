@@ -39,14 +39,24 @@ export function getGoverningImage(
     if (scenesById && !scenesById.has(image.sceneId)) continue;
     const scene = scenesById?.get(image.sceneId);
     const pos = resolveImageWordPosition(image, chapters, scene);
-    if (pos < 0) continue;
-    if (pos <= wordPosition && pos > bestPos) {
+    if (pos < 0 || pos > wordPosition) continue;
+    // Highest position at/before the reader wins; on a tie (two generations for the
+    // same slot/position) the NEWEST generation wins, so an old image can never
+    // bleed through and overtake a fresh one — e.g. after a page refresh that
+    // rehydrates both from the archive.
+    if (pos > bestPos || (pos === bestPos && isNewer(image, best))) {
       best = image;
       bestPos = pos;
     }
   }
 
   return best;
+}
+
+/** True when `a` is a more recent generation than `b` (by generatedAt). */
+function isNewer(a: CachedImage, b: CachedImage | null): boolean {
+  if (!b) return true;
+  return (a.generatedAt ?? "") > (b.generatedAt ?? "");
 }
 
 /** Earliest positioned image strictly after the reader (section preview hold). */
@@ -64,7 +74,8 @@ export function getPreviewImage(
     const scene = scenesById?.get(image.sceneId);
     const pos = resolveImageWordPosition(image, chapters, scene);
     if (pos < 0 || pos <= wordPosition) continue;
-    if (pos < bestPos) {
+    // Earliest upcoming position; on a tie the newest generation wins.
+    if (pos < bestPos || (pos === bestPos && isNewer(image, best))) {
       best = image;
       bestPos = pos;
     }
