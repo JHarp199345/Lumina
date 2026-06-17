@@ -398,8 +398,12 @@ export function useImageTrigger() {
             word_position: scenePosition,
             image_id: outcome.ok ? outcome.image.id : null,
           },
-          goal_achieved: outcome.ok ? 1 : outcome.reason === "cached" ? 0.75 : 0,
-          unblocked_next: outcome.ok || outcome.reason === "cached",
+          // "busy" is backpressure — the single-flight guard correctly declined a
+          // concurrent request; the queue item is requeued below. Treat it as a
+          // benign deferral (like "cached"), not an image_director failure, so it
+          // doesn't drag the run grade to 0 or generate false "scored 0%" findings.
+          goal_achieved: outcome.ok ? 1 : outcome.reason === "cached" || outcome.reason === "busy" ? 0.75 : 0,
+          unblocked_next: outcome.ok || outcome.reason === "cached" || outcome.reason === "busy",
         }),
         (err) => ({
           metrics: {
