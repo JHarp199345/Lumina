@@ -27,6 +27,12 @@ export interface ActiveWorkflowContext {
 
 let _active: ActiveWorkflowContext | null = null;
 
+// Depth of explicit client-side trackStep() wrappers currently on the stack.
+// While > 0, the client is recording this step itself, so inner agent calls
+// must NOT also be auto-recorded server-side (that double-logs one task as two
+// — e.g. a "visual-lore" wrapper plus the inner visual_analyst call).
+let _explicitStepDepth = 0;
+
 export function setWorkflowContext(ctx: ActiveWorkflowContext | null): void {
   _active = ctx;
 }
@@ -64,6 +70,10 @@ export function getWorkflowAgentHeaders(
   if (stepName) h["X-Workflow-Step-Name"] = httpHeaderSafe(stepName);
   if (stepGoal) h["X-Workflow-Step-Goal"] = httpHeaderSafe(stepGoal);
   if (skill) h["X-Workflow-Step-Skill"] = httpHeaderSafe(skill);
+  // Inside an explicit trackStep the client records the step itself, so tell the
+  // server not to auto-record a duplicate. Only when client recording is live
+  // (run id present) — otherwise keep the server fallback for the 401 case.
+  if (_explicitStepDepth > 0 && _active.id) h["X-Workflow-Suppress-Step"] = "1";
   return h;
 }
 
@@ -248,6 +258,9 @@ export async function trackStep<T>(
 
   const sw = stopwatch();
   const seq = await beginStep(workflowId, spec);
+  // This wrapper now owns the step record; suppress server-side auto-recording
+  // of the inner agent call(s) for the duration of work().
+  _explicitStepDepth += 1;
   try {
     const result = await work();
     const outcome = evaluate(result);
@@ -269,6 +282,8 @@ export async function trackStep<T>(
       status: "failed",
     });
     throw err;
+  } finally {
+    _explicitStepDepth = Math.max(0, _explicitStepDepth - 1);
   }
 }
 
