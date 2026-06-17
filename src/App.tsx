@@ -4,6 +4,7 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { useBookStore } from "@/store/bookStore";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { useBookOrchestration } from "@/hooks/useBookOrchestration";
+import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import ImageTriggerHost from "@/components/visual/ImageTriggerHost";
 import { useDeviceLayout } from "@/hooks/useDeviceLayout";
 import { storage } from "@/storage";
@@ -55,6 +56,10 @@ function App() {
   } = useBookStore();
   const [showOnboarding, setShowOnboarding] = useState(!hasCompletedOnboarding);
   const { importEpub, importEpubFile, loadLibrary, openBook } = useEpubImport();
+
+  // Keep the screen awake while a generation is in flight so the poll loop isn't
+  // throttled by screen sleep (foreground case). See useScreenWakeLock.
+  useScreenWakeLock();
 
   // Dev-only: ?test=1 auto-loads a bundled test EPUB and skips onboarding so the
   // reader (and highlight selection) can be exercised in preview without a picker.
