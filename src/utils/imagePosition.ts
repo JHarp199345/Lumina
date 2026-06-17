@@ -23,6 +23,18 @@ export function resolveImageWordPosition(
   return -1;
 }
 
+/** Newer image wins when two share the same anchor position. */
+function newerThan(a: CachedImage, b: CachedImage | null): boolean {
+  if (!b) return true;
+  return (a.generatedAt ?? "") > (b.generatedAt ?? "");
+}
+
+/**
+ * The image of the slot the reader is currently in: the one with the highest
+ * anchor position at or before the reader. If that slot has no image yet, this
+ * naturally returns the last earlier slot that does — i.e. the previous image is
+ * "held" until the next slot's image is ready. Never returns a slot ahead.
+ */
 export function getGoverningImage(
   images: CachedImage[],
   wordPosition: number,
@@ -39,8 +51,8 @@ export function getGoverningImage(
     if (scenesById && !scenesById.has(image.sceneId)) continue;
     const scene = scenesById?.get(image.sceneId);
     const pos = resolveImageWordPosition(image, chapters, scene);
-    if (pos < 0) continue;
-    if (pos <= wordPosition && pos > bestPos) {
+    if (pos < 0 || pos > wordPosition) continue;
+    if (pos > bestPos || (pos === bestPos && newerThan(image, best))) {
       best = image;
       bestPos = pos;
     }
@@ -49,10 +61,9 @@ export function getGoverningImage(
   return best;
 }
 
-/** Earliest positioned image strictly after the reader (section preview hold). */
-export function getPreviewImage(
+/** The first slot's image (earliest anchor position) — newest wins on a tie. */
+export function getFirstPositionedImage(
   images: CachedImage[],
-  wordPosition: number,
   chapters: Chapter[],
   scenesById?: Map<string, IdentifiedScene>
 ): CachedImage | null {
@@ -63,8 +74,8 @@ export function getPreviewImage(
     if (scenesById && !scenesById.has(image.sceneId)) continue;
     const scene = scenesById?.get(image.sceneId);
     const pos = resolveImageWordPosition(image, chapters, scene);
-    if (pos < 0 || pos <= wordPosition) continue;
-    if (pos < bestPos) {
+    if (pos < 0) continue;
+    if (pos < bestPos || (pos === bestPos && newerThan(image, best))) {
       best = image;
       bestPos = pos;
     }
@@ -74,9 +85,12 @@ export function getPreviewImage(
 }
 
 /**
- * Image to show on the visual panel: the governing anchor at or before the
- * reader, or — when still before the first anchor — the next upcoming image
- * so the panel is never blank while art exists for the current section.
+ * The single deterministic rule for what the reader sees.
+ *
+ * Slots run in reading order. Show the slot at or before the reader (the previous
+ * image is held until the next slot's image is ready). Before the first slot,
+ * show the first slot's image. A slot ahead of the reader is never shown. This is
+ * the only selector the reader display uses — no look-ahead, no second path.
  */
 export function getDisplayImage(
   images: CachedImage[],
@@ -86,7 +100,7 @@ export function getDisplayImage(
 ): CachedImage | null {
   return (
     getGoverningImage(images, wordPosition, chapters, scenesById) ??
-    getPreviewImage(images, wordPosition, chapters, scenesById)
+    getFirstPositionedImage(images, chapters, scenesById)
   );
 }
 

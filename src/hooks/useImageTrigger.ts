@@ -20,14 +20,7 @@ import { getStyleSeedById } from "@/data/styleSeeds";
 import { LUMINA_CONFIG } from "@/config";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
-import { getCurrentPlannedScene } from "@/utils/scenePosition";
-import {
-  getDisplayImage,
-  getGoverningImage,
-  getImageForScene,
-  hasPositionedImages,
-  resolveImageWordPosition,
-} from "@/utils/imagePosition";
+import { getDisplayImage } from "@/utils/imagePosition";
 import {
   segmentScenesForSemanticMap,
   slotHasQueuedOrCachedImage,
@@ -60,13 +53,11 @@ export function useImageTrigger() {
   const isGeneratingRef = useRef(false);
   const isPlanningRef = useRef(false);
   const priorPromptRef = useRef<string>("");
-  const lastDisplayDecisionRef = useRef<string>("");
   const lastWordPositionRef = useRef(0);
   const lastQueuePositionRef = useRef(-1);
 
   useEffect(() => {
     priorPromptRef.current = "";
-    lastDisplayDecisionRef.current = "";
     lastWordPositionRef.current = 0;
     lastQueuePositionRef.current = -1;
   }, [activeBook?.id]);
@@ -82,71 +73,34 @@ export function useImageTrigger() {
 
     const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
 
-    // SINGLE SOURCE OF TRUTH: only images belonging to the CURRENT generation may
-    // govern the display — the same scene-membership scope the gallery uses. Without
-    // this, an orphaned image from a prior generation (e.g. an expository diagram from
-    // a wrong classification) could win by raw word position and show in the reader
-    // while the gallery showed a different, current image.
+    // SINGLE SOURCE OF TRUTH: only images from the CURRENT generation may display, so
+    // an orphan from a prior generation can never leak into the reader.
     const currentSceneIds = new Set(activeSemanticMap.scenes.map((scene) => scene.id));
-    const allCached = Object.values(useImageStore.getState().imageCache);
-    const cachedImages = allCached.filter((image) => currentSceneIds.has(image.sceneId));
-    const canonicalScenes = segmentScenesForSemanticMap(activeSemanticMap.scenes, chapters, activeSemanticMap);
-
-    let current = useImageStore.getState().currentImage;
+    const scenesById = new Map(activeSemanticMap.scenes.map((scene) => [scene.id, scene]));
+    const cachedImages = Object.values(useImageStore.getState().imageCache).filter((image) =>
+      currentSceneIds.has(image.sceneId)
+    );
     const readerPos = useReaderStore.getState().wordPosition;
 
-    // If the currently displayed image is an orphan from a prior generation, drop it
-    // immediately so it can never linger in any view.
+    let current = useImageStore.getState().currentImage;
     if (current && !currentSceneIds.has(current.sceneId)) {
       setCurrentImage(null);
       setCurrentThemes([]);
       current = null;
     }
 
-    const activePlannedScene = getCurrentPlannedScene(canonicalScenes, readerPos, chapters);
-    const activeSceneImage = activePlannedScene
-      ? getImageForScene(activePlannedScene, cachedImages, chapters, canonicalScenes)
-      : null;
-    const isNavigationJump = Date.now() < useImageStore.getState().navigationJumpUntil;
-    const displayImage = isNavigationJump
-      ? activeSceneImage ?? null
-      : getDisplayImage(cachedImages, readerPos, chapters);
-    const governingImage = getGoverningImage(cachedImages, readerPos, chapters);
-    const currentImagePosition =
-      current && chapters.length > 0 ? resolveImageWordPosition(current, chapters) : -1;
-
-    const nextPositionedImage = cachedImages
-      .map((image) => ({ image, position: resolveImageWordPosition(image, chapters) }))
-      .filter(({ position }) => position > readerPos)
-      .sort((a, b) => a.position - b.position)[0] ?? null;
+    // ONE deterministic rule, reading and jumps alike: show the slot at or before the
+    // reader (the previous image is held until the next slot's image is ready); before
+    // the first slot, show the first slot's image; never show a slot ahead of the reader.
+    const displayImage = getDisplayImage(cachedImages, readerPos, chapters, scenesById);
 
     if (displayImage) {
-      const displayPos = resolveImageWordPosition(displayImage, chapters);
-      const isPreview = !governingImage || governingImage.id !== displayImage.id;
-
       if (current?.id !== displayImage.id || current.filePath !== displayImage.filePath) {
         setCurrentImage(displayImage);
         setCurrentThemes(displayImage.emotionalThemes);
-      } else {
-        const decisionSignature = [
-          displayImage.id,
-          current?.id ?? "none",
-          readerPos,
-          nextPositionedImage?.position ?? "none",
-          cachedImages.length,
-          isPreview ? "preview-hold" : "hold",
-        ].join("|");
-
-        if (decisionSignature !== lastDisplayDecisionRef.current) {
-          lastDisplayDecisionRef.current = decisionSignature;
-          diagnosticInfo("image.display.hold", "Holding visual segment", {
-            governingSceneId: displayImage.sceneId,
-            wordPosition: readerPos,
-            imageWordPosition: displayPos,
-          });
-        }
       }
-    } else if (current && (isNavigationJump || hasPositionedImages(cachedImages, chapters))) {
+    } else if (current) {
+      // No current-generation image exists yet — show nothing.
       setCurrentImage(null);
       setCurrentThemes([]);
     }
