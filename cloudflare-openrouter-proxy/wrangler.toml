@@ -1,0 +1,14 @@
+name = "lumina-openrouter-free"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# The OpenRouter API key is NOT stored here. It is a secret, set once with:
+#   wrangler secret put OPENROUTER_API_KEY
+# (see README.md). Never commit the key.
+
+# ── Optional: per-IP rate limiting via Workers KV ──
+# Create the namespace, then paste its id below and uncomment:
+#   wrangler kv namespace create RATE_LIMIT_KV
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT_KV"
+# id = "PASTE_NAMESPACE_ID_HERE"
