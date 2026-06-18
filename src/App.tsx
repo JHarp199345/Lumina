@@ -117,13 +117,12 @@ function App() {
     diagnosticInfo("library.load.start", "Loading library");
     let cancelled = false;
     (async () => {
-      const starterHydrated = await hydrateStarterLibrary().catch((err) => {
+      await hydrateStarterLibrary().catch((err) => {
         diagnosticError("starter_library.hydrate.failed", "Could not hydrate starter library", {
           error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
         });
         return false;
       });
-      if (starterHydrated && !cancelled) setShowOnboarding(false);
       return loadLibrary();
     })().then((books) => {
       if (cancelled || useBookStore.getState().activeBook || books.length === 0) return;
