@@ -35,8 +35,29 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-let queueDepth = 0;
-let chain: Promise<unknown> = Promise.resolve();
+// Bounded concurrency — NOT single-flight. The Horde is a crowd of workers, so
+// separate requests take separate queue slots and wait in parallel. We let up to
+// MAX_CONCURRENT image jobs run at once (each its own submit→poll→result); a
+// reader who requests several images in succession gets them all in line together
+// (~one queue wait, not N×) instead of serialized. Overflow waits for a slot
+// rather than being rejected. The Worker's per-IP submit cap is the abuse guard.
+const MAX_CONCURRENT = 6;
+let active = 0;
+const waiters: Array<() => void> = [];
+
+function acquireSlot(): Promise<void> {
+  if (active < MAX_CONCURRENT) {
+    active += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => waiters.push(resolve));
+}
+
+function releaseSlot(): void {
+  const next = waiters.shift();
+  if (next) next(); // hand the slot straight to the next waiter (active unchanged)
+  else active -= 1;
+}
 
 async function submit(prompt: string, params: HordeImageParams): Promise<string> {
   let lastErr = "";
@@ -111,22 +132,20 @@ async function runOne(prompt: string, params: HordeImageParams): Promise<HordeIm
 }
 
 /**
- * Generate one SFW image via the free AI Horde, serialized single-flight so we
- * never stampede the shared free tier. Always resolves (never throws) with a
- * safe image or a fail-closed reason.
+ * Generate one SFW image via the free AI Horde. Bounded-concurrent: up to
+ * MAX_CONCURRENT jobs run at once (each its own queue slot, polled in parallel);
+ * further requests wait for a slot. Always resolves (never throws) with a safe
+ * image or a fail-closed reason.
  */
 export async function generateHordeImage(
   prompt: string,
   params: HordeImageParams = {}
 ): Promise<HordeImageResult> {
   if (!PROXY_URL) return { ok: false, reason: "not_configured", message: "VITE_FREE_PROXY_URL is unset" };
-  if (queueDepth >= 4) return { ok: false, reason: "failed", message: "too many pending image requests" };
-  queueDepth += 1;
-  const run = chain.then(() => runOne(prompt, params));
-  chain = run.catch(() => undefined);
+  await acquireSlot();
   try {
-    return await run;
+    return await runOne(prompt, params);
   } finally {
-    queueDepth -= 1;
+    releaseSlot();
   }
 }
