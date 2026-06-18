@@ -34,6 +34,7 @@ import {
   runOdysseusSequential,
   type OdysseusParallelTask,
 } from "@/api/llmClient";
+import { mapWithConcurrency } from "@/utils/concurrency";
 import { VISUAL_PLAN_VERSION } from "@/config/visualPlan";
 import { storyOnlyStructure } from "@/utils/storyContent";
 import { buildVisualSlotPlan } from "@/utils/sceneDedup";
@@ -340,6 +341,47 @@ async function identifyScenes(
     } catch (err) {
       console.warn("[Semantic] Parallel scene identification failed, falling back to sequential:", err);
     }
+  }
+
+  // Gemini tolerates concurrency — identify the (deduped) scenes in parallel
+  // instead of one at a time. Free/local providers stay sequential below.
+  if (getProvider() === "gemini") {
+    const jobs: Array<() => Promise<IdentifiedScene>> = [];
+    const used = new Set<string>();
+    const opening = structure.chapters[0];
+    if (opening) {
+      used.add(opening.id);
+      jobs.push(() =>
+        identifyOpeningScene(opening, structure, shapeResult, apiKey).catch((err) => {
+          console.warn("[Semantic] Opening scene identification failed, using fallback:", err);
+          return buildFallbackScene(opening, structure, "opening", undefined, shapeResult);
+        })
+      );
+    }
+    for (const point of macroArc.inflectionPoints) {
+      const chapter = structure.chapters[point.approximateChapterIndex];
+      if (!chapter || used.has(chapter.id)) continue;
+      used.add(chapter.id);
+      jobs.push(() =>
+        identifySceneForInflection(chapter, point, structure, shapeResult, apiKey).catch((err) => {
+          console.warn("[Semantic] Inflection scene identification failed, using fallback:", err);
+          return buildFallbackScene(chapter, structure, point.id, point, shapeResult);
+        })
+      );
+    }
+    let completed = 0;
+    return mapWithConcurrency(jobs, 4, async (job) => {
+      const scene = await job();
+      completed += 1;
+      onProgress?.({
+        phase: "scenes",
+        message: `Finding key scenes — ${completed}/${jobs.length}…`,
+        percent: 45 + Math.round((completed / Math.max(1, jobs.length)) * 20),
+        current: completed,
+        total: jobs.length,
+      });
+      return scene;
+    });
   }
 
   const scenes: IdentifiedScene[] = [];
@@ -774,6 +816,28 @@ async function generateImageDescriptions(
     } catch (err) {
       console.warn("[Semantic] Parallel image descriptions failed, falling back to sequential:", err);
     }
+  }
+
+  // Gemini tolerates concurrency — write the independent visual briefs in parallel.
+  if (getProvider() === "gemini") {
+    let completed = 0;
+    return mapWithConcurrency(scenes, 5, async (scene) => {
+      let description: string;
+      try {
+        description = await generateSingleDescription(scene, macroArc, bookTitle, apiKey);
+      } catch {
+        description = buildFallbackDescription(scene, macroArc);
+      }
+      completed += 1;
+      onProgress?.({
+        phase: "prompts",
+        message: `Writing visual briefs — ${completed}/${scenes.length}…`,
+        percent: 68 + Math.round((completed / Math.max(1, scenes.length)) * 17),
+        current: completed,
+        total: scenes.length,
+      });
+      return { ...scene, imageDescription: description };
+    });
   }
 
   const result: IdentifiedScene[] = [];

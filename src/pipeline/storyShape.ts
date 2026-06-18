@@ -85,7 +85,9 @@ async function scoreChapters(
   apiKey: string,
   onProgress?: AnalysisProgressReporter
 ): Promise<number[]> {
-  const BATCH_SIZE = 8;
+  // Gemini's large context handles many chapters per call accurately, so use
+  // bigger batches (far fewer calls). Free/local providers keep small batches.
+  const BATCH_SIZE = getProvider() === "gemini" ? 24 : 8;
 
   if (getProvider() === "odysseus") {
     try {
