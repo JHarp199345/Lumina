@@ -374,6 +374,45 @@ In `src/api/llmClient.ts` (current seam: `type LLMProvider = "odysseus" |
 
 ---
 
+## 10A. QUEUE, FAIRNESS & ABUSE — keep it simple; the fancy queue is later
+
+Operator instinct: "one shared key at the Worker, queue requests by availability."
+Right direction. The refinement (the "better idea"):
+
+- **There are TWO different keys — don't conflate them.** (a) The operator's ONE
+  shared **free** OpenRouter key, server-side in the Worker, used for ALL free-mode
+  users — this is the "one key + queue" the operator means. (b) A user's OWN
+  **paid** key (paid mode), which is **session-only** (§3A) and never the shared
+  one. Free mode = the shared Worker key; paid mode = the user's ephemeral key.
+- **Model-availability routing is already free.** OpenRouter's `models` failover
+  array (§4) IS "use whichever free model is available" — it routes around saturated
+  models automatically. Do NOT build that part.
+- **Fairness across users — start simple.** Per-IP rate limit in Workers KV (§5) +
+  the client's bounded queue + exponential backoff (§10) gives a fair, non-crashing
+  experience with near-zero complexity. Ship this first.
+- **"Prune stupid requests" = dedup, already specified.** Newest-wins dedup +
+  single-flight (§10) cancels double-taps and stale slot requests; add a cheap
+  Worker-side reject for empty/garbage payloads.
+- **Soft app-token (anti-scripting):** the Worker checks a lightweight signed
+  origin/app token so it isn't trivially callable by outside scripts draining the
+  shared key. Cheap; do it.
+
+### The "spot in line" global queue — desirable, but a deliberate LATER upgrade
+A visible cross-user queue ("the free tier is busy — you're 4th in line") is great
+UX and fits the best-effort ethos. BUT:
+- **Cloudflare Workers are STATELESS** — each request is a fresh isolate. A true
+  cross-user FIFO queue with live positions needs **Cloudflare Durable Objects** (or
+  Cloudflare Queues) for shared coordination state — a real step up in complexity
+  (and DO/Queues free-tier limits apply).
+- So **v1 = rate-limit + backoff + dedup** (no global queue). Add the
+  Durable-Objects "spot in line" only if real contention proves it's needed; the
+  architecture (everything already through the Worker) supports bolting it on later
+  with no rework.
+- Per the gate: the queue / spot-in-line exists **only when Knowledge Horde mode is
+  on** — off means it, like everything else, isn't constructed.
+
+---
+
 ## 11. THE USER-FACING WARNING (consent gate for free mode)
 
 Shown once when free mode is selected (this IS the "ask once"). Accurate
@@ -436,8 +475,16 @@ The bundle has "gotten significant since inception"; be mindful.
 5. **Naming:** keep "Knowledge Horde" as the umbrella vs "Free / Community mode."
 6. **Keyless default:** silently use free mode vs the once-ask warning (the warning
    in §11 is the ask-once; recommended).
-7. **Isolation boundary for outputs:** does a Horde image land in the same library
-   as local ones (tagged with provenance), or a separate namespace?
+7. ~~Isolation boundary for outputs~~ — **RESOLVED (operator):** a Horde image
+   lands in the **same library** as other images, but is **examined (NSFW +
+   valid-image) as early as possible in the workflow, BEFORE it renders OR is
+   stored.** Fail closed — a flagged image is never saved and never shown. (The
+   examination is the Worker-side classifier in §7.)
+
+**Resolved dependency — OpenShelf:** the public-domain book on-ramp is **already
+built** (an in-app link to Project Gutenberg). It is the sanctioned content source
+the warning references ("books opened through OpenShelf"). No work needed; free
+mode can rely on it today.
 
 ---
 
