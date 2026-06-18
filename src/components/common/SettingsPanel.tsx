@@ -212,6 +212,29 @@ function VisualSection() {
           </div>
         )}
 
+        {activeBook && (
+          <div className="rounded-lg bg-ink/[0.04] border border-hair p-3 space-y-2">
+            <p className="text-xs text-ink-faint leading-relaxed">
+              Operator: export this analyzed book (text, images, EPUB) as a starter bundle to
+              pre-load on the public site.
+            </p>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const { exportStarterBundle } = await import("@/services/starterBundle");
+                  await exportStarterBundle(activeBook.id);
+                } catch (e) {
+                  alert("Export failed: " + (e instanceof Error ? e.message : String(e)));
+                }
+              }}
+              className="text-xs px-3 py-1.5 rounded-md border border-hair text-ink hover:bg-ink/[0.06]"
+            >
+              Export “{activeBook.title}” as starter bundle
+            </button>
+          </div>
+        )}
+
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs text-ink-faint">Visual Style</label>
