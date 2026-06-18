@@ -15,7 +15,7 @@ interface SettingsStore extends UserSettings {
   setHasCompletedOnboarding: (completed: boolean) => void;
   setApiKeyConfigured: (configured: boolean) => void;
   setVisualInterpretationLevel: (level: number) => void;
-  setLlmProvider: (provider: "odysseus" | "gemini") => void;
+  setLlmProvider: (provider: "odysseus" | "gemini" | "openrouter-free") => void;
   setOdysseusUrl: (url: string) => void;
   resolvedTheme: () => "dark" | "light";
 }

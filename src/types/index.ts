@@ -917,7 +917,7 @@ export interface UserSettings {
   apiKeyConfigured: boolean;
   visualInterpretationLevel: number;
   // AI Engine
-  llmProvider: "odysseus" | "gemini";
+  llmProvider: "odysseus" | "gemini" | "openrouter-free";
   odysseusUrl: string;
 }
 

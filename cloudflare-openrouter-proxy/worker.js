@@ -16,11 +16,14 @@
 // `:free` ids here. Find the current free models at:
 //   https://openrouter.ai/models?max_price=0
 // (Reader will replace this with their exact list.)
+// Ordered by reliability at producing clean structured JSON (the fragile part of
+// the pipeline). Failover tries them top-to-bottom. VERIFY each is still free at
+// https://openrouter.ai/models?max_price=0 before each deploy — ids drift.
 const FREE_MODELS = [
-  "deepseek/deepseek-chat-v3-0324:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "google/gemini-2.0-flash-exp:free",
-  "qwen/qwen-2.5-72b-instruct:free",
+  "meta-llama/llama-3.3-70b-instruct:free", // primary heavy reasoning
+  "qwen/qwen-2.5-72b-instruct:free", // strong complex-text fallback
+  "google/gemini-2.0-flash-exp:free", // vision/multimodal + fast
+  "deepseek/deepseek-r1-distill-llama-70b:free", // analytical backstop (reasoning; strip <think> client-side)
 ];
 
 // Origins allowed to call this Worker (your app URLs). Anything else is refused

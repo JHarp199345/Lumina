@@ -7,7 +7,7 @@ import { normalizeOdysseusUrl } from "@/utils/odysseusUrl";
 // The PWA stores URL/provider/token in IndexedDB-backed storage and mirrors the
 // token to localStorage for synchronous auth-header reads.
 
-export type LLMProvider = "odysseus" | "gemini";
+export type LLMProvider = "odysseus" | "gemini" | "openrouter-free";
 
 const TOKEN_KEY = "lk_lumina_odysseus_token";
 const TOKEN_STORAGE_NAME = "lumina_odysseus_token";
@@ -307,7 +307,18 @@ export async function llmGenerate(
   prompt: string,
   options: LLMGenerateOptions = {}
 ): Promise<string> {
-  if (getProvider() === "odysseus") {
+  const provider = getProvider();
+  if (provider === "openrouter-free") {
+    // HARD GATE + lazy-load: the walled-off free-mode client is imported (and thus
+    // constructed) ONLY on this path. When free mode is off it is never loaded —
+    // not in the initial bundle, and it shares no state with the local workflow.
+    const { callOpenRouterFree } = await import("@/api/freeMode/openRouterFreeClient");
+    return callOpenRouterFree(agent, prompt, {
+      temperature: options.temperature,
+      maxTokens: options.maxTokens,
+    });
+  }
+  if (provider === "odysseus") {
     return _callOdysseus(agent, prompt, options);
   }
   return _callGemini(prompt, options);
