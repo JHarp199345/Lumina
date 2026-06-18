@@ -35,6 +35,7 @@ import { useGalleryActions } from "@/hooks/useGalleryActions";
 import { useImageStore } from "@/store/imageStore";
 import { useUiStore } from "@/store/uiStore";
 import { hydrateOdysseusConfig } from "@/api/llmClient";
+import { hydrateStarterLibrary } from "@/services/starterHydration";
 import type { StyleSeedId, BookStructure } from "@/types";
 
 function App() {
@@ -115,7 +116,16 @@ function App() {
   useEffect(() => {
     diagnosticInfo("library.load.start", "Loading library");
     let cancelled = false;
-    loadLibrary().then((books) => {
+    (async () => {
+      const starterHydrated = await hydrateStarterLibrary().catch((err) => {
+        diagnosticError("starter_library.hydrate.failed", "Could not hydrate starter library", {
+          error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+        });
+        return false;
+      });
+      if (starterHydrated && !cancelled) setShowOnboarding(false);
+      return loadLibrary();
+    })().then((books) => {
       if (cancelled || useBookStore.getState().activeBook || books.length === 0) return;
       const lastBook = [...books].sort((a, b) => {
         const aTime = new Date(a.lastOpened ?? a.importedAt).getTime();
