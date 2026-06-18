@@ -19,11 +19,11 @@
 // Ordered by reliability at producing clean structured JSON (the fragile part of
 // the pipeline). Failover tries them top-to-bottom. VERIFY each is still free at
 // https://openrouter.ai/models?max_price=0 before each deploy — ids drift.
+// NOTE: OpenRouter caps the failover `models` array at 3 — keep this at 3 ids.
 const FREE_MODELS = [
   "meta-llama/llama-3.3-70b-instruct:free", // primary heavy reasoning
   "qwen/qwen-2.5-72b-instruct:free", // strong complex-text fallback
   "google/gemini-2.0-flash-exp:free", // vision/multimodal + fast
-  "deepseek/deepseek-r1-distill-llama-70b:free", // analytical backstop (reasoning; strip <think> client-side)
 ];
 
 // Origins allowed to call this Worker (your app URLs). Anything else is refused
@@ -87,7 +87,8 @@ export default {
       upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+          // Trim defends against a trailing newline/space from the secret paste.
+          Authorization: `Bearer ${(env.OPENROUTER_API_KEY || "").trim()}`,
           "Content-Type": "application/json",
           // OpenRouter attribution headers (optional but recommended):
           "HTTP-Referer": ALLOWED_ORIGINS[0],
