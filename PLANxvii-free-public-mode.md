@@ -115,6 +115,55 @@ machine, so the disclaimer doesn't need to cover it.
 > Earlier wrong assumption to avoid: "Horde generates the analysis, images, and
 > audio." It does not do audio, and in this design it does not do the text either
 > (OpenRouter does). Keep the split straight.
+>
+> VERIFIED (against the official Haidra-Org/AI-Horde repo): the AI Horde is "a
+> free community service that lets anyone create AI-generated images and text" —
+> **image + text only, no audio/TTS.** Not a memory claim; checked.
+
+---
+
+## 3A. MODES, AUDIO, AND KEY-STORAGE POLICY (operator-specified)
+
+Three modes map to three providers; audio and key handling differ per mode.
+
+### Modes → providers
+- **Free mode ("Knowledge Horde")** — provider `openrouter-free` (text via the
+  Worker) + AI Horde (images via the Worker). **No user key** — the OpenRouter key
+  lives server-side in the Worker; Horde needs no billing key.
+- **Local mode** — provider `odysseus`. The user runs their own server(s) and
+  chooses their own local TTS (operator self-hosts e.g. Kokoro; users *may*, but
+  must build their own — the operator cannot provide it). This limitation is the
+  whole reason the best-effort free mode exists.
+- **Paid mode (BYO key)** — provider `gemini` (and/or other paid). Uses the paid
+  API the user supplies, including its TTS voice.
+
+### Audio = script + voice, handled per mode
+The "audio overview" is an LLM-written **script** plus a **voice** that speaks it.
+- **Free:** script from `openrouter-free`; voice from the **browser's on-device
+  Web Speech API** (`speechSynthesis`). **Play** calls
+  `speechSynthesis.speak(new SpeechSynthesisUtterance(script))` with a voice the
+  user picks from `speechSynthesis.getVoices()`.
+  - IMPORTANT: the Web Speech API **is programmatically controllable** — Play can
+    drive it directly. The "open a window with instructions to highlight the text
+    and pick a voice" path is only a **FALLBACK** for the rare browser without Web
+    Speech support / where it's disabled. Do not make the fallback the default.
+  - On-device = nothing leaves the device for the voice (privacy bonus). **Free
+    mode only** — this whole browser-voice arrangement does not apply to local/paid.
+- **Local:** script from the local model; voice from **whichever local TTS server
+  the user configured** (operator's case: self-hosted).
+- **Paid:** script + premium **voice from the paid API** the user supplied.
+
+### Key-storage policy (security safeguard — operator-specified)
+- **Paid keys are SESSION-ONLY.** Store a BYO paid key in `sessionStorage` /
+  in-memory, **never** in persistent `localStorage`/IndexedDB. Closing the
+  browser/tab **deletes the key**; the user re-enters it each session. This
+  protects keys on shared/public machines (library, clinic) — the core audience.
+  > NOTE: this is a CHANGE from today's persisted `storage.loadApiKey(...)`
+  > behavior. The public build must NOT persist paid keys.
+- **Free mode: no key at all.**
+- **Local mode: assumes the user's own private setup;** their config is their
+  responsibility (may persist on a trusted personal machine — but the public/shared
+  deployment should default to session-only for any secret).
 
 ---
 
@@ -378,7 +427,9 @@ The bundle has "gotten significant since inception"; be mindful.
 ## 13. OPEN QUESTIONS (decisions still owed by the operator)
 
 1. **Confirm the four free-text model ids** on the live page; fix the Gemini id.
-2. **Audio:** on-device `speechSynthesis` vs pre-baked-only for free mode (or both).
+2. ~~Audio for free mode~~ — **RESOLVED (see §3A):** free script via `openrouter-free`,
+   voice via on-device `speechSynthesis` (instructions-window only as fallback);
+   pre-baked audio for starter books. Paid keys session-only.
 3. **Horde identity:** anonymous key `0000000000` (slow), one shared registered
    key (drains/fairness), or register-per-user (best fairness, more friction).
 4. **Which Cloudflare Workers AI model** for NSFW image classification.
