@@ -16,6 +16,7 @@ import { storage } from "@/storage";
 import { LUMINA_CONFIG } from "@/config";
 import { GOOGLE_KEY_NAME } from "@/pipeline/audioOverview";
 import type { OverviewScope } from "@/pipeline/audioOverview";
+import { getProvider } from "@/api/llmClient";
 import { knowledgeProtocol } from "@/pipeline/knowledgeGrounding";
 import {
   PRESENTATION_TEMPLATES,
@@ -94,6 +95,10 @@ export default function PresentationStudio() {
   }, [activeBook?.id]);
 
   useEffect(() => {
+    if (getProvider() !== "gemini") {
+      setHasKey(true);
+      return;
+    }
     let cancelled = false;
     storage
       .loadApiKey(GOOGLE_KEY_NAME)
@@ -117,8 +122,8 @@ export default function PresentationStudio() {
         setProfile(existing);
         return;
       }
-      const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
-      if (cancelled || !apiKey || !activeSemanticMap) return;
+      const apiKey = (await storage.loadApiKey(GOOGLE_KEY_NAME)) ?? "";
+      if (cancelled || (!apiKey && getProvider() === "gemini") || !activeSemanticMap) return;
       setProfileBuilding(true);
       try {
         const built = await buildSourceProfile(activeStructure, activeSemanticMap, apiKey);
@@ -159,8 +164,8 @@ export default function PresentationStudio() {
 
   const requestFullerSuggestion = async (ghostAngle?: (typeof suggestions)[0] | null) => {
     if (!activeStructure) return;
-    const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
-    if (!apiKey) {
+    const apiKey = (await storage.loadApiKey(GOOGLE_KEY_NAME)) ?? "";
+    if (!apiKey && getProvider() === "gemini") {
       setHasKey(false);
       return;
     }
@@ -188,8 +193,8 @@ export default function PresentationStudio() {
       setError("Open a book first.");
       return;
     }
-    const apiKey = await storage.loadApiKey(GOOGLE_KEY_NAME);
-    if (!apiKey) {
+    const apiKey = (await storage.loadApiKey(GOOGLE_KEY_NAME)) ?? "";
+    if (!apiKey && getProvider() === "gemini") {
       setHasKey(false);
       setError("Add your Google AI Studio key in Settings to generate presentations.");
       return;

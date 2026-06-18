@@ -17,7 +17,7 @@
 const PROXY_URL =
   (import.meta.env as Record<string, string | undefined>).VITE_FREE_PROXY_URL?.replace(/\/+$/, "") || "";
 
-const MAX_WAIT_MS = 3 * 60 * 1000; // give the free horde up to 3 minutes
+const MAX_WAIT_MS = 2 * 60 * 60 * 1000; // free Horde jobs can take 35-90 minutes
 const POLL_INTERVAL_MS = 4000;
 const SUBMIT_ATTEMPTS = 3;
 
@@ -25,6 +25,15 @@ export interface HordeImageParams {
   width?: number;
   height?: number;
   steps?: number;
+}
+
+export interface HordeImageProgress {
+  id: string;
+  waitTimeSeconds?: number;
+  queuePosition?: number;
+  waiting?: number;
+  processing?: number;
+  done?: boolean;
 }
 
 export type HordeImageResult =
@@ -85,13 +94,28 @@ async function submit(prompt: string, params: HordeImageParams): Promise<string>
   throw new Error(lastErr || "submit failed");
 }
 
-async function pollUntilDone(id: string): Promise<void> {
+async function pollUntilDone(id: string, onProgress?: (progress: HordeImageProgress) => void): Promise<void> {
   const deadline = Date.now() + MAX_WAIT_MS;
   while (Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
     const res = await fetch(`${PROXY_URL}/horde/check/${encodeURIComponent(id)}`).catch(() => null);
     if (!res?.ok) continue;
-    const data = (await res.json()) as { done?: boolean; faulted?: boolean };
+    const data = (await res.json()) as {
+      done?: boolean;
+      faulted?: boolean;
+      wait_time?: number;
+      queue_position?: number;
+      waiting?: number;
+      processing?: number;
+    };
+    onProgress?.({
+      id,
+      waitTimeSeconds: data.wait_time,
+      queuePosition: data.queue_position,
+      waiting: data.waiting,
+      processing: data.processing,
+      done: data.done,
+    });
     if (data.faulted) throw new Error("generation faulted");
     if (data.done) return;
   }
@@ -120,10 +144,15 @@ async function fetchResult(id: string): Promise<HordeImageResult> {
   return { ok: true, dataUrl, seed: gen.seed, workerName: gen.worker_name };
 }
 
-async function runOne(prompt: string, params: HordeImageParams): Promise<HordeImageResult> {
+async function runOne(
+  prompt: string,
+  params: HordeImageParams,
+  onProgress?: (progress: HordeImageProgress) => void
+): Promise<HordeImageResult> {
   try {
     const id = await submit(prompt, params);
-    await pollUntilDone(id);
+    onProgress?.({ id });
+    await pollUntilDone(id, onProgress);
     return await fetchResult(id);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -139,12 +168,13 @@ async function runOne(prompt: string, params: HordeImageParams): Promise<HordeIm
  */
 export async function generateHordeImage(
   prompt: string,
-  params: HordeImageParams = {}
+  params: HordeImageParams = {},
+  onProgress?: (progress: HordeImageProgress) => void
 ): Promise<HordeImageResult> {
   if (!PROXY_URL) return { ok: false, reason: "not_configured", message: "VITE_FREE_PROXY_URL is unset" };
   await acquireSlot();
   try {
-    return await runOne(prompt, params);
+    return await runOne(prompt, params, onProgress);
   } finally {
     releaseSlot();
   }

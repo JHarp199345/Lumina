@@ -25,7 +25,7 @@ export const LUMINA_CONFIG = {
   /** Jumps/gallery requests prepare only the requested visual slot, never a local batch. */
   VISUAL_SINGLE_SLOT_PROMOTIONS: 1,
   /** Long local/remote image jobs can survive reloads; after this, Lumina allows retry. */
-  VISUAL_GENERATION_STALE_MS: 45 * 60 * 1000,
+  VISUAL_GENERATION_STALE_MS: 2 * 60 * 60 * 1000,
   /** Any single image-engine network request longer than this is treated as stalled. */
   IMAGE_FETCH_TIMEOUT_MS: 90 * 1000,
   /** Local Odysseus/ComfyUI requests can legitimately run long on older machines. */

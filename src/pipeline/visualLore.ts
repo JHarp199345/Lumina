@@ -76,10 +76,10 @@ export async function buildVisualLoreDossier(params: {
     itemLabel: terms.slice(0, 3).join(", "),
   });
 
-  // Odysseus: one visual-lore worker writes organized, stamped artifacts. This
-  // keeps the local workflow sequential and readable instead of creating a wall
-  // of competing lore operators.
-  if (getProvider() === "odysseus") {
+  // Odysseus and free mode: one visual-lore worker writes organized, stamped
+  // artifacts from local book evidence. Free mode must not call Gemini Search;
+  // it uses the OpenRouter proxy through llmGenerateJSON.
+  if (getProvider() === "odysseus" || getProvider() === "openrouter-free") {
     try {
       const dossier = await buildLoreOdysseus(params.structure, terms, params.scenes ?? [], params.onProgress);
       diagnosticInfo("visual_lore.complete", "Visual lore dossier created", {

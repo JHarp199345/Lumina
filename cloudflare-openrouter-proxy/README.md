@@ -3,6 +3,8 @@
 A tiny Cloudflare Worker that lets keyless Lumina users generate for free, safely:
 
 - Holds **one OpenRouter API key server-side** — never shipped to the browser.
+- Holds an optional **registered AI Horde key server-side** for faster image queue
+  priority. Anonymous Horde still works, but it can be extremely slow.
 - Restricts every call to a **free-model allowlist** (edit `FREE_MODELS` in `worker.js`).
 - **Fails over** across those free models automatically (OpenRouter `models` routing).
 - **Per-IP rate limit** (optional, via Workers KV) so one user can't hog the shared tier.
@@ -41,6 +43,7 @@ wrangler login                 # opens a browser to authorize your Cloudflare ac
 ```bash
 cd cloudflare-openrouter-proxy
 wrangler secret put OPENROUTER_API_KEY    # paste the sk-or-... key when prompted
+wrangler secret put HORDE_API_KEY         # paste the registered AI Horde key when prompted
 wrangler deploy
 ```
 Deploy prints your Worker URL, e.g. `https://lumina-openrouter-free.<you>.workers.dev`.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { animate, motion, AnimatePresence, useMotionValue } from "framer-motion";
-import { X, Key, Image, Type, Trash2, RefreshCw, Palette, FolderOpen, Server } from "lucide-react";
+import { X, Key, Image, Type, Trash2, RefreshCw, Palette, FolderOpen, Server, AlertTriangle } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useBookStore } from "@/store/bookStore";
 import { useImageStore } from "@/store/imageStore";
@@ -11,6 +11,7 @@ import { getAnalysisSlice } from "@/pipeline/collectionSlicing";
 import { useEpubImport } from "@/hooks/useEpubImport";
 import { storage } from "@/storage";
 import ApiKeySetup from "./ApiKeySetup";
+import ModalPortal from "./ModalPortal";
 import {
   getProvider,
   setProvider,
@@ -430,6 +431,7 @@ function AISection() {
   const [token, setTokenState] = useState(() => getOdysseusToken());
   const [testState, setTestState] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [testMsg, setTestMsg] = useState("");
+  const [showFreeConsent, setShowFreeConsent] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -442,8 +444,18 @@ function AISection() {
   }, []);
 
   function applyProvider(p: LLMProvider) {
+    if (p === "openrouter-free") {
+      setShowFreeConsent(true);
+      return;
+    }
     setProvider(p);
     setTestState("idle");
+  }
+
+  function acceptFreeMode() {
+    setProvider("openrouter-free");
+    setTestState("idle");
+    setShowFreeConsent(false);
   }
 
   function handleUrlChange(val: string) {
@@ -502,8 +514,8 @@ function AISection() {
       <SectionHeader icon={Server} label="AI Engine" />
       <div className="px-5 space-y-4">
         {/* Provider pills */}
-        <div className="flex gap-2">
-          {(["odysseus", "gemini"] as LLMProvider[]).map((p) => (
+        <div className="grid grid-cols-3 gap-2">
+          {(["odysseus", "gemini", "openrouter-free"] as LLMProvider[]).map((p) => (
             <button
               key={p}
               onClick={() => applyProvider(p)}
@@ -513,7 +525,7 @@ function AISection() {
                   : "bg-ink/5 text-ink-faint border border-transparent hover:border-hair"
               }`}
             >
-              {p === "odysseus" ? "Local (Odysseus)" : "Cloud (Gemini)"}
+              {providerLabel(p)}
             </button>
           ))}
         </div>
@@ -581,8 +593,97 @@ function AISection() {
             Using Google AI Studio. Add your API key in the section below.
           </p>
         )}
+
+        {provider === "openrouter-free" && (
+          <p className="text-xs text-ink-faint leading-relaxed">
+            Free mode uses shared public AI services. Images queue on community GPUs and can take
+            35-90 minutes.
+          </p>
+        )}
       </div>
+
+      {showFreeConsent && (
+        <FreeModeConsentModal
+          onCancel={() => setShowFreeConsent(false)}
+          onAccept={acceptFreeMode}
+        />
+      )}
     </div>
+  );
+}
+
+function providerLabel(provider: LLMProvider): string {
+  if (provider === "odysseus") return "Local";
+  if (provider === "gemini") return "Gemini";
+  return "Free";
+}
+
+function FreeModeConsentModal({
+  onCancel,
+  onAccept,
+}: {
+  onCancel: () => void;
+  onAccept: () => void;
+}) {
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-scrim px-4 backdrop-blur-sm">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96, y: 10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.96, y: 10 }}
+          className="w-full max-w-md rounded-xl border border-lumina-gold/25 bg-surface-dark p-5 shadow-2xl shadow-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="free-mode-title"
+        >
+          <div className="mb-4 flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-lumina-gold" />
+            <div>
+              <h2 id="free-mode-title" className="text-sm font-semibold text-ink-soft">
+                Turn on Free Mode?
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-ink-faint">
+                Lumina will use shared public AI services so it can work without your own key.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3 text-xs leading-relaxed text-ink-faint">
+            <p>
+              Reading analysis is sent to free community model providers through Lumina's proxy.
+              Images are queued on AI Horde, a network of volunteer-run computers.
+            </p>
+            <p>
+              Image generation is free and best-effort. It can take 35-90 minutes, especially for
+              artistic images, and Lumina will show the queue estimate while it waits.
+            </p>
+            <p>
+              Use this for public-domain books, books you own, and Open Shelf titles. Do not use
+              free mode for personal, private, work, client, medical, legal, or sensitive material.
+            </p>
+            <p>
+              Need privacy or faster generation? Use Local Odysseus or your own Gemini key instead.
+            </p>
+          </div>
+
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              onClick={onCancel}
+              className="rounded-lg border border-hair bg-ink/[0.04] px-3 py-2 text-xs text-ink-faint transition-colors hover:text-ink-soft"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onAccept}
+              className="rounded-lg border border-lumina-gold/40 bg-lumina-gold/20 px-3 py-2 text-xs font-medium text-lumina-gold transition-colors hover:bg-lumina-gold/25"
+            >
+              I understand, use Free Mode
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    </ModalPortal>
   );
 }
 

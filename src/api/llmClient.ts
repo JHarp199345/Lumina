@@ -79,7 +79,7 @@ export async function hydrateOdysseusConfig(): Promise<void> {
     storage.loadApiKey(TOKEN_STORAGE_NAME).catch(() => null),
   ]);
 
-  if (provider === "odysseus" || provider === "gemini") {
+  if (provider === "odysseus" || provider === "gemini" || provider === "openrouter-free") {
     useSettingsStore.getState().setLlmProvider(provider);
   }
   if (url) {

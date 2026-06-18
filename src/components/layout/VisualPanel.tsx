@@ -62,6 +62,25 @@ const ARC_AMBIENT_GRADIENTS: Record<string, string> = {
   "default":          "radial-gradient(ellipse at 50% 50%, #111118 0%, #0c0c10 100%)",
 };
 
+function formatVisualWait(seconds?: number): string | null {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds)) return null;
+  const safe = Math.max(0, Math.round(seconds));
+  if (safe < 60) return `${safe}s`;
+  const minutes = Math.round(safe / 60);
+  if (minutes < 90) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return rem ? `${hours} hr ${rem} min` : `${hours} hr`;
+}
+
+function visualJobDetail(job: NonNullable<ReturnType<typeof useImageStore.getState>["activeVisualJob"]>): string | null {
+  if (job.isProcessing) return "Rendering now";
+  const wait = formatVisualWait(job.estimatedWaitSeconds);
+  const position = typeof job.queuePosition === "number" ? `#${job.queuePosition} in line` : null;
+  if (wait && position) return `${wait} left · ${position}`;
+  return wait ? `${wait} left` : position;
+}
+
 
 export default function VisualPanel() {
   const {
@@ -317,6 +336,12 @@ export default function VisualPanel() {
                     className="h-full rounded-full bg-lumina-gold/75 transition-all duration-500"
                     style={{ width: `${Math.max(6, Math.min(100, activeVisualJob.percent))}%` }}
                   />
+                </div>
+              )}
+              {activeVisualJob && visualJobDetail(activeVisualJob) && (
+                <div className="mt-1.5 flex items-center justify-between gap-3 text-[11px] text-ink-faint">
+                  <span>Free image queue</span>
+                  <span className="shrink-0 tabular-nums">{visualJobDetail(activeVisualJob)}</span>
                 </div>
               )}
             </motion.div>

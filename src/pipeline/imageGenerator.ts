@@ -89,6 +89,13 @@ export interface GenerateImageOptions {
   bookStructure?: BookStructure;
   bookProfile?: BookProfile | null;
   forceCompositionRefresh?: boolean;
+  onHordeProgress?: (progress: {
+    waitTimeSeconds?: number;
+    queuePosition?: number;
+    waiting?: number;
+    processing?: number;
+    done?: boolean;
+  }) => void;
   onComplete?: (image: CachedImage) => void;
 }
 
@@ -113,7 +120,14 @@ export async function generateImage(options: GenerateImageOptions): Promise<Cach
   let imageData: Uint8Array | null = null;
   let apiUsed: CachedImage["generationApi"] = "imagen3";
 
-  if (getProvider() === "odysseus") {
+  if (getProvider() === "openrouter-free") {
+    try {
+      imageData = await generateWithHorde(prompt, options.onHordeProgress);
+    } catch (err) {
+      throw new Error(`Free image generation failed: ${describeError(err)}`);
+    }
+    apiUsed = "horde";
+  } else if (getProvider() === "odysseus") {
     // Local path: iterative multi-pass refinement via Odysseus → ComfyUI.
     // Falls back to single-pass if the iterative endpoint isn't available.
     try {
@@ -746,6 +760,34 @@ function base64ToUint8Array(base64: string): Uint8Array {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
+}
+
+async function generateWithHorde(
+  prompt: string,
+  onProgress?: GenerateImageOptions["onHordeProgress"]
+): Promise<Uint8Array> {
+  const { generateHordeImage } = await import("@/api/freeMode/hordeImageClient");
+  const result = await generateHordeImage(
+    prompt,
+    {
+      width: 1024,
+      height: 576,
+      steps: 20,
+    },
+    onProgress
+  );
+  if (!result.ok) {
+    throw new Error(result.message || result.reason);
+  }
+  return dataUrlToUint8Array(result.dataUrl);
+}
+
+function dataUrlToUint8Array(dataUrl: string): Uint8Array {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0 || !/^data:image\//i.test(dataUrl.slice(0, comma))) {
+    throw new Error("Horde returned an invalid image data URL");
+  }
+  return base64ToUint8Array(dataUrl.slice(comma + 1));
 }
 
 function sleep(ms: number): Promise<void> {

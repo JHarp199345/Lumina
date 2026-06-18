@@ -56,6 +56,8 @@ export interface SlotGenerationRequest {
   force?: boolean;
   /** Replace the existing image for this visual slot, without touching any other slot. */
   replaceExisting?: boolean;
+  /** The queue runner has already marked this slot as generating. */
+  fromQueue?: boolean;
   onComplete?: (image: CachedImage) => void;
 }
 
@@ -116,31 +118,34 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
 
   if (req.force) {
     store.clearQueueForSlot(slotKey);
-  } else if (store.isSlotBusy(slotKey)) {
+  } else if (!req.fromQueue && store.isSlotBusy(slotKey)) {
     store.setVisualPlanningNotice("That image is already being composed. Watch the progress indicator instead of starting it again.");
     return { ok: false, reason: "busy" };
   }
 
-  if (!store.claimGenerationSlot(slotKey, req.replaceExisting)) {
+  const isFreeMode = getProvider() === "openrouter-free";
+  if (!isFreeMode && !store.claimGenerationSlot(slotKey, req.replaceExisting)) {
     store.setVisualPlanningNotice("Another visual is already being composed. Let it finish before starting another.");
     return { ok: false, reason: "busy" };
   }
 
   const styleSeed = getStyleSeedById(activeStyleSeed);
   if (!styleSeed) {
-    store.releaseGenerationSlot();
+    if (!isFreeMode) store.releaseGenerationSlot();
     return { ok: false, reason: "no_style" };
   }
 
   const googleKey = await storage.loadApiKey("lumina_google_ai_key");
   const falKey = await storage.loadApiKey("lumina_fal_key");
   if (!googleKey && getProvider() === "gemini") {
-    store.releaseGenerationSlot();
+    if (!isFreeMode) store.releaseGenerationSlot();
     return { ok: false, reason: "no_key" };
   }
 
-  store.setIsGenerating(true);
-  store.markGenerationStarted();
+  if (!isFreeMode) {
+    store.setIsGenerating(true);
+    store.markGenerationStarted();
+  }
   const job = startVisualJob({
     bookId: req.bookId,
     scene: req.scene,
@@ -167,6 +172,25 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
       bookStructure: activeStructure ?? undefined,
       bookProfile: activeSemanticMap.bookProfile ?? null,
       forceCompositionRefresh: req.replaceExisting,
+      onHordeProgress: (progress) => {
+        const wait = progress.waitTimeSeconds;
+        const position = progress.queuePosition;
+        const isProcessing = Boolean(progress.processing && progress.processing > 0);
+        const message = isProcessing
+          ? "A free community GPU is rendering this image..."
+          : typeof wait === "number"
+            ? `Queued on free community GPUs — about ${formatWait(wait)}.`
+            : "Queued on free community GPUs...";
+        const updated = updateVisualJob(job.id, {
+          phase: "generating",
+          message,
+          percent: isProcessing ? 72 : 45,
+          estimatedWaitSeconds: wait,
+          queuePosition: position,
+          isProcessing,
+        });
+        if (updated) store.setActiveVisualJob(updated);
+      },
     });
 
     if (image.visualSlotKey !== slotKey) {
@@ -200,7 +224,19 @@ export async function generateForVisualSlot(req: SlotGenerationRequest): Promise
     store.setActiveVisualJob(null);
     return { ok: false, reason: "error", error: message };
   } finally {
-    store.setIsGenerating(false);
-    store.releaseGenerationSlot();
+    if (!isFreeMode) {
+      store.setIsGenerating(false);
+      store.releaseGenerationSlot();
+    }
   }
+}
+
+function formatWait(seconds: number): string {
+  const safe = Math.max(0, Math.round(seconds));
+  if (safe < 60) return `${safe}s`;
+  const minutes = Math.round(safe / 60);
+  if (minutes < 90) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return rem ? `${hours} hr ${rem} min` : `${hours} hr`;
 }

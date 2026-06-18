@@ -18,6 +18,7 @@ import { ensureVisualPlanBatch } from "@/services/visualPlanBatching";
 import { storage } from "@/storage";
 import { getStyleSeedById } from "@/data/styleSeeds";
 import { LUMINA_CONFIG } from "@/config";
+import { getProvider } from "@/api/llmClient";
 
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { getDisplayImage } from "@/utils/imagePosition";
@@ -29,6 +30,8 @@ import {
 import { EMPTY_CHAPTERS } from "@/utils/stableEmpty";
 import { diagnosticInfo } from "@/utils/diagnostics";
 import type { IdentifiedScene } from "@/types";
+
+const FREE_IMAGE_MAX_CONCURRENT = 6;
 
 function scenePositions(
   scenes: IdentifiedScene[],
@@ -51,6 +54,7 @@ export function useImageTrigger() {
   const imageGenerationEnabled = useSettingsStore((s) => s.imageGenerationEnabled);
 
   const isGeneratingRef = useRef(false);
+  const freeGeneratingScenesRef = useRef<Set<string>>(new Set());
   const isPlanningRef = useRef(false);
   const priorPromptRef = useRef<string>("");
   const lastWordPositionRef = useRef(0);
@@ -252,6 +256,86 @@ export function useImageTrigger() {
   }, [activeSemanticMap, imageGenerationEnabled, activeBook, getSceneWordPosition]);
 
   const processQueue = useCallback(async () => {
+    if (getProvider() === "openrouter-free") {
+      const running = freeGeneratingScenesRef.current;
+      const semanticMap = activeSemanticMap;
+      if (!semanticMap) return;
+
+      while (running.size < FREE_IMAGE_MAX_CONCURRENT) {
+        reconcileStaleGeneration();
+
+        const store = useImageStore.getState();
+        const next = store.dequeue();
+        if (!next || next.status !== "pending") return;
+
+        const scene = semanticMap.scenes.find((s) => s.id === next.sceneId);
+        if (!scene) {
+          store.updateQueueItemStatus(next.sceneId, "complete");
+          continue;
+        }
+
+        const chapters = useBookStore.getState().activeStructure?.chapters ?? EMPTY_CHAPTERS;
+        const readerPosition = useReaderStore.getState().wordPosition;
+        const scenePosition =
+          typeof next.wordPosition === "number"
+            ? next.wordPosition
+            : computeSceneWordPosition(scene, chapters);
+
+        const aheadLimit =
+          Date.now() < store.navigationJumpUntil
+            ? LUMINA_CONFIG.VISUAL_JUMP_QUEUE_WINDOW_WORDS
+            : LUMINA_CONFIG.VISUAL_PRELOAD_DISTANCE_WORDS;
+        const sceneDelta = scenePosition - readerPosition;
+        if (sceneDelta > aheadLimit || sceneDelta < -LUMINA_CONFIG.VISUAL_POSITION_MATCH_TOLERANCE) {
+          store.updateQueueItemStatus(next.sceneId, "complete");
+          continue;
+        }
+
+        const slotKey = visualSlotKeyForScene(scene, chapters) ?? next.visualSlotKey ?? null;
+        if (!slotKey) {
+          store.updateQueueItemStatus(next.sceneId, "complete");
+          continue;
+        }
+
+        running.add(next.sceneId);
+        store.updateQueueItemStatus(next.sceneId, "generating");
+
+        void generateForVisualSlot({
+          scene,
+          bookId: next.bookId,
+          fromQueue: true,
+          onComplete: (img) => {
+            if (activeStyleSeed) {
+              const styleSeed = getStyleSeedById(activeStyleSeed);
+              if (styleSeed) {
+                priorPromptRef.current = extractPaletteContext(styleSeed, [img.descriptionUsed]);
+              }
+            }
+          },
+        })
+          .then((result) => {
+            const latest = useImageStore.getState();
+            if (result.ok || result.reason === "cached") {
+              latest.updateQueueItemStatus(next.sceneId, "complete");
+            } else if (result.reason === "busy") {
+              latest.updateQueueItemStatus(next.sceneId, "pending");
+            } else if (result.reason === "error") {
+              latest.updateQueueItemStatus(next.sceneId, "failed");
+            } else {
+              latest.updateQueueItemStatus(next.sceneId, "complete");
+            }
+          })
+          .catch(() => {
+            useImageStore.getState().updateQueueItemStatus(next.sceneId, "failed");
+          })
+          .finally(() => {
+            freeGeneratingScenesRef.current.delete(next.sceneId);
+            processQueueRef.current();
+          });
+      }
+      return;
+    }
+
     if (isGeneratingRef.current) return;
 
     reconcileStaleGeneration();
@@ -333,6 +417,7 @@ export function useImageTrigger() {
           generateForVisualSlot({
             scene,
             bookId: next.bookId,
+            fromQueue: true,
             onComplete: (img) => {
               if (activeStyleSeed) {
                 const styleSeed = getStyleSeedById(activeStyleSeed);

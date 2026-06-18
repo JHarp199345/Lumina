@@ -812,7 +812,7 @@ export interface CachedImage {
   visualComposition?: string;
   styleSeed: StyleSeedId;
   generatedAt: string;
-  generationApi: "imagen3" | "gemini-image" | "flux" | "comfyui";
+  generationApi: "imagen3" | "gemini-image" | "flux" | "comfyui" | "horde";
   emotionalThemes: string[];
 }
 
@@ -829,6 +829,9 @@ export interface VisualGenerationJob {
   phase: "planning" | "generating" | "saving";
   message: string;
   percent: number;
+  estimatedWaitSeconds?: number;
+  queuePosition?: number;
+  isProcessing?: boolean;
   startedAt: string;
   updatedAt: string;
   error?: string;

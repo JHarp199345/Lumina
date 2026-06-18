@@ -12,6 +12,7 @@ import { useBookStore } from "@/store/bookStore";
 import { useImageStore } from "@/store/imageStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { analyzeBook } from "@/pipeline/semanticAnalyzer";
+import { analyzeBookFreeMode } from "@/pipeline/freeModeIngestion";
 import { buildVisualLoreDossier } from "@/pipeline/visualLore";
 import { createVisualDirectorBriefs } from "@/pipeline/visualDirector";
 import { generateImage } from "@/pipeline/imageGenerator";
@@ -484,6 +485,7 @@ export function useBookOrchestration() {
           reportProgress(progress);
         };
 
+        const isFreeMode = getProvider() === "openrouter-free";
         const baseSemanticMap = await trackStep(
           wfId,
           {
@@ -492,7 +494,9 @@ export function useBookOrchestration() {
             agent: "reading",
             skill: "book-semantic-analysis",
           },
-          () => analyzeBook(structure, googleKey ?? "", phaseReporter),
+          () => isFreeMode
+            ? analyzeBookFreeMode(structure, phaseReporter)
+            : analyzeBook(structure, googleKey ?? "", phaseReporter),
           (map) => ({
             metrics: {
               scenes: map.scenes.length,
@@ -512,7 +516,7 @@ export function useBookOrchestration() {
         // Step 2 — source profile (early — before visual pipeline; uses semantic map only)
         try {
           const apiKey = await storage.loadApiKey("lumina_google_ai_key");
-          const canBuild = apiKey || getProvider() === "odysseus";
+          const canBuild = isFreeMode || apiKey || getProvider() === "odysseus";
           const bookId = String(baseSemanticMap.bookId);
           const existing = await storage.loadSourceProfile(bookId).catch(() => null);
           sourceProfileForBookProfile = existing;
