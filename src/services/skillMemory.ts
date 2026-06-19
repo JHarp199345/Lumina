@@ -62,9 +62,9 @@ function _derive(memory: SkillMemory): string[] {
 
   const wordRatio = params.targetWords > 0 ? results.actualWords / params.targetWords : 1;
 
-  if (wordRatio < 0.75) {
+  if (wordRatio < 0.97) {
     lessons.push(
-      `For a ${params.targetMinutes}-min overview the first pass only reached ${Math.round(wordRatio * 100)}% of target — expansion loops are needed`
+      `For a ${params.targetMinutes}-min overview the script reached ${Math.round(wordRatio * 100)}% of target — expand until at least 97%`
     );
   }
   if (results.expansionLoops >= 1) {
@@ -148,15 +148,15 @@ const QUALITY_SCORE: Record<OverallQuality, number> = {
 export function getLearnedStrategy(): LearnedStrategy {
   const all = _load().filter((m) => m.taskType === "audio_overview");
   if (all.length === 0) {
-    return { lessons: [], expectedExpansionLoops: 2, maxExpansionLoops: 4 };
+    return { lessons: [], expectedExpansionLoops: 3, maxExpansionLoops: 6 };
   }
 
   const recent = all.slice(-15);
 
   // Average expansion loops from recent runs
   const avgLoops = recent.reduce((a, b) => a + b.results.expansionLoops, 0) / recent.length;
-  const expectedExpansionLoops = Math.max(2, Math.ceil(avgLoops));
-  const maxExpansionLoops = Math.max(expectedExpansionLoops + 1, 4);
+  const expectedExpansionLoops = Math.max(3, Math.ceil(avgLoops));
+  const maxExpansionLoops = Math.max(expectedExpansionLoops + 2, 6);
 
   // Collect lessons from top-rated + recent, deduped
   const rated = all

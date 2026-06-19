@@ -29,6 +29,7 @@ import type { BookStructure, Chapter, SemanticMap, SourceIntelligenceProfile } f
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export const GOOGLE_KEY_NAME = "lumina_google_ai_key";
+const AUDIO_OVERVIEW_MIN_WORD_RATIO = 0.97;
 
 // Prebuilt Gemini TTS voices (a curated subset; the API accepts the voiceName).
 export interface GeminiVoice {
@@ -287,7 +288,7 @@ export async function generateOverviewScript(args: ScriptArgs): Promise<string> 
 
   const prompt = `${instruction}
 ${coverageSection}
-Your explanation must be thorough and complete. Do not abbreviate, rush past, or skip key ideas — cover each concept in enough depth that a listener builds real understanding. Aim for approximately ${minutes} minutes of narration (~${targetWords} words at a calm pace). Let the material determine the length; completeness matters more than hitting a target.
+Your explanation must be thorough and complete. Do not abbreviate, rush past, or skip key ideas — cover each concept in enough depth that a listener builds real understanding. Aim for approximately ${minutes} minutes of narration (~${targetWords} words at a calm pace), and do not stop short: the script should reach at least ${Math.round(AUDIO_OVERVIEW_MIN_WORD_RATIO * 100)}% of that target unless the source material is truly exhausted.
 
 Write CONTINUOUS SPOKEN NARRATION meant to be heard, not read. Do NOT include headings, bullet points, stage directions, speaker labels, or any markup — only the words to be spoken, in flowing paragraphs.
 
@@ -541,7 +542,7 @@ async function _buildChunkScript(
 
   const prompt = `Write a spoken audio overview of "${bookTitle}"${sectionNote}. ${positionGuide}
 
-${instructionLine}${lessonsLine}${continuationLine}The analysis below covers every concept, argument, example, and relationship in this section. Translate it into thorough spoken narration (~${segTargetWords} words). Cover every idea fully — develop each concept with context, examples, and explanation. Do not abbreviate or rush past anything.
+${instructionLine}${lessonsLine}${continuationLine}The analysis below covers every concept, argument, example, and relationship in this section. Translate it into thorough spoken narration (~${segTargetWords} words, minimum ${Math.round(segTargetWords * AUDIO_OVERVIEW_MIN_WORD_RATIO)} words). Cover every idea fully — develop each concept with context, examples, and explanation. Do not abbreviate or rush past anything.
 
 Speak directly into the substance. Do not announce topics, narrate your process, or use phrases like "let me explain", "we'll now look at", or "in this section". Begin immediately with the content itself. Continuous flowing paragraphs only — no headings, bullets, or markup.
 
@@ -555,7 +556,7 @@ ${understanding}`;
 }
 
 /**
- * Iteratively expand a script until it reaches ≥88% of the target word count.
+ * Iteratively expand a script until it reaches the required minimum word count.
  * Each loop appends a continuation drawn from the understanding document.
  */
 async function _expandToTarget(
@@ -572,14 +573,14 @@ async function _expandToTarget(
 
   for (let i = 0; i < maxLoops; i++) {
     const current = result.split(/\s+/).filter(Boolean).length;
-    if (current >= targetWords * 0.88) break;
+    if (current >= targetWords * AUDIO_OVERVIEW_MIN_WORD_RATIO) break;
 
     loopsUsed++;
-    const needed = targetWords - current;
+    const needed = Math.max(80, Math.ceil(targetWords * AUDIO_OVERVIEW_MIN_WORD_RATIO) - current);
     const pct = Math.round((current / targetWords) * 100);
     onProgress?.(`Deepening narration (${pct}% of target)…`);
 
-    const prompt = `The narration of "${bookTitle}" is ${current} words and needs to reach ~${targetWords} words. Continue developing the ideas — add examples, context, and elaboration to concepts already mentioned. Do not repeat what was said. Begin immediately with content.
+    const prompt = `The narration of "${bookTitle}" is ${current} words and must reach at least ${Math.round(targetWords * AUDIO_OVERVIEW_MIN_WORD_RATIO)} words for the requested duration. Continue developing the ideas — add examples, context, and elaboration to concepts already mentioned. Do not repeat what was said. Begin immediately with content.
 
 NARRATION (continue from the end):
 …${result.slice(-700).trim()}
@@ -587,10 +588,10 @@ NARRATION (continue from the end):
 ANALYSIS (draw from for depth):
 ${understanding.slice(0, 3000)}
 
-Write ${needed}+ words of continuation. No preamble.`;
+Write at least ${needed} words of continuation. No preamble.`;
 
     const ext = await llmGenerate("narrator", prompt, {
-      maxTokens: Math.min(4096, Math.round(needed * 2.5)),
+      maxTokens: Math.min(6144, Math.round(needed * 3.2)),
       geminiKey: apiKey,
     });
     result = result.trimEnd() + " " + ext.trim();
@@ -776,7 +777,7 @@ async function _generateAudioOverviewLocal(
   // Also push to skills catalog
   const { recordOdysseusSkillRun } = await import("@/api/llmClient");
   const lessons: string[] = [];
-  if (wordRatio < 0.75) lessons.push(`First-pass word ratio was ${Math.round(wordRatio * 100)}% — plan ${totalExpansionLoops + 1}+ expansion loops for ${minutes}-min targets`);
+  if (wordRatio < AUDIO_OVERVIEW_MIN_WORD_RATIO) lessons.push(`Final word ratio was ${Math.round(wordRatio * 100)}% — plan ${totalExpansionLoops + 1}+ expansion loops for ${minutes}-min targets`);
   if (totalExpansionLoops > 0) lessons.push(`Used ${totalExpansionLoops} expansion loop(s) to reach target length`);
   if (total > 1) lessons.push(`${total}-segment pipeline: comprehension pass per chunk feeds narration pass`);
   recordOdysseusSkillRun("audio-overview-narration", lessons, { actualWords, targetWords, expansionLoops: totalExpansionLoops });

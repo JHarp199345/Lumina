@@ -401,7 +401,17 @@ JSON ONLY. Return exactly this shape:
   "diversityNotes": "how this differs from recent images",
   "finalPrompt": "complete image prompt, depictive and scene-faithful, 90-150 words",
   "negativePrompt": "comma-separated negative prompt"
-}`;
+}
+
+Important image-prompt rule:
+- Keep taxonomy labels out of composition/finalPrompt text. Internal labels such as "threshold",
+  "setup", "payoff", "cost", "aftermath", "symbolic motif", "visual beat", and
+  "threshold composition" are planning terms, not things to paint.
+- If the scene is a literary threshold, describe the visible human action, object,
+  setting, pressure, and choice. Do not add a literal doorway, gate, arch, portal,
+  border, or threshold unless it is actually present in the quoted source text.
+- The finalPrompt must focus on the physical scene being depicted, not on naming
+  what function the scene serves in the story structure.`;
 }
 
 function getInterpretationInstruction(level: number): string {
@@ -635,11 +645,13 @@ export function buildComfyUIPrompt(brief: VisualDirectorBrief, styleSeed: StyleS
   if (styleSeed.promptFragment) sentences.push(`Rendered as ${styleSeed.promptFragment.trim()}.`);
 
   // Join as flowing prose; ensure each fragment ends with a period.
-  return sentences
+  return stripImageTaxonomy(
+    sentences
     .map((s) => (/[.!?]$/.test(s) ? s : `${s}.`))
     .join(" ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+  );
 }
 
 export function buildFinalImagePrompt(brief: VisualDirectorBrief, styleSeed: StyleSeed): string {
@@ -650,14 +662,14 @@ export function buildFinalImagePrompt(brief: VisualDirectorBrief, styleSeed: Sty
         ? "Illustrative scene depiction filtered through the selected art style."
         : "Balanced interpretation with recognizable scene anchors and atmospheric emphasis.";
 
-  return [
+  const prompt = [
     brief.finalPrompt && brief.finalPrompt.length > 80 ? brief.finalPrompt : brief.composition,
     `Scene blocking: ${brief.blocking.stagingSummary}`,
     `Focal point: ${brief.blocking.focalPoint}. Camera logic: ${brief.blocking.cameraLogic}.`,
     `Element placement: ${[...brief.blocking.elements]
       .sort((a, b) => b.visualPriority - a.visualPriority)
       .slice(0, 6)
-      .map((element) => `${element.label} (${element.role}) ${element.placement}, ${element.scale}, ${element.motion}: ${element.depiction}`)
+      .map((element) => `${element.label} ${element.placement}, ${element.scale}, ${element.motion}: ${element.depiction}`)
       .join("; ")}.`,
     `Physical relationships: ${brief.blocking.relationships
       .slice(0, 8)
@@ -667,7 +679,7 @@ export function buildFinalImagePrompt(brief: VisualDirectorBrief, styleSeed: Sty
       ? `Grounded lore descriptors used: ${brief.loreDescriptorsUsed.join(", ")}.`
       : "",
     `Concrete scene anchors: ${brief.concreteAnchors.join(", ")}.`,
-    `Camera and composition: ${humanize(brief.perspective)}, ${humanize(brief.cameraDistance)}, ${humanize(brief.subjectFocus)} as the focus.`,
+    `Camera and composition: ${humanize(brief.perspective)}, ${humanize(brief.cameraDistance)}, ${humanSubjectFocus(brief.subjectFocus)}.`,
     `Motion: ${humanize(brief.motionLevel)}.`,
     `Emotional tone: ${brief.dominantEmotion}; ${brief.emotionalTone.join(", ")}.`,
     `Symbolic accents: ${brief.symbolicAnchors.join(", ")}.`,
@@ -679,6 +691,34 @@ export function buildFinalImagePrompt(brief: VisualDirectorBrief, styleSeed: Sty
   ]
     .filter(Boolean)
     .join(" ");
+
+  return stripImageTaxonomy(prompt);
+}
+
+function humanSubjectFocus(focus: SubjectFocus): string {
+  if (focus === "threshold") return "the visible decision or change in the scene as the focus";
+  if (focus === "symbolic_motif") return "one concrete recurring object or visual detail as the focus";
+  return `${humanize(focus)} as the focus`;
+}
+
+export function stripImageTaxonomy(text: string): string {
+  return text
+    .replace(/\bthreshold[_ -]composition\b/gi, "composition built around a visible change")
+    .replace(/\bthresholds\b/gi, "turning points")
+    .replace(/\bthreshold\b/gi, "turning point")
+    .replace(/\bsymbolic[_ -]motifs?\b/gi, "recurring visual detail")
+    .replace(/\bvisual[_ -]beats?\b/gi, "scene moment")
+    .replace(/\bsetup\b/gi, "early story moment")
+    .replace(/\bpayoff\b/gi, "major consequence")
+    .replace(/\bcost\b/gi, "consequence")
+    .replace(/\baftermath\b/gi, "quiet consequence")
+    .replace(/\bprimary[_ -]subject\b/gi, "main visible figure or object")
+    .replace(/\bsecondary[_ -]subject\b/gi, "supporting visible figure or object")
+    .replace(/\bopposing[_ -]force\b/gi, "visible pressure")
+    .replace(/\bcontested[_ -]object\b/gi, "important object")
+    .replace(/\bmotion[_ -]group\b/gi, "moving group")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function buildNegativePrompt(

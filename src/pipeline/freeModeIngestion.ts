@@ -229,7 +229,7 @@ function buildChunkPrompt(structure: BookStructure, chunk: FreeIngestionChunk): 
 
 Return ONLY valid JSON with this shape:
 {
-  "summary": "120-220 word factual summary of this chunk",
+  "summary": "180-280 word checkpoint-grade factual summary of this chunk",
   "emotionalTone": ["2-5 short tone words"],
   "themes": ["2-6 recurring ideas"],
   "entities": ["up to 12 important characters, places, objects, or concepts"],
@@ -244,7 +244,15 @@ Return ONLY valid JSON with this shape:
 Rules:
 - Do not summarize beyond this chunk.
 - Do not invent private facts outside the text.
+- The summary must be dense enough to resume later work without the source text:
+  name the important people/concepts, what changes, why it matters, and any
+  concrete objects or setting details that later audio or visual generation needs.
+- Avoid generic labels such as threshold, setup, payoff, trope, beat, or motif in
+  image-facing prose. Describe the visible scene itself.
 - Keep image description non-explicit and suitable for public viewing.
+- The visualMoment.description must depict the selected physical moment, not its
+  story taxonomy. Do not add literal doors, gates, borders, or portals unless
+  the chunk itself contains them.
 
 Book: ${structure.title}
 Author: ${structure.author}

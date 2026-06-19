@@ -11,6 +11,7 @@ import type {
   StyleSeed,
   VisualCompositionArtifact,
 } from "@/types";
+import { stripImageTaxonomy } from "@/pipeline/visualDirector";
 import { computeSceneWordPosition } from "@/utils/scenePosition";
 import { visualSlotKeyForScene } from "@/utils/sceneDedup";
 import { countWords } from "@/pipeline/gutenbergBoundaries";
@@ -544,6 +545,13 @@ export function buildCompositionPrompt(params: {
         .join("\n")
     : "- No extra profile items selected; rely on the passage and visual brief.";
 
+  const sceneTarget = stripImageTaxonomy(
+    scene.publicVisualBrief?.expectedDepiction ||
+      scene.directorBrief?.composition ||
+      scene.imageDescription ||
+      "Depict the selected story moment clearly."
+  );
+
   return `You are Lumina's local image composer. Convert this book passage into ONE vivid, literal, depictive frozen-frame image composition for a local image model.
 
 Return only the final composition paragraph. Do not restate these instructions. Do not quote the source passage. Do not analyze. Do not critique. Do not include headings, JSON, bullet lists, labels, markdown, negative prompts, artist names, or copyrighted reference-image copying.
@@ -556,6 +564,10 @@ Requirements:
 - Preserve the important spatial relationships: who/what is foreground, background, above/below, near/far, moving/still.
 - Use profile facts only when they are relevant to this passage.
 - Respect reader direction if provided, but do not invent contradictions to the passage.
+- Ignore internal story taxonomy words. Terms like threshold, setup, payoff, cost,
+  aftermath, beat, and motif describe why Lumina selected a scene; they are not
+  visual objects. Do not add literal doors, gates, borders, portals, or arches
+  unless the source passage itself contains them.
 - Style seed to blend in naturally: ${styleSeed.name} — ${styleSeed.promptFragment}
 - The first word of your answer must begin the composition itself, not a preface.
 
@@ -563,7 +575,7 @@ Format exemplar:
 A small brass locket rests open in a gloved palm at the edge of a rain-dark window, its hinge catching a thin blade of cold morning light. Inside, a faded miniature portrait faces outward, half-obscured by a loose strand of hair caught beneath the glass. The hand holding it is tense but still, knuckles pale beneath worn leather, while the other hand hovers nearby as if afraid to touch the object. Behind the figure, the room falls into soft shadow: a chair pushed back, a candle guttering low, scattered letters lying unread on the table. The composition stays close and intimate, with the locket as the sharp focal point and the surrounding space blurred into grief, secrecy, and decision.
 
 Scene target:
-${scene.publicVisualBrief?.expectedDepiction || scene.directorBrief?.composition || scene.imageDescription || "Depict the selected story moment clearly."}
+${sceneTarget}
 
 Reader visual direction:
 ${scene.publicVisualBrief?.readerDirection || params.readerDirection || "none"}

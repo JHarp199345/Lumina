@@ -9,16 +9,16 @@ function titleCase(value: string): string {
 }
 
 function sceneTitle(scene: IdentifiedScene, beat?: VisualBeat): string {
-  const motif = scene.symbolicMotifs.find((item) => item.length > 2);
+  const motif = scene.symbolicMotifs.find((item) => item.length > 2 && !isPlanningLabel(item));
   if (motif) return titleCase(motif).slice(0, 64);
   if (scene.expositoryBeat?.sectionTitle) return scene.expositoryBeat.sectionTitle.slice(0, 64);
-  return titleCase(beat?.beatType ?? "visual moment");
+  return titleCase(friendlyBeatLabel(beat?.beatType));
 }
 
 export function buildPublicVisualBrief(scene: IdentifiedScene, beat?: VisualBeat): PublicVisualBrief {
-  const beatLabel = titleCase(beat?.beatType ?? "planned moment");
+  const beatLabel = titleCase(friendlyBeatLabel(beat?.beatType));
   const emotions = scene.emotionalVector.slice(0, 2).join(" + ") || "story pressure";
-  const motifs = scene.symbolicMotifs.slice(0, 3);
+  const motifs = scene.symbolicMotifs.filter((item) => !isPlanningLabel(item)).slice(0, 3);
   const atmosphere = scene.atmosphericQualities.slice(0, 2).join(", ") || "the scene's atmosphere";
 
   return {
@@ -58,4 +58,27 @@ export function buildPublicVisualBrief(scene: IdentifiedScene, beat?: VisualBeat
     highlightColor: scene.publicVisualBrief?.highlightColor,
     updatedAt: new Date().toISOString(),
   };
+}
+
+function isPlanningLabel(value: string): boolean {
+  return /^(threshold|setup|payoff|cost|aftermath|opening|closing|approach|reversal|promise|symbolic motif)$/i.test(
+    value.trim().replace(/[_-]/g, " ")
+  );
+}
+
+function friendlyBeatLabel(value?: string): string {
+  switch (value) {
+    case "opening": return "opening scene";
+    case "setup": return "early scene";
+    case "mystery_seed": return "mysterious scene";
+    case "suspense_build": return "tense scene";
+    case "promise": return "charged scene";
+    case "reversal": return "turning scene";
+    case "approach": return "approaching consequence";
+    case "payoff": return "major scene";
+    case "cost": return "consequence scene";
+    case "aftermath": return "quiet consequence";
+    case "closing": return "closing scene";
+    default: return "visual moment";
+  }
 }
