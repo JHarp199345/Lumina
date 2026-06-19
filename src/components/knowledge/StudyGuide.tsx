@@ -38,6 +38,7 @@ import {
 import { refineStudyGuide } from "@/pipeline/studyRefiner";
 import { generateFlashcards } from "@/pipeline/studyFlashcards";
 import { generateChapterQuiz, generateSegmentQuiz, generateWholeBookQuiz } from "@/pipeline/studyQuizzer";
+import { knowledgeProtocol } from "@/pipeline/knowledgeGrounding";
 import {
   groupSegmentsByChapter,
   isBookComplete,
@@ -45,15 +46,21 @@ import {
   isSegmentReached,
   type StudyChapterGroup,
 } from "@/utils/studyProgress";
-import type { BookStructure, StudyBadgeAward, StudyGuide, StudyQuiz, StudyQuizAttempt, StudySegment } from "@/types";
+import type { BookStructure, SemanticMap, StudyBadgeAward, StudyGuide, StudyQuiz, StudyQuizAttempt, StudySegment } from "@/types";
 import type { StudyFlashcard } from "@/types";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type QuizMode = "segment" | "chapter" | "book";
 type StudyView = "home" | "map" | "quizzes" | "flashcards" | "badges";
 
+function quizModeLabel(mode: QuizMode, isExpository: boolean): string {
+  if (mode === "segment") return isExpository ? "Topic" : "Segment";
+  if (mode === "chapter") return isExpository ? "Section" : "Chapter";
+  return "Book";
+}
+
 export default function StudyGuide() {
-  const { activeBook, activeStructure } = useBookStore();
+  const { activeBook, activeStructure, activeSemanticMap } = useBookStore();
   const { guide, isGenerating, progressMessage, mount, setIsGenerating, setProgress } =
     useStudyStore();
   const wordPosition = useReaderStore((s) => s.wordPosition);
@@ -117,8 +124,16 @@ export default function StudyGuide() {
         await sleep(280);
       }
       const built = buildHeuristicStudyGuide(activeStructure);
-      await storage.saveStudyGuide(built);
-      mount(activeBook.id, built);
+      const apiKey = await storage.loadApiKey("lumina_google_ai_key");
+      if (apiKey) {
+        setProgress("Asking AI to organize the guide around the book itself...");
+        const refined = await refineStudyGuide(built, activeStructure, apiKey, (p) => setProgress(p.message));
+        await storage.saveStudyGuide(refined);
+        mount(activeBook.id, refined);
+      } else {
+        await storage.saveStudyGuide(built);
+        mount(activeBook.id, built);
+      }
     } catch (err) {
       console.error("[StudyGuide] Generation failed:", err);
       setError(err instanceof Error ? err.message : "Could not build the study guide.");
@@ -233,6 +248,7 @@ export default function StudyGuide() {
           <QuizSelector
             guide={guide}
             activeStructure={activeStructure}
+            activeSemanticMap={activeSemanticMap}
             wordPosition={wordPosition}
             quizzes={quizzes}
             attempts={attempts}
@@ -597,6 +613,7 @@ function FlashcardStudio({
 function QuizSelector({
   guide,
   activeStructure,
+  activeSemanticMap,
   wordPosition,
   quizzes,
   attempts,
@@ -607,6 +624,7 @@ function QuizSelector({
 }: {
   guide: StudyGuide;
   activeStructure: BookStructure | null;
+  activeSemanticMap: SemanticMap | null;
   wordPosition: number;
   quizzes: StudyQuiz[];
   attempts: StudyQuizAttempt[];
@@ -615,7 +633,10 @@ function QuizSelector({
   onAttemptSaved: (attempt: StudyQuizAttempt) => void;
   onBadgeSaved: (badge: StudyBadgeAward) => void;
 }) {
-  const [mode, setMode] = useState<QuizMode>("segment");
+  const protocol = knowledgeProtocol(activeSemanticMap);
+  const isExpository = protocol === "expository";
+  const availableModes: QuizMode[] = isExpository ? ["segment", "chapter", "book"] : ["chapter", "book"];
+  const [mode, setMode] = useState<QuizMode>(() => (isExpository ? "segment" : "chapter"));
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [selectedChapterIndex, setSelectedChapterIndex] = useState<number | null>(null);
   const [allowSpoilers, setAllowSpoilers] = useState(false);
@@ -642,6 +663,14 @@ function QuizSelector({
     ? [...attempts].reverse().find((attempt) => attempt.quizId === activeQuiz.id)
     : null;
 
+  useEffect(() => {
+    if (!availableModes.includes(mode)) {
+      setMode(availableModes[0]);
+      setNotice(null);
+      setActiveQuiz(null);
+    }
+  }, [availableModes.join("|"), mode]);
+
   const canGenerate =
     mode === "segment"
       ? Boolean(selectedSegment && isSegmentReached(selectedSegment, wordPosition))
@@ -651,13 +680,17 @@ function QuizSelector({
 
   const targetLabel =
     mode === "segment"
-      ? selectedSegment?.title ?? "Choose a segment"
+      ? selectedSegment?.title ?? (isExpository ? "Choose a topic" : "Choose a segment")
       : mode === "chapter"
-        ? selectedChapter?.chapterTitle ?? "Choose a chapter"
-        : "Whole Book Review";
+        ? selectedChapter?.chapterTitle ?? (isExpository ? "Choose a section" : "Choose a chapter")
+        : isExpository ? "Whole Book Synthesis" : "Whole Book Review";
 
   const questionRange =
-    mode === "segment" ? "3-5 questions" : mode === "chapter" ? "5-10 questions" : "8-12 questions";
+    mode === "segment"
+      ? isExpository ? "4-6 topic questions" : "4-6 questions"
+      : mode === "chapter"
+        ? isExpository ? "6-10 section questions" : "6-10 chapter questions"
+        : isExpository ? "10-14 synthesis questions" : "8-12 book questions";
 
   const handleGenerate = () => {
     if (!canGenerate) return;
@@ -685,12 +718,12 @@ function QuizSelector({
       let quiz: StudyQuiz;
       if (mode === "segment") {
         if (!selectedSegment) return;
-        quiz = await generateSegmentQuiz({ segment: selectedSegment, structure: activeStructure, apiKey });
+        quiz = await generateSegmentQuiz({ segment: selectedSegment, structure: activeStructure, apiKey, semanticMap: activeSemanticMap });
       } else if (mode === "chapter") {
         if (!selectedChapter) return;
-        quiz = await generateChapterQuiz({ chapter: selectedChapter, structure: activeStructure, apiKey });
+        quiz = await generateChapterQuiz({ chapter: selectedChapter, structure: activeStructure, apiKey, semanticMap: activeSemanticMap });
       } else {
-        quiz = await generateWholeBookQuiz({ segments: guide.segments, structure: activeStructure, apiKey });
+        quiz = await generateWholeBookQuiz({ segments: guide.segments, structure: activeStructure, apiKey, semanticMap: activeSemanticMap });
       }
       await storage.saveStudyQuiz(quiz);
       onQuizSaved(quiz);
@@ -708,17 +741,19 @@ function QuizSelector({
       <div className="mb-3 flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-lumina-gold/75">
-            Quiz Selector
+            {isExpository ? "Topic Quizzes" : "Chapter Quizzes"}
           </p>
           <p className="mt-0.5 text-[11px] text-ink-faint">
-            Choose the scope before generating a quiz.
+            {isExpository
+              ? "Follow the book's topics and section order."
+              : "Review fiction by completed chapter, without later spoilers."}
           </p>
         </div>
         <ListChecks size={15} className="text-lumina-gold/70" />
       </div>
 
       <div className="grid grid-cols-3 gap-1 rounded-lg border border-hair bg-black/16 p-1">
-        {(["segment", "chapter", "book"] as const).map((item) => (
+        {availableModes.map((item) => (
           <button
             key={item}
             onClick={() => {
@@ -731,7 +766,7 @@ function QuizSelector({
                 : "text-ink-faint hover:text-ink-soft"
             }`}
           >
-            {item === "book" ? "Book" : item}
+            {quizModeLabel(item, isExpository)}
           </button>
         ))}
       </div>
@@ -761,7 +796,7 @@ function QuizSelector({
               <TargetButton
                 key={chapter.chapterIndex}
                 title={chapter.chapterTitle}
-                subtitle={`${chapter.segments.length} segment${chapter.segments.length === 1 ? "" : "s"}`}
+                subtitle={`${chapter.segments.length} ${isExpository ? "topic" : "moment"}${chapter.segments.length === 1 ? "" : "s"}`}
                 active={selectedChapterIndex === chapter.chapterIndex}
                 locked={!isChapterReached(chapter, wordPosition)}
                 onClick={() => {
@@ -777,8 +812,9 @@ function QuizSelector({
           <div className="rounded-xl border border-hair bg-ink/[0.025] px-3 py-3">
             <p className="text-[13px] font-medium text-ink/85">Whole Book Review</p>
             <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-              High-level comprehension chains focused on causation, callbacks,
-              consequences, and theme.
+              {isExpository
+                ? "Learning chains across the book's topics, terms, mechanisms, and applications."
+                : "High-level comprehension chains focused on causation, callbacks, consequences, and theme."}
             </p>
             {!bookComplete && (
               <label className="mt-3 flex items-start gap-2 rounded-lg border border-hair bg-black/12 px-2.5 py-2 text-[11px] leading-relaxed text-ink-faint">
@@ -825,7 +861,9 @@ function QuizSelector({
             <Lock size={12} className="mt-0.5 shrink-0" />
             {mode === "book"
               ? "Finish the book or allow spoilers to unlock this quiz."
-              : "Read past this selection before generating its quiz."}
+              : isExpository
+                ? "Read past this topic or section before generating its quiz."
+                : "Read past this chapter before generating its quiz."}
           </p>
         )}
       </div>
@@ -907,6 +945,7 @@ function QuizRunner({
   const displayAttempt = completedAttempt ?? latestAttempt ?? null;
   const displayAnswers = submitted && displayAttempt ? displayAttempt.answers : answers;
   const score = displayAttempt?.score;
+  const answeredCount = answers.filter((answer) => answer >= 0).length;
 
   const submit = async () => {
     if (answers.some((answer) => answer < 0)) return;
@@ -929,10 +968,12 @@ function QuizRunner({
   };
 
   return (
-    <div className="mt-3 rounded-xl border border-lumina-gold/24 bg-lumina-gold/[0.045] p-3">
+    <div className="mt-3 rounded-xl border border-lumina-gold/24 bg-gradient-to-b from-lumina-gold/[0.075] to-ink/[0.025] p-3">
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.14em] text-lumina-gold/70">Segment Quiz</p>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-lumina-gold/70">
+            {quizScopeLabel(quiz.scope)}
+          </p>
           <p className="mt-1 text-sm font-medium text-ink/85">{quiz.title}</p>
           {submitted && score != null && (
             <p className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-faint">
@@ -950,22 +991,39 @@ function QuizRunner({
         </button>
       </div>
 
+      {!submitted && (
+        <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-black/20">
+          <div
+            className="h-full rounded-full bg-lumina-gold/55 transition-all"
+            style={{ width: `${Math.round((answeredCount / Math.max(1, quiz.questions.length)) * 100)}%` }}
+          />
+        </div>
+      )}
+
       <div className="space-y-3">
         {quiz.questions.map((question, questionIndex) => {
           const selected = displayAnswers[questionIndex] ?? -1;
           const previous = quiz.questions[questionIndex - 1];
           const showChainTitle = Boolean(question.chainTitle && question.chainTitle !== previous?.chainTitle);
           return (
-            <div key={question.id} className="rounded-lg border border-hair bg-surface-dark/55 p-3">
+            <div key={question.id} className="rounded-lg border border-hair bg-surface-dark/62 p-3 shadow-sm shadow-black/10">
               {showChainTitle && (
                 <p className="mb-2 text-[10px] uppercase tracking-[0.16em] text-lumina-gold/65">
                   {question.chainTitle}
                 </p>
               )}
-              <p className="text-[10px] uppercase tracking-[0.12em] text-ink-faint">
-                Question {question.questionNumber} of {quiz.questions.length}
-              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-ink-faint">
+                  Question {question.questionNumber} of {quiz.questions.length}
+                </p>
+                <span className="rounded-full border border-hair bg-ink/[0.035] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-ink-faint">
+                  {question.level}
+                </span>
+              </div>
               <p className="mt-1 text-[13px] leading-relaxed text-ink/88">{question.question}</p>
+              {question.purpose && (
+                <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">{question.purpose}</p>
+              )}
               <div className="mt-2 space-y-1.5">
                 {question.options.map((option, optionIndex) => {
                   const isSelected = selected === optionIndex;
@@ -1014,6 +1072,12 @@ function QuizRunner({
       )}
     </div>
   );
+}
+
+function quizScopeLabel(scope: StudyQuiz["scope"]): string {
+  if (scope === "book") return "Book Review";
+  if (scope === "chapter") return "Chapter / Section Quiz";
+  return "Topic Quiz";
 }
 
 function TargetButton({
