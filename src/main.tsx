@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { Analytics } from "@vercel/analytics/react";
 import App from "./App";
 import "./styles/globals.css";
 import { diagnosticError, installDiagnostics } from "./utils/diagnostics";
@@ -177,6 +178,7 @@ void ensureFreshBuild().then(() => {
   <React.StrictMode>
     <LuminaCrashBoundary>
       <App />
+      <Analytics />
     </LuminaCrashBoundary>
   </React.StrictMode>
   );
